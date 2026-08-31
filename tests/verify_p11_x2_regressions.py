@@ -1,11 +1,13 @@
 """One regression test per X2 finding. Each FAILS against the pre-X2 models.py."""
 import sys
+from pathlib import Path
 import threading
 from datetime import date, datetime, timezone
 from decimal import Decimal as D
 from uuid import uuid4
 
-sys.path.insert(0, "D:/GitHub/AI-Trading-Agent/src")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 from domain import models as m  # noqa: E402
 from audit import events as ae  # noqa: E402
 from audit import chain as ac  # noqa: E402
@@ -302,6 +304,70 @@ def t_f8_llm_signal_raises_its_own_error():
     raises(m.LlmOutputNotPermitted, lambda: m.Signal(**kw, is_llm_derived=True))
     assert not issubclass(m.LlmOutputNotPermitted, m.RiskDenyIsFinal)
     assert issubclass(m.LlmOutputNotPermitted, m.DomainError)
+
+
+# ---- M-2 MEDIUM: the allocate postcondition must survive `python -O` --------
+# It was a bare `assert`, which -O strips: the only guard that money is conserved across a
+# split silently vanished in an optimised deployment and the whole suite still passed.
+# Money.allocate resolves the name `Money` as a module global at call time, so perturbing
+# it makes the parts fail to sum back to the whole - which is the only way to reach the
+# postcondition, since the algorithm is otherwise self-consistent by construction.
+_M2_FORCE_VIOLATION = """
+import sys, unittest.mock
+sys.path.insert(0, {src!r})
+from decimal import Decimal as D
+from domain import models as m
+
+_real = m.Money
+def _skewed(*a, **kw):
+    obj = _real(*a, **kw)
+    return _real(amount=obj.amount + D("0.01"), currency=obj.currency)
+
+money = _real(amount=D("100.00"), currency=m.Currency.USD)
+with unittest.mock.patch.object(m, "Money", _skewed):
+    try:
+        money.allocate([D(1), D(1), D(1)])
+        print("NO_RAISE")
+    except m.MoneyPrecisionError:
+        print("RAISED")
+    except Exception as e:
+        print("WRONG_EXC:" + type(e).__name__)
+print("debug=" + str(__debug__))
+"""
+
+
+def t_m2_allocate_postcondition_survives_dash_O():
+    # NOTE: this test must NOT use `assert` for its own checks. When the suite itself is
+    # run under `python -O` those asserts are stripped and the test silently verifies
+    # nothing - the exact failure mode M-2 is about. Explicit raises only.
+    import subprocess
+
+    def require(cond, msg):
+        if not cond:
+            raise AssertionError(msg)
+
+    code = _M2_FORCE_VIOLATION.format(src=str(REPO_ROOT / "src"))
+
+    # Normal mode: the guard must raise MoneyPrecisionError, not AssertionError.
+    normal = subprocess.run([sys.executable, "-c", code],
+                            capture_output=True, text=True, timeout=120)
+    require("debug=True" in normal.stdout, f"expected __debug__ True: {normal.stdout!r}")
+    require("RAISED" in normal.stdout,
+            f"no MoneyPrecisionError without -O (stdout={normal.stdout!r} "
+            f"stderr={normal.stderr[-300:]!r})")
+
+    # Optimised mode: asserts are stripped here. The guard must STILL raise.
+    opt = subprocess.run([sys.executable, "-O", "-c", code],
+                         capture_output=True, text=True, timeout=120)
+    require("debug=False" in opt.stdout, f"-O did not disable __debug__: {opt.stdout!r}")
+    require("RAISED" in opt.stdout,
+            f"money-conservation guard did not fire under -O; it is still an assert "
+            f"(stdout={opt.stdout!r} stderr={opt.stderr[-300:]!r})")
+
+    # And the happy path is unchanged.
+    money = m.Money(amount=D("100.00"), currency=USD)
+    parts = [str(p.amount) for p in money.allocate([D(1), D(1), D(1)])]
+    require(parts == ["33.34", "33.33", "33.33"], f"allocate changed: {parts}")
 
 
 for _n, _f in sorted((n, f) for n, f in list(globals().items()) if n.startswith("t_")):

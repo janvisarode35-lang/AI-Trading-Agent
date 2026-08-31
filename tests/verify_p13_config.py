@@ -4,7 +4,7 @@ import sys
 from decimal import Decimal as D
 from pathlib import Path
 
-ROOT = Path("D:/GitHub/AI-Trading-Agent")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from config import loader as L  # noqa: E402
 

@@ -1,4 +1,4 @@
-"""SPEC-P1.1-DOMAIN v0.1 — the complete typed vocabulary of the trading system.
+"""SPEC-P1.1-DOMAIN v0.3 — the complete typed vocabulary of the trading system.
 
 Everything downstream imports from here. This module has NO I/O, NO database, NO broker
 and NO clock: `datetime.now()` never appears in it. Time enters as a parameter, which is
@@ -879,9 +879,15 @@ class Money(_Frozen):
             Money(amount=Decimal(sign * b).scaleb(-minor), currency=self.currency)
             for b in base
         )
-        assert sum((m.amount for m in out), Decimal(0)) == self.amount, (
-            "allocate postcondition violated: parts do not sum to the whole"
-        )
+        # X2 finding M-2. This was an `assert`, which `python -O` strips: the one check
+        # that money is conserved across a split vanished in an optimised deployment and
+        # no test noticed. A guard on money conservation must not depend on __debug__.
+        total = sum((m.amount for m in out), Decimal(0))
+        if total != self.amount:
+            raise MoneyPrecisionError(
+                f"allocate postcondition violated: parts sum to {total}, expected "
+                f"{self.amount} ({self.currency.value})"
+            )
         return out
 
     def __str__(self) -> str:

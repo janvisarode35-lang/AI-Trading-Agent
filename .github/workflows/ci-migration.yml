@@ -1,0 +1,50 @@
+# SPEC-P1.2-STORAGE v0.1 — CI execution of the storage schema (X2 finding B-1).
+#
+# B-1: migrations/0001_initial.sql had never been run. This workflow runs it on every
+# push and pull request that touches the schema, using the SAME pinned image and the
+# SAME script a developer runs locally, and fails the build unless psql exits 0.
+name: migration
+
+on:
+  push:
+    paths:
+      - 'migrations/**'
+      - 'docker-compose.yml'
+      - 'scripts/apply-migration.sh'
+      - '.github/workflows/ci-migration.yml'
+  pull_request:
+    paths:
+      - 'migrations/**'
+      - 'docker-compose.yml'
+      - 'scripts/apply-migration.sh'
+      - '.github/workflows/ci-migration.yml'
+  workflow_dispatch:
+
+jobs:
+  apply-migration:
+    name: apply 0001_initial.sql
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env (CI-only credential, never a production secret)
+        run: |
+          cp .env.example .env
+          # Overwrite the placeholder so the value is unique to this ephemeral runner.
+          sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci_$(openssl rand -hex 16)/" .env
+
+      - name: Start TimescaleDB
+        run: docker compose up -d --wait
+
+      - name: Apply migration and assert exit 0
+        run: bash scripts/apply-migration.sh
+
+      - name: Dump database logs on failure
+        if: failure()
+        run: docker compose logs --no-color timescaledb
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

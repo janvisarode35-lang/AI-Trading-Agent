@@ -1,10 +1,12 @@
 """Verification harness for SPEC-P1.1-DOMAIN. Asserts the invariants the spec claims."""
 import sys
+from pathlib import Path
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
-sys.path.insert(0, "D:/GitHub/AI-Trading-Agent/src")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 from domain import models as m  # noqa: E402
 
 PASS, FAIL = [], []

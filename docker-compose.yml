@@ -1,0 +1,59 @@
+# SPEC-P1.2-STORAGE v0.1 — local + CI database for migration execution (X2 finding B-1).
+#
+# B-1 was raised because migrations/0001_initial.sql had never been executed: the only
+# test touching it regex-scraped the DDL as text. This file makes execution reproducible
+# on a developer machine and on CI with the same image and the same command.
+#
+# The image is PINNED, not `latest-pg16`. A floating tag means the schema that passed CI
+# yesterday is not the schema that passes today, which is not auditable.
+#
+# NOT the `-oss` variant: 0001_initial.sql calls add_compression_policy,
+# add_continuous_aggregate_policy and add_retention_policy. Those are community (TSL)
+# features and are absent from timescaledb-oss builds.
+#
+# Storage is a Docker-managed NAMED VOLUME. It deliberately does not bind-mount into the
+# repository: container layers and database files must never reach git.
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.29.2-pg16
+    container_name: ai-trading-tsdb
+    environment:
+      # NOT the application database. The image's own init script
+      # (/docker-entrypoint-initdb.d/000_install_timescaledb.sh) installs the timescaledb
+      # extension into template1 and into POSTGRES_DB, landing it in schema `public`.
+      # 0001_initial.sql requires timescaledb in schema `extensions`, and timescaledb is
+      # relocatable=false, so it can never be moved afterwards. The application database
+      # is therefore created from template0 by scripts/apply-migration.sh, which lets the
+      # migration install the extension into `extensions` itself. See APP_DB in .env.
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # Dev-only. Production credentials come from HashiCorp Vault, never from a file
+      # in the repository. .env is gitignored; .env.example carries the placeholder.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set - copy .env.example to .env}
+      # Deterministic ordering and timestamps for reproducible migration runs.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      # Bound to loopback only. An unauthenticated Postgres reachable on a LAN is not
+      # acceptable even for a dev database. Port 55432 avoids colliding with any
+      # PostgreSQL already listening on 5432.
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - tsdb_data:/var/lib/postgresql/data
+      # Read-only: the container must never be able to alter the migration it applies.
+      - ./migrations:/migrations:ro
+      - ./scripts:/scripts:ro
+    healthcheck:
+      # pg_isready alone returns success while the server is still in recovery, so the
+      # readiness probe also requires that a real query executes.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d postgres -q && psql -U ${POSTGRES_USER:-postgres} -d postgres -tAc 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 10s
+    restart: "no"
+
+volumes:
+  tsdb_data:
+    name: ai_trading_tsdb_data

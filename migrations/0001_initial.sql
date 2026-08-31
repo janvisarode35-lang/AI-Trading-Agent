@@ -1355,6 +1355,26 @@ DECLARE
     v_prev text;
     v_seq  bigint;
 BEGIN
+    -- X2 finding H-1. The advisory lock below serialises EXECUTION, but it does not
+    -- refresh a SNAPSHOT. Under REPEATABLE READ or SERIALIZABLE the SELECT that reads the
+    -- chain head runs on the snapshot taken at the transaction's first statement, so a
+    -- transaction that began before a concurrent writer committed reads a stale head and
+    -- assigns a seq that is already taken. The primary key is (seq, occurred_at) -- forced,
+    -- because a hypertable's unique index must contain the partitioning column -- so seq
+    -- alone is NOT unique and nothing rejects the duplicate. Reproduced 2026-08-31: two
+    -- rows at seq=2, both with prev_hash of seq=1, inserted without error.
+    --
+    -- timescaledb is relocatable=false and the PK cannot be narrowed, so the only place to
+    -- close this is here, before the head is read. Fail closed: refuse the write.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION
+            'audit_log insert requires READ COMMITTED isolation, got %; a snapshot older '
+            'than a concurrent commit assigns a duplicate seq and forks the chain '
+            '(X2 finding H-1)',
+            current_setting('transaction_isolation')
+            USING ERRCODE = 'invalid_transaction_state';
+    END IF;
+
     PERFORM pg_advisory_xact_lock(hashtext('trading.audit_log'));
     SELECT seq, payload_hash INTO v_seq, v_prev
       FROM trading.audit_log ORDER BY seq DESC LIMIT 1;
@@ -1389,13 +1409,25 @@ CREATE OR REPLACE FUNCTION trading.verify_audit_chain(p_from bigint DEFAULT 0)
 RETURNS TABLE (broken_at bigint, reason text)
 LANGUAGE sql STABLE SET search_path = trading, pg_temp AS $$
     WITH ordered AS (
+        -- X2 finding M-1: ORDER BY seq alone is not deterministic when a duplicate seq
+        -- exists, so lag() could pair the rows either way between runs. occurred_at is
+        -- the tiebreak because it is the other half of the primary key.
         SELECT seq, prev_hash, payload_hash,
-               lag(payload_hash) OVER (ORDER BY seq) AS expected_prev,
-               lag(seq)          OVER (ORDER BY seq) AS prior_seq
+               lag(payload_hash) OVER (ORDER BY seq, occurred_at) AS expected_prev,
+               lag(seq)          OVER (ORDER BY seq, occurred_at) AS prior_seq
           FROM trading.audit_log WHERE seq >= p_from
     )
+    -- X2 finding M-1. A duplicate seq must be reported as a duplicate. Previously it fell
+    -- through to the gap branch (seq <> prior_seq + 1 is true when seq = prior_seq) and
+    -- was reported as 'gap: prior seq N', sending an operator to look for a missing row
+    -- that does not exist. A duplicate is the H-1 fork signature, not a gap.
+    SELECT seq, 'duplicate seq: ' || count(*)::text || ' rows share this seq'
+      FROM trading.audit_log WHERE seq >= p_from
+     GROUP BY seq HAVING count(*) > 1
+    UNION ALL
     SELECT seq, 'gap: prior seq ' || coalesce(prior_seq::text, 'NULL')
-      FROM ordered WHERE prior_seq IS NOT NULL AND seq <> prior_seq + 1
+      FROM ordered
+     WHERE prior_seq IS NOT NULL AND seq <> prior_seq + 1 AND seq <> prior_seq
     UNION ALL
     SELECT seq, 'fork: prev_hash does not match preceding payload_hash'
       FROM ordered WHERE expected_prev IS NOT NULL AND prev_hash <> expected_prev;

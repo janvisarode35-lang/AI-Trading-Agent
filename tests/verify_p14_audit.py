@@ -10,7 +10,7 @@ from decimal import Decimal as D
 from pathlib import Path
 from uuid import UUID, uuid4
 
-ROOT = Path("D:/GitHub/AI-Trading-Agent")
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from audit import chain as K  # noqa: E402
 from audit import events as V  # noqa: E402

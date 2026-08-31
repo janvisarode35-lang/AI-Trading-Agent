@@ -3,12 +3,14 @@ the model. This is the check that would have caught X2 findings F-5 and F-9
 automatically instead of by hand."""
 import re
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "D:/GitHub/AI-Trading-Agent/src")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 from domain import models as m  # noqa: E402
 from audit import events as ae  # noqa: E402
 
-DDL = open("D:/GitHub/AI-Trading-Agent/migrations/0001_initial.sql", encoding="utf-8").read()
+DDL = (REPO_ROOT / "migrations" / "0001_initial.sql").read_text(encoding="utf-8")
 
 # Columns that are storage concerns, not domain concerns, and are deliberately absent
 # from the model. Each needs a reason or it is drift wearing a waiver.

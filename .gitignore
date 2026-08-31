@@ -245,5 +245,13 @@ service-account*.json
 node_modules/
 
 # Docker runtime data
+# Reproducible CONFIGURATION (docker-compose.yml, Dockerfiles, init/migration scripts)
+# IS committed. Docker's runtime STORAGE never is: image layers, container filesystems,
+# build cache and database volumes live in Docker's own data root (D:\DockerData) and
+# are reconstructible from the pinned image plus migrations/.
 postgres-data/
 docker-data/
+DockerData/
+pgdata/
+tsdb_data/
+*.vhdx
