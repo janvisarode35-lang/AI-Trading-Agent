@@ -216,3 +216,34 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Trading / runtime data
+data/
+runtime/
+tmp/
+logs/
+reports/
+backups/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets / credentials
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# API / local configuration
+.env.*
+!.env.example
+
+# Node / frontend dependencies (if applicable)
+node_modules/
+
+# Docker runtime data
+postgres-data/
+docker-data/

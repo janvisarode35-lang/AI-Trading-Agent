@@ -1,0 +1,1253 @@
+# =============================================================================
+# policy.yaml — the ONLY source of a risk number in this system.
+#
+# SPEC-P1.3-CONFIG v0.1. Loaded by src/config/loader.py and by nothing else.
+# No code path reads a risk number from an environment variable, a constant, or a
+# literal (SPEC-P1.3 §7; enforced by tests/verify_p13_no_env_risk.py).
+#
+# Every rule carries the frozen authority it derives from. A rule with no
+# authority is a rule someone invented, and the loader rejects it.
+#
+# CONVENTIONS, fixed upstream and not re-litigated here:
+#   *_pct is a FRACTION in [0,1], never integer percent   (P0.1 §6, P0.3 §15.1)
+#   limits are INCLUSIVE: `lte 0.05` PASSES at exactly 0.05, breach is > 0.05 (P0.1 §6)
+#   windows count COMPLETED EXCHANGE SESSIONS, never calendar days  (P0.1 §6)
+#   money is Decimal, quantised to the currency's minor units       (P1.1 §3.2)
+# =============================================================================
+
+schema_version: 1
+policy_version: "0.1.0"
+
+metadata:
+  description: >-
+    Deterministic policy layer read by the risk engine (P2.9) and the kill switch
+    (P2.10). Every constitutional risk number appears here exactly once.
+  authored_by: "JS — Project Owner"
+  authored_at: "2026-08-27T00:00:00Z"
+
+# -----------------------------------------------------------------------------
+# 1. GOVERNANCE — who may change what, and how many people it takes.
+# -----------------------------------------------------------------------------
+governance:
+  # Tightening a limit is ALWAYS safe and needs no approval (ADR-09 row 3).
+  min_approvals_to_tighten: 0
+  # Loosening requires TWO DISTINCT approver identities.
+  #
+  # ADR-09 row 2 authorises the Owner alone to increase a limit. Requiring two is
+  # therefore STRICTER than the frozen ADR, and ADR-09 row 3's "tightening is
+  # always safe" is exactly what makes a stricter control permissible without a
+  # constitutional amendment.
+  #
+  # OPERATIONAL CONSEQUENCE, stated rather than discovered: at team size 1
+  # (ADR-09, [DEFAULT-3] of P0.1) this makes limit increases IMPOSSIBLE until a
+  # second approver is enrolled. That is deliberate and it is safe — every
+  # emergency action available to a single operator is a tightening or a kill,
+  # and both remain unblocked.
+  min_approvals_to_loosen: 2
+  # There is NO approval count that permits overriding a single risk DENY.
+  # ADR-09's final row: no approver, no code path. Immutable.
+  risk_deny_override_permitted: false
+  approver_roles: [OWNER]
+  signature:
+    algorithm: ed25519
+    # Detached signature over the canonical content hash (SPEC-P1.3 §5.2).
+    public_key_ref: "vault://kv/data/trading/policy-signing#public_key"
+    required: true
+
+# -----------------------------------------------------------------------------
+# 2. LAYERING — resolution order, lowest precedence first.
+#    Later layers override earlier ones, key by key (SPEC-P1.3 §6).
+# -----------------------------------------------------------------------------
+layering:
+  order: [defaults, market, environment, operator_override]
+  # The operator_override layer exists for operational knobs only. Any attempt to
+  # override a key under `rules.*` is a LOAD FAILURE, not a warning: an operator
+  # who can loosen a limit at runtime has defeated [CONST-1] and ADR-09 alike.
+  operator_override_denied_prefixes:
+    - "rules."
+    - "governance."
+    - "kill_switch."
+
+# -----------------------------------------------------------------------------
+# 3. SECRETS — never a literal in this file (SPEC-P1.3 §8).
+#    Syntax: vault://<mount>/<path>#<key>
+#    Resolved at load, held in memory only, never written to the effective-config
+#    dump, never logged, never included in the content hash input.
+# -----------------------------------------------------------------------------
+secret_refs:
+  broker_us_key: "vault://kv/data/trading/alpaca#api_key"
+  broker_us_secret: "vault://kv/data/trading/alpaca#api_secret"
+  broker_in_key: "vault://kv/data/trading/zerodha#api_key"
+  broker_in_secret: "vault://kv/data/trading/zerodha#api_secret"
+  llm_primary_key: "vault://kv/data/trading/openai#api_key"
+  llm_fallback_key: "vault://kv/data/trading/deepseek#api_key"
+  marketdata_key: "vault://kv/data/trading/massive#api_key"
+
+# -----------------------------------------------------------------------------
+# 4. NON-RULE CONFIGURATION — the frozen keys from P0.1 §10.2 / P0.3 §14.4.
+#    These are values the system reads; they are not evaluated as rules.
+# -----------------------------------------------------------------------------
+holding:
+  median_target_sessions: 15        # ADR-13
+  min_sessions: 3                   # ADR-13
+  band_sessions: [3, 40]            # ADR-13
+  time_stop_sessions: 40            # ADR-13
+  time_stop_min_return_pct: 0.02    # ADR-13
+  hard_max_sessions: 120            # ADR-13
+
+universe:
+  reconstitution_cron_utc: "Sat 06:00"   # ADR-14
+  US:
+    max_instruments: 1500                # ADR-14
+    enter_rank: 1300                     # ADR-14
+    exit_rank: 1700                      # ADR-14
+    min_market_cap_usd: 500000000        # [RS §4]
+    min_addv_usd_floor: 1000000          # ADR-14 (scaling term in UNIV-003)
+    min_addv_position_multiple: 100      # ADR-14
+    min_price_usd: "5.00"                # [RS §4]
+    min_sessions_history: 250            # ADR-14
+    min_reported_quarters: 4             # ADR-14
+  IN:
+    max_instruments: 500                 # ADR-14
+    enter_rank: 400
+    exit_rank: 520
+    min_market_cap_inr: 5000000000       # [RS §4] ₹500 Cr
+    min_addv_inr_floor: 50000000         # [RS §4] ₹5 Cr
+    min_addv_position_multiple: 100
+    min_price_inr: "50.00"               # ASSUMPTION — see SPEC-P1.3 OPEN QUESTIONS Q-P1.3-2
+    min_sessions_history: 250
+    min_reported_quarters: 4
+
+portfolio:
+  target_positions: 20                   # ADR-14
+  positions_band: [15, 25]               # ADR-14
+  target_weight_pct: 0.040               # ADR-14
+  max_position_pct: 0.050                # [CONST]
+  forced_trim_pct: 0.075                 # ADR-14
+  min_cash_pct: 0.20                     # ADR-14
+
+turnover:
+  max_new_entries_per_session: 4         # ADR-14
+  max_nav_traded_pct_per_session: 0.20   # ADR-14
+
+decision:
+  min_edge_multiple_of_cost: 2.0         # ADR-13 Chain F, [DEFAULT-8] of P0.1
+
+cost:
+  assumed_round_trip_bps:
+    US: 25                               # ADR-13 Chain F — ASSUMPTION, measured in P5.3 (Q13)
+    IN: 90                               # ADR-13 Chain F — ASSUMPTION
+  verified_monthly_usd:
+    paper: 129                           # AD-1
+    live: 228                            # AD-1
+  vm_monthly_usd: null                   # AD-1 — unpriced, P0.3 Q-1
+  backup_monthly_usd: null               # AD-1 — unpriced, P0.3 Q-2
+  total_operating_is_complete: false     # AD-1
+
+schedule:
+  US:
+    ingest_utc: "21:45"                  # ADR-02, ADR-14
+    pipeline_utc: "22:30"                # ADR-02, ADR-14
+    order_window_et: "09:45-10:15"       # ADR-14
+  IN:
+    ingest_utc: "10:30"                  # ADR-14 shape, India session
+    pipeline_utc: "11:15"
+    order_window_ist: "09:45-10:15"
+
+fx:
+  base_currency: USD                     # ADR-15
+  source_primary: RBI_REFERENCE          # ADR-15 — ASSUMPTION
+  system_may_convert: false              # ADR-15 — IMMUTABLE
+  rate_decimal_places: 6                 # ADR-15 §5
+
+risk_evaluation:
+  evaluate_per_pool: true                # ADR-15 — IMMUTABLE
+  evaluate_consolidated: true            # ADR-15 — IMMUTABLE
+  stricter_binds: true                   # ADR-15 §4 — IMMUTABLE
+
+account:
+  type: CASH                             # ADR-12
+  # Both counters exist in v1; day_trades_5d is computed but not enforced under
+  # AccountType.CASH, so it is proven correct before it ever becomes binding.
+  enforce_settled_cash: true             # ADR-13 Chain D
+  enforce_day_trades: false              # ADR-13 Chain D — becomes true under MARGIN
+  pdt_equity_floor_usd: 25000            # ADR-13 Chain D — ASSUMPTION [VERIFY-P0.2]
+  pdt_max_day_trades_5d: 3               # ADR-13 Chain D
+
+retrain:
+  schedule: quarterly_expanding_window   # ADR-07
+  triggers:                              # ADR-07 — the COMPLETE list
+    - PSI_GT_0_25
+    - IC_BELOW_CI
+    - UNIVERSE_SHOCK_GT_15PCT
+    - SCHEMA_BREAK
+    - REGIME_UNDERREPRESENTED
+
+promotion:
+  min_wf_windows: 34                     # ADR-08
+  min_closed_trades: 1000                # ADR-08
+  shadow_min_sessions: 60                # ADR-08
+  dsr_threshold: 0.95                    # ADR-08
+  walkforward_roll_months: 3             # AD-2
+  walkforward_initial_train_years: 1.5   # AD-2
+
+llm:
+  primary_provider: OPENAI                    # AD-5
+  primary_model_id: "gpt-5.6-luna"            # AD-5
+  fallback_provider: DEEPSEEK                 # AD-5
+  fallback_model_id: "deepseek-v4-flash"      # AD-5
+  primary_conditional_on: "M-7"               # AD-5
+  live_path_tier: STANDARD                    # AD-5 — never BATCH until M-10 closes
+  gate_width: 15                              # ADR-13 Chain G
+  cost_per_call_usd: "0.003000"               # P0.3 §5.1
+  spend_alarm_warn_usd_month: "5.00"          # P0.3 DECISION 5
+  spend_alarm_critical_usd_month: "50.00"     # ADR-13 Chain G
+  spend_window_days: 30                       # RULE-B9 — trailing, rolling, UTC
+  spend_excludes_approved_replay: true        # RULE-B9(d) — IMMUTABLE
+  replay_requires_approval: true              # RULE-B7 — IMMUTABLE
+  replay_offpeak_only: true                   # RULE-B8 — IMMUTABLE
+  may_receive_portfolio_state: false          # [DEFAULT-7] of P0.1 — IMMUTABLE
+  call_timeout_seconds: 120                   # RULE-B11
+  stage_deadline_seconds: 600                 # RULE-B11
+  max_concurrency: 25                         # RULE-B11 — min(gate_width, 25)
+
+hitl:
+  risk_deny_override_permitted: false    # ADR-09 — IMMUTABLE, no code path exists
+  actions:                               # ADR-09's 12 rows
+    - {id: 1,  action: RE_ENABLE_AFTER_KILL,      approver: OWNER, sla_hours: null, on_expiry: STAYS_HALTED}
+    - {id: 2,  action: INCREASE_RISK_LIMIT,       approver: OWNER, sla_hours: 24,   on_expiry: DENIED}
+    - {id: 3,  action: DECREASE_RISK_LIMIT,       approver: null,  sla_hours: null, on_expiry: AUTOMATIC}
+    - {id: 4,  action: PROMOTE_CHALLENGER,        approver: OWNER, sla_hours: 72,   on_expiry: STAYS_IN_SHADOW}
+    - {id: 5,  action: ADVANCE_CAPITAL_STAGE,     approver: OWNER, sla_hours: null, on_expiry: STAYS_AT_STAGE}
+    - {id: 6,  action: FIRST_LIVE_ORDER_NEW_MKT,  approver: OWNER, sla_hours: null, on_expiry: DENIED}
+    - {id: 7,  action: CHANGE_INSTRUMENT_ALLOWLIST, approver: OWNER, sla_hours: 24, on_expiry: DENIED}
+    - {id: 8,  action: CHANGE_PROVIDER_OR_MODEL,  approver: OWNER, sla_hours: 24,   on_expiry: DENIED}
+    - {id: 9,  action: MANUAL_ORDER_OUTSIDE_PIPELINE, approver: OWNER, sla_hours: 0, on_expiry: ALWAYS_PERMITTED_DUAL_LOGGED}
+    - {id: 10, action: DEPLOY_CODE,               approver: OWNER, sla_hours: null, on_expiry: NOT_DEPLOYED}
+    - {id: 11, action: ROTATE_BROKER_CREDENTIAL,  approver: OWNER, sla_hours: 4,    on_expiry: FAIL_CLOSED_HALT}
+    - {id: 12, action: AMEND_CONST_OR_ADR,        approver: OWNER, sla_hours: null, on_expiry: DENIED}
+
+kill_switch:
+  restore_state_on_boot: TRIPPED         # ADR-10, invariant I3 — IMMUTABLE
+  requires_human_to_re_enable: true      # [CONST-7] — IMMUTABLE
+  auto_re_enable_permitted: false        # ADR-09 row 1 — IMMUTABLE
+
+dr:
+  rpo_state_seconds: 0                   # ADR-10
+  rto_safe_minutes: 30                   # ADR-10
+  rto_operational_hours: 4               # ADR-10
+  restore_drill_cadence: monthly         # ADR-10
+
+storage:
+  compression_after_days: 30             # P0.3 [DEFAULT-B10]
+  expected_compression_ratio_numeric: 15 # P0.3 §2.1 — measured at day 45 (RULE-B2)
+  expected_compression_ratio_text: 4     # P0.3 §2.1
+  audit_retention: indefinite            # P0.1 §10.2 — IMMUTABLE
+  records_retention_years: 7             # [DEFAULT-10] of P0.1
+  disk_warn_pct: 0.70                    # P0.3 §15.1
+  disk_critical_pct: 0.85                # P0.3 §15.1
+
+latency:
+  exit:
+    bar_to_ack_budget_seconds: 5         # P0.3 §6.2
+    bar_to_ack_hard_seconds: 10          # P0.3 §6.2
+    stale_bar_critical_seconds: 600      # P0.3 §15.1
+    audit_write_budget_ms: 100
+    audit_write_hard_ms: 1000
+  stages:                                # P0.3 §6.1 — budget seconds, on_breach
+    - {stage: INGEST,           budget_seconds: 1800, on_breach: ABORT}
+    - {stage: UNIVERSE_RESOLVE, budget_seconds: 30,   on_breach: ABORT}
+    - {stage: TIER1_SCREEN,     budget_seconds: 120,  on_breach: ABORT}
+    - {stage: TIER2_QUANT,      budget_seconds: 120,  on_breach: ABORT}
+    - {stage: INFERENCE_GATE,   budget_seconds: 30,   on_breach: ABORT}
+    - {stage: TIER3_LLM,        budget_seconds: 600,  on_breach: DEGRADE}
+    - {stage: DECISION,         budget_seconds: 60,   on_breach: ABORT}
+    - {stage: RISK,             budget_seconds: 60,   on_breach: DENY_ALL}
+    - {stage: AUDIT_FREEZE,     budget_seconds: 60,   on_breach: ABORT}
+    - {stage: ORDER_PLACEMENT,  budget_seconds: 5,    on_breach: RETRY_IN_WINDOW}
+    - {stage: MONITOR_EVAL,     budget_seconds: 5,    on_breach: ALERT_CRITICAL}
+    - {stage: EXIT_SUBMIT,      budget_seconds: 10,   on_breach: ALERT_CRITICAL}
+
+vm:
+  vcpu: 4                                # P0.3 §4.3
+  ram_gb: 16                             # P0.3 §4.3
+  disk_gb: 250                           # P0.3 §4.3
+  disk_class: NVME_SSD                   # P0.3 §4.3
+  static_egress_ips: 1                   # [CONST-9]
+
+broker:
+  IN:
+    primary: ZERODHA                     # AD-4, [CONST-10]
+    monitoring_backup: UPSTOX            # AD-4 — read-only
+  US:
+    primary: ALPACA
+    emergency_backup: IBKR               # AD-4
+  emergency_backup_is_manual_only: true  # AD-3 — IMMUTABLE
+  emergency_backup_counts_toward_rto: false  # AD-3 — IMMUTABLE
+
+instrument_allowlist:                    # ADR-05, invariant I5 — deny-by-default
+  tradeable: [COMMON_STOCK]
+  read_only: [ETF]
+  # Everything not listed above is DENIED. Futures and options are never
+  # tradeable in this program at any version (ADR-05).
+  permanently_banned: [FUTURE, OPTION]
+
+# -----------------------------------------------------------------------------
+# 5. RULES — every constitutional risk limit, one rule each, stable ID.
+#
+#    action semantics:
+#      ALLOW  — the rule passed
+#      DENY   — this order/decision does not happen
+#      MODIFY — the order may proceed at a reduced size named by the rule
+#      KILL   — trip the kill switch at the stated scope
+#    on_missing_input is ALWAYS DENY or KILL. [CONST-6] admits nothing else, and
+#    the loader rejects any other value.
+# -----------------------------------------------------------------------------
+rules:
+
+  # ---- Exposure ------------------------------------------------------------
+  - id: EXP-001
+    description: "Single position may not exceed 5% of its pool's NAV."
+    authority: "[CONST]"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.050
+    comparison: lte
+    measurement:
+      basis: pool_nav
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [pool_nav, position_market_value, intended_fill_quantity, mark_price]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Evaluated on the INTENDED POST-FILL weight for new and increased positions
+      (ADR-14). A position that drifts above 5% through appreciation alone does
+      NOT trigger a forced sale — see EXP-006. Inclusive: exactly 0.050 passes.
+
+  - id: EXP-002
+    description: "Sector exposure may not exceed 20% of pool NAV."
+    authority: "[CONST]"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.200
+    comparison: lte
+    measurement:
+      basis: pool_nav
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [pool_nav, sector_classification, position_market_value, intended_fill_quantity]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Computed on SINGLE NAMES ONLY while ETFs are read-only (ADR-05), which makes
+      it unambiguous. The v2 ETF gate requires a decomposition rule before this
+      rule can survive a basket holding.
+
+  - id: EXP-003
+    description: "Constitutional gross exposure ceiling — 2x equity."
+    authority: "[CONST]"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 2.0
+    comparison: lte
+    measurement:
+      basis: equity
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [equity, gross_exposure_value]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      UNREACHABLE under ADR-12 (long-only, cash account): gross ≡ net ≤ 1.0x, so
+      EXP-005 binds first. Retained per P0.1 §C-2 as the constitutional upper
+      bound; the engine enforces min(EXP-003, EXP-005). Reaching 2x requires
+      margin, which requires an ADR-12 revisit AND ADR-09 Owner approval.
+
+  - id: EXP-004
+    description: "Constitutional net exposure ceiling — 1x equity."
+    authority: "[CONST]"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 1.0
+    comparison: lte
+    measurement:
+      basis: equity
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [equity, net_exposure_value]
+    action: DENY
+    on_missing_input: DENY
+
+  - id: EXP-005
+    description: "Account-type gross ceiling — 1.0x under a cash account."
+    authority: "ADR-12 / P0.1 §C-2"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 1.0
+    comparison: lte
+    measurement:
+      basis: equity
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [equity, gross_exposure_value, account_type]
+    action: DENY
+    on_missing_input: DENY
+    notes: "The binding ceiling in v1. ADR-12 tightens [CONST]; it does not contradict it."
+
+  - id: EXP-006
+    description: "Position drifted above 7.5% — force a trim at the next order window."
+    authority: "ADR-14"
+    scope: pool
+    mode: enforce
+    severity: HIGH
+    threshold: 0.075
+    comparison: lte
+    measurement:
+      basis: pool_nav
+      window: point_in_time
+      timing: end_of_session
+    inputs: [pool_nav, position_market_value]
+    action: MODIFY
+    modify:
+      target: position_weight_pct
+      to: 0.040
+    on_missing_input: DENY
+    notes: >-
+      Drift alone never forces an immediate sale — that would create trades driven
+      purely by a rising price, which is both costly (ADR-13 Chain F) and perverse.
+      Between 5.0% and 7.5% the position is frozen (blocks any increase via
+      EXP-001) and trimmed at the next scheduled rebalance. Above 7.5% the trim is
+      forced at the next session's order window, so the exception cannot run away.
+
+  # ---- Loss and drawdown ---------------------------------------------------
+  - id: LOSS-001
+    description: "Daily loss may not exceed 2% of NAV."
+    authority: "[CONST]"
+    scope: pool_and_consolidated
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.020
+    comparison: lte
+    measurement:
+      basis: nav_at_session_start
+      window: session
+      timing: continuous
+    inputs: [nav_at_session_start, nav_current, realised_pnl_session, unrealised_pnl_session]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      MARK-TO-MARKET, not realised only. Per-pool boundary is that exchange's
+      session; consolidated boundary is the UTC accounting date, evaluated after
+      the LATER of the two closes (ADR-15 §7). An overnight gap counts against the
+      session in which it is REALISED — the session that opens at the gapped price
+      — never retroactively against the prior session (P0.1 §6). A per-pool breach
+      halts that pool; a consolidated breach escalates to LOSS-004.
+
+  - id: LOSS-002
+    description: "Weekly loss may not exceed 5% of NAV."
+    authority: "[CONST]"
+    scope: pool_and_consolidated
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.050
+    comparison: lte
+    measurement:
+      basis: nav_at_week_start
+      window: "sessions:5"
+      timing: continuous
+    inputs: [nav_at_week_start, nav_current, realised_pnl_week, unrealised_pnl_week]
+    action: DENY
+    on_missing_input: DENY
+    notes: "Five COMPLETED exchange sessions for the relevant market, not calendar days."
+
+  - id: LOSS-003
+    description: "Max drawdown 10% from peak NAV — trips the kill switch."
+    authority: "[CONST]"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.100
+    comparison: lte
+    measurement:
+      basis: peak_nav_from_audit_trail
+      window: since_peak
+      timing: continuous
+    inputs: [peak_nav_from_audit_trail, nav_current]
+    action: KILL
+    kill_scope: POOL
+    on_missing_input: KILL
+    notes: >-
+      peak_nav is REPLAYED FROM THE AUDIT TRAIL, never recomputed from portfolio
+      state (invariant I4). Recomputation resets the peak to the present value and
+      silently un-trips the condition — the kill switch would forget why it fired.
+      on_missing_input is KILL, not DENY: if the peak cannot be established, the
+      drawdown is unknown, and an unknown drawdown against a kill-switch rule is
+      the one case where halting beats declining a trade.
+
+  - id: LOSS-004
+    description: "Consolidated max drawdown 10% — trips the GLOBAL kill switch."
+    authority: "[CONST] / ADR-15 §4"
+    scope: consolidated
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.100
+    comparison: lte
+    measurement:
+      basis: consolidated_peak_nav_from_audit_trail
+      window: since_peak
+      timing: continuous
+    inputs: [consolidated_peak_nav_from_audit_trail, consolidated_nav_current, fx_rate]
+    action: KILL
+    kill_scope: GLOBAL
+    on_missing_input: KILL
+    notes: >-
+      The dual-evaluation rule ADR-15 exists for. Without a PER-POOL LOSS-003, a
+      10% loss in a small India pool reads as ~1% consolidated and never fires.
+
+  # ---- Sizing --------------------------------------------------------------
+  - id: SIZE-001
+    description: "Risk per trade may not exceed 1% of pool NAV."
+    authority: "[CONST]"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.010
+    comparison: lte
+    measurement:
+      basis: pool_nav
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [pool_nav, entry_price, stop_price, intended_fill_quantity]
+    action: MODIFY
+    modify:
+      target: order_quantity
+      to: max_quantity_within_risk_budget
+    on_missing_input: DENY
+    notes: >-
+      Risk = (entry - stop) x quantity, where stop is STOP-001's value. MODIFY
+      rather than DENY because a smaller size is always available and always safe;
+      the modified quantity is then re-evaluated from scratch against every rule.
+
+  - id: SIZE-002
+    description: "Order quantity rounds DOWN to the tradeable increment, never up."
+    authority: "P0.1 §6"
+    scope: instrument
+    mode: enforce
+    severity: HIGH
+    threshold: null
+    comparison: multiple_of
+    measurement:
+      basis: instrument_qty_increment
+      window: point_in_time
+      timing: pre_trade
+    inputs: [instrument_qty_increment, intended_fill_quantity]
+    action: MODIFY
+    modify:
+      target: order_quantity
+      to: floor_to_increment
+    on_missing_input: DENY
+    notes: >-
+      Rounding UP can breach EXP-001 by construction. A result of zero is a
+      no-trade outcome, logged, not an error (P0.1 §6). on_missing_input is DENY:
+      a missing increment must never default to 1, because in India that would
+      place an order for an illegal quantity.
+
+  # ---- Liquidity -----------------------------------------------------------
+  - id: LIQ-001
+    description: "Position may not exceed 1% of 20-session median ADDV."
+    authority: "[CONST]"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0.010
+    comparison: lte
+    measurement:
+      basis: addv_20_session_median
+      window: "sessions:20"
+      timing: pre_trade_intended_post_fill
+    inputs: [addv_20_session_median, intended_fill_quantity, mark_price]
+    action: MODIFY
+    modify:
+      target: order_quantity
+      to: max_quantity_within_liquidity_cap
+    on_missing_input: DENY
+    notes: >-
+      ADDV is the 20-session MEDIAN of (close x volume), not the mean — one spike
+      must not qualify a name (P0.1 §6). Twenty COMPLETED sessions.
+
+  # ---- Order rate ----------------------------------------------------------
+  - id: RATE-001
+    description: "No more than 20 orders per minute, globally."
+    authority: "[CONST]"
+    scope: global
+    mode: enforce
+    severity: HIGH
+    threshold: 20
+    comparison: lte
+    measurement:
+      basis: order_count
+      window: "rolling_seconds:60"
+      timing: pre_trade
+    inputs: [order_submission_timestamps]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Also the SEBI OPS cap surface ([CONST-9]). Rolling 60 seconds on wall clock,
+      not a fixed minute bucket: a bucket reset permits 40 orders across a
+      boundary.
+
+  - id: RATE-002
+    description: "No more than 10 orders per minute per strategy."
+    authority: "[CONST]"
+    scope: strategy
+    mode: enforce
+    severity: HIGH
+    threshold: 10
+    comparison: lte
+    measurement:
+      basis: order_count
+      window: "rolling_seconds:60"
+      timing: pre_trade
+    inputs: [order_submission_timestamps, strategy_id]
+    action: DENY
+    on_missing_input: DENY
+
+  # ---- Stops and execution -------------------------------------------------
+  - id: STOP-001
+    description: "Protective stop is entry - 2.5 x ATR(14) at entry."
+    authority: "[CONST]"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: 2.5
+    comparison: eq
+    measurement:
+      basis: atr_14_completed_bars
+      window: "sessions:14"
+      timing: at_entry
+    inputs: [entry_price, atr_14_completed_bars]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      ATR(14) uses 14 COMPLETED bars and EXCLUDES today's partial bar (P0.1 §6),
+      enforced upstream by Bar.is_final. The stop is placed at the broker at
+      entry; a same-session stop-out is possible and is accounted for by CASH-001's
+      counters rather than prevented. A stop at or above entry is InvalidStopError,
+      not a wide stop.
+
+  - id: EXEC-001
+    description: "Limit orders by default; MARKET only for an emergency exit."
+    authority: "[CONST]"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: in
+    allowed_values: [LIMIT]
+    allowed_values_emergency: [MARKET, LIMIT]
+    measurement:
+      basis: order_type
+      window: point_in_time
+      timing: pre_trade
+    inputs: [order_type, is_emergency_exit]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      is_emergency_exit is set ONLY by the kill-switch liquidation path and the
+      exit hierarchy, never by a strategy. This rule is why US fractional trading
+      is unreachable in v1 (SPEC-P1.1 §3.4): fractional requires market/day orders.
+
+  # ---- Holding period ------------------------------------------------------
+  - id: HOLD-001
+    description: "A position is held at least 3 completed sessions."
+    authority: "ADR-13"
+    scope: instrument
+    mode: enforce
+    severity: MEDIUM
+    threshold: 3
+    comparison: gte
+    measurement:
+      basis: sessions_held
+      window: since_entry
+      timing: pre_exit
+    inputs: [sessions_held, entry_trading_date]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Does NOT apply to a stop-out, an exit-hierarchy event or a kill-switch
+      liquidation — a minimum hold that blocks a protective exit is a bug, not a
+      policy. Applies only to a discretionary/thesis-driven exit.
+
+  - id: HOLD-002
+    description: "Time stop at 40 sessions if return is below 2%."
+    authority: "ADR-13"
+    scope: instrument
+    mode: enforce
+    severity: MEDIUM
+    threshold: 40
+    comparison: lte
+    measurement:
+      basis: sessions_held
+      window: since_entry
+      timing: end_of_session
+    inputs: [sessions_held, position_return_pct]
+    action: MODIFY
+    modify:
+      target: exit_signal
+      to: EXIT
+    on_missing_input: DENY
+
+  - id: HOLD-003
+    description: "Hard maximum holding period — 120 completed sessions."
+    authority: "ADR-13 (treat as irreversible)"
+    scope: instrument
+    mode: enforce
+    severity: HIGH
+    threshold: 120
+    comparison: lte
+    measurement:
+      basis: sessions_held
+      window: since_entry
+      timing: end_of_session
+    inputs: [sessions_held]
+    action: MODIFY
+    modify:
+      target: exit_signal
+      to: EXIT
+    on_missing_input: DENY
+    notes: >-
+      Absolute. Forces slot turnover and guarantees a single US tax regime (always
+      short-term), which is why the accounting layer never needs mixed STCG/LTCG
+      lot treatment (ADR-13 Chain E).
+
+  # ---- Edge ----------------------------------------------------------------
+  - id: EDGE-001
+    description: "Expected alpha must be at least 2x expected round-trip cost."
+    authority: "ADR-13 Chain F"
+    scope: instrument
+    mode: enforce
+    severity: HIGH
+    threshold: 2.0
+    comparison: gte
+    measurement:
+      basis: expected_alpha_bps_over_round_trip_cost_bps
+      window: "sessions:15"
+      timing: pre_trade
+    inputs: [expected_alpha_bps, assumed_round_trip_bps]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      At 15-day holds round-trip cost runs ~4.2%/yr of the traded book. The
+      threshold is not optional. assumed_round_trip_bps is an ASSUMPTION (25 US /
+      90 IN) until P5.3 measures it over >=200 LIVE fills — paper excluded (N11).
+
+  # ---- Cash and settlement -------------------------------------------------
+  - id: CASH-001
+    description: "New entries are sized against SETTLED cash only."
+    authority: "ADR-13 Chain D / P0.1 §0.4 R-1"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold_input: settled_cash
+    comparison: lte
+    measurement:
+      basis: settled_cash
+      window: point_in_time
+      timing: pre_trade
+    inputs: [settled_cash, intended_notional]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      A buy that would consume unsettled proceeds is DENIED. [RS §16] names PDT as
+      the binding US constraint; given ADR-12's CASH account it is NOT — settled
+      funds are. EXEMPT for kill-switch liquidation (see KILL-002).
+
+  - id: CASH-002
+    description: "Under MARGIN with equity < $25,000, deny new entries at 3 day trades in 5 sessions."
+    authority: "ADR-13 Chain D"
+    scope: pool
+    mode: monitor
+    severity: HIGH
+    threshold: 3
+    comparison: lt
+    measurement:
+      basis: day_trades_5d
+      window: "sessions:5"
+      timing: pre_trade
+    inputs: [day_trades_5d, equity, account_type]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      mode is MONITOR in v1 because ADR-12 selects a CASH account, where PDT does
+      not apply. The counter is computed and stored regardless, so it is proven
+      correct BEFORE it ever becomes binding. Switching to MARGIN flips this rule
+      to enforce and is a config change, not a code change — which is the whole
+      reason both counters were specified in Chain D.
+
+  # ---- Instruments ---------------------------------------------------------
+  - id: INST-001
+    description: "Instrument type must be on the tradeable allowlist. Deny by default."
+    authority: "ADR-05, invariant I5"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: in
+    allowed_values_ref: "instrument_allowlist.tradeable"
+    measurement:
+      basis: instrument_type
+      window: point_in_time
+      timing: pre_trade
+    inputs: [instrument_type]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      An unknown or newly appearing instrument type is a DENY, not a pass-through.
+      Futures and options are never tradeable in this program at any version.
+
+  - id: INST-002
+    description: "Instrument must be ACTIVE. Halted, suspended or delisted names may not be entered."
+    authority: "P0.1 §6"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: in
+    allowed_values: [ACTIVE]
+    measurement:
+      basis: instrument_status
+      window: point_in_time
+      timing: pre_trade
+    inputs: [instrument_status]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      A halt while HELD is an exit-hierarchy event, not a price update, and this
+      rule does not block that exit.
+
+  # ---- Universe ------------------------------------------------------------
+  - id: UNIV-001
+    description: "Minimum price at the last completed session's official close."
+    authority: "[RS §4]"
+    scope: market
+    mode: enforce
+    severity: MEDIUM
+    threshold_ref: "universe.{market}.min_price"
+    comparison: gte
+    measurement:
+      basis: official_close_last_completed_session
+      window: "sessions:1"
+      timing: universe_reconstitution
+    inputs: [official_close_last_completed_session]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      The OFFICIAL CLOSE of the last completed session, UNADJUSTED, never a live
+      or intraday price (P0.1 §6). A stock halted at $4.98 fails on its last valid
+      close and is excluded — it is not carried at its pre-halt price.
+
+  - id: UNIV-002
+    description: "Minimum market capitalisation."
+    authority: "[RS §4]"
+    scope: market
+    mode: enforce
+    severity: MEDIUM
+    threshold_ref: "universe.{market}.min_market_cap"
+    comparison: gte
+    measurement:
+      basis: last_close_times_shares_outstanding
+      window: "sessions:1"
+      timing: universe_reconstitution
+    inputs: [official_close_last_completed_session, shares_outstanding_most_recent_reported]
+    action: DENY
+    on_missing_input: DENY
+    notes: "Never intraday, never a vendor's live estimate (P0.1 §6)."
+
+  - id: UNIV-003
+    description: "Minimum ADDV, scaled so the liquidity cap and the position cap stay consistent."
+    authority: "ADR-14"
+    scope: market
+    mode: enforce
+    severity: MEDIUM
+    threshold_ref: "max(universe.{market}.min_addv_floor, 100 * max_position_value)"
+    comparison: gte
+    measurement:
+      basis: addv_20_session_median
+      window: "sessions:20"
+      timing: universe_reconstitution
+    inputs: [addv_20_session_median, pool_nav, portfolio.max_position_pct]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      The scaling term exists because at ~$100,000 NAV a 5% position is $12,500,
+      which exceeds 1% of a $1M-ADDV name — LIQ-001 would bind and silently shrink
+      positions below target weight. ADR-14's revisit trigger fires here.
+
+  - id: UNIV-004
+    description: "Minimum price history — 250 completed sessions."
+    authority: "ADR-14"
+    scope: market
+    mode: enforce
+    severity: MEDIUM
+    threshold_ref: "universe.{market}.min_sessions_history"
+    comparison: gte
+    measurement:
+      basis: completed_sessions_of_history
+      window: since_listing
+      timing: universe_reconstitution
+    inputs: [completed_sessions_of_history]
+    action: DENY
+    on_missing_input: DENY
+
+  - id: UNIV-005
+    description: "Minimum reported fundamentals — 4 quarters."
+    authority: "ADR-14"
+    scope: market
+    mode: enforce
+    severity: MEDIUM
+    threshold_ref: "universe.{market}.min_reported_quarters"
+    comparison: gte
+    measurement:
+      basis: reported_quarters_disseminated
+      window: since_listing
+      timing: universe_reconstitution
+    inputs: [reported_quarters_disseminated]
+    action: DENY
+    on_missing_input: DENY
+    notes: "Counted on DISSEMINATION date, never filing date (rule N1)."
+
+  # ---- Portfolio shape and turnover ---------------------------------------
+  - id: PORT-001
+    description: "Cash buffer may not fall below 20% of pool NAV."
+    authority: "ADR-14"
+    scope: pool
+    mode: enforce
+    severity: HIGH
+    threshold: 0.20
+    comparison: gte
+    measurement:
+      basis: pool_nav
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [pool_nav, cash, intended_notional]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Doubles as the settlement buffer that makes a T+1 cycle workable without
+      ever touching unsettled proceeds (ADR-13 Chain D).
+
+  - id: PORT-002
+    description: "Open position count stays within the 15-25 band."
+    authority: "ADR-14"
+    scope: pool
+    mode: monitor
+    severity: LOW
+    threshold: 25
+    comparison: lte
+    measurement:
+      basis: open_position_count
+      window: point_in_time
+      timing: pre_trade_intended_post_fill
+    inputs: [open_position_count]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      MONITOR, not enforce: TURN-001 already caps new entries at 4 per session, so
+      the band is an observation about portfolio shape rather than a second gate.
+      Promote to enforce if the count is ever observed outside the band.
+
+  - id: TURN-001
+    description: "At most 4 new entries per session."
+    authority: "ADR-14"
+    scope: pool
+    mode: enforce
+    severity: HIGH
+    threshold: 4
+    comparison: lte
+    measurement:
+      basis: new_entry_count
+      window: session
+      timing: pre_trade
+    inputs: [new_entry_count_this_session]
+    action: DENY
+    on_missing_input: DENY
+    notes: "Bounds slippage and stops a regime flip turning the book over in a day."
+
+  - id: TURN-002
+    description: "At most 20% of pool NAV traded per session."
+    authority: "ADR-14"
+    scope: pool
+    mode: enforce
+    severity: HIGH
+    threshold: 0.20
+    comparison: lte
+    measurement:
+      basis: pool_nav
+      window: session
+      timing: pre_trade_intended_post_fill
+    inputs: [pool_nav, notional_traded_this_session, intended_notional]
+    action: DENY
+    on_missing_input: DENY
+
+  # ---- Data quality and fail-closed gates ---------------------------------
+  - id: DATA-001
+    description: "Market data older than its staleness policy blocks the decision."
+    authority: "[CONST-6]"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: 600
+    comparison: lte
+    measurement:
+      basis: seconds_since_as_of
+      window: point_in_time
+      timing: pre_trade
+    inputs: [data_as_of, evaluation_time]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Stale-bar CRITICAL at 600 s (P0.3 §15.1), measured on wall clock since the
+      LAST RECEIVED MESSAGE for that symbol, not derived from bar-window
+      arithmetic. SUSPENDED during a halt (RULE-B12c) — a routine halt raising a
+      false CRITICAL would block new entries pool-wide, which is a self-inflicted
+      outage.
+
+  - id: DATA-002
+    description: "A non-final bar may not feed a signal."
+    authority: "P0.1 §6"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: eq
+    allowed_values: [true]
+    measurement:
+      basis: bar_is_final
+      window: point_in_time
+      timing: pre_trade
+    inputs: [bar_is_final]
+    action: DENY
+    on_missing_input: DENY
+    notes: "This is what makes 'ATR(14) excludes today's partial bar' enforceable."
+
+  - id: DATA-003
+    description: "An order price must be an exact multiple of the effective tick."
+    authority: "rule N10"
+    scope: instrument
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: multiple_of
+    measurement:
+      basis: tick_size_for_market_symbol_date
+      window: point_in_time
+      timing: pre_trade
+    inputs: [order_limit_price, tick_size_for_market_symbol_date]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      REJECTED locally, never rounded silently. Silent rounding moves a price the
+      strategy chose in a direction nobody decided, and the audit trail then
+      records a price the decision engine never produced. A missing regime row is
+      DENY — never a default of 0.01.
+
+  - id: FX-001
+    description: "A missing FX rate blocks new entries in BOTH pools."
+    authority: "ADR-15 §5, invariant I10"
+    scope: global
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: exists
+    measurement:
+      basis: fx_rate_for_accounting_date
+      window: point_in_time
+      timing: pre_trade
+    inputs: [fx_rate_for_accounting_date]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Never carried forward, never interpolated, never defaulted. Blocks BOTH
+      pools, not just the foreign one: without a rate no consolidated NAV exists,
+      so LOSS-004 cannot be evaluated at all.
+
+  - id: RECON-001
+    description: "An UNRECONCILED position denies all new entries across its entire pool."
+    authority: "ADR-10 §2"
+    scope: pool
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0
+    comparison: eq
+    measurement:
+      basis: unreconciled_position_count
+      window: point_in_time
+      timing: pre_trade
+    inputs: [unreconciled_position_count]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      POOL scope, not instrument scope. While any position is unreconciled the
+      risk engine treats it as full-size risk. The broker is the system of record;
+      on disagreement the broker wins for quantity and the discrepancy is
+      escalated, never silently corrected.
+
+  - id: REGIME-001
+    description: "An UNKNOWN regime permits no new entries."
+    authority: "[DEFAULT-7] of SPEC-P1.1, [CONST-6]"
+    scope: market
+    mode: enforce
+    severity: HIGH
+    threshold: null
+    comparison: not_in
+    disallowed_values: [UNKNOWN]
+    measurement:
+      basis: regime_label
+      window: session
+      timing: pre_trade
+    inputs: [regime_label]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      A regime the classifier cannot determine does not become SIDEWAYS by
+      default. Exits are unaffected.
+
+  # ---- Kill switch ---------------------------------------------------------
+  - id: KILL-001
+    description: "No order may be placed while the kill switch is not ARMED."
+    authority: "[CONST-7], invariant I3"
+    scope: global
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: in
+    allowed_values: [ARMED]
+    measurement:
+      basis: kill_switch_state
+      window: point_in_time
+      timing: pre_trade
+    inputs: [kill_switch_state]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      On boot the state is TRIPPED unconditionally, so this rule denies everything
+      until a human re-enables (ADR-09 row 1 — no SLA, no auto-expiry). Liquidation
+      orders are exempt via KILL-002.
+
+  - id: KILL-002
+    description: "Kill-switch liquidation is exempt from settlement and day-trade counters."
+    authority: "ADR-13 Chain D"
+    scope: global
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: eq
+    measurement:
+      basis: is_kill_switch_liquidation
+      window: point_in_time
+      timing: pre_trade
+    inputs: [is_kill_switch_liquidation]
+    action: ALLOW
+    exempts: [CASH-001, CASH-002, KILL-001, HOLD-001, TURN-001, TURN-002, EXEC-001]
+    on_missing_input: DENY
+    notes: >-
+      A PDT flag or a good-faith violation is a 90-day inconvenience; an
+      uncontrolled drawdown is permanent. The exemption is deliberate, documented
+      and alerted on. It does NOT exempt EXP-*, LOSS-* or INST-001, because
+      liquidation only ever REDUCES exposure and those rules cannot bind against a
+      reduction.
+
+  # ---- Audit ---------------------------------------------------------------
+  - id: AUDIT-001
+    description: "No action takes effect without a successful prior audit write."
+    authority: "[CONST-5]"
+    scope: global
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: exists
+    measurement:
+      basis: audit_event_id
+      window: point_in_time
+      timing: pre_trade
+    inputs: [audit_event_id]
+    action: DENY
+    on_missing_input: DENY
+
+  - id: AUDIT-002
+    description: "A broken or forked audit hash chain is a hard stop."
+    authority: "ADR-10 §5"
+    scope: global
+    mode: enforce
+    severity: CRITICAL
+    threshold: 0
+    comparison: eq
+    measurement:
+      basis: audit_chain_breaks
+      window: point_in_time
+      timing: on_boot
+    inputs: [audit_chain_breaks]
+    action: KILL
+    kill_scope: GLOBAL
+    on_missing_input: KILL
+    notes: "No trading resumes; the break is investigated as an integrity incident."
+
+  # ---- LLM boundary --------------------------------------------------------
+  - id: LLM-001
+    description: "The LLM never receives portfolio state."
+    authority: "[DEFAULT-7] of P0.1 — IMMUTABLE"
+    scope: global
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: eq
+    allowed_values: [false]
+    measurement:
+      basis: llm_prompt_contains_portfolio_state
+      window: point_in_time
+      timing: pre_llm_call
+    inputs: [llm_prompt_contains_portfolio_state]
+    action: DENY
+    on_missing_input: DENY
+    notes: >-
+      Caps the blast radius of a successful prompt injection at one candidate's
+      thesis. No NAV, cash, position, P&L or limit reaches a prompt.
+
+  - id: LLM-002
+    description: "All external content reaching an LLM must be sanitiser-tagged untrusted DATA."
+    authority: "[CONST-4], rule N14"
+    scope: global
+    mode: enforce
+    severity: CRITICAL
+    threshold: null
+    comparison: exists
+    measurement:
+      basis: sanitiser_version
+      window: point_in_time
+      timing: pre_llm_call
+    inputs: [sanitiser_version, content_is_sanitised]
+    action: DENY
+    on_missing_input: DENY
+
+  - id: LLM-003
+    description: "The live LLM path uses the STANDARD tier, never BATCH."
+    authority: "AD-5 — until M-10 closes"
+    scope: global
+    mode: enforce
+    severity: HIGH
+    threshold: null
+    comparison: in
+    allowed_values: [STANDARD]
+    measurement:
+      basis: llm_tier
+      window: point_in_time
+      timing: pre_llm_call
+    inputs: [llm_tier, is_replay_job]
+    action: DENY
+    on_missing_input: DENY
