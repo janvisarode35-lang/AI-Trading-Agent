@@ -970,15 +970,46 @@ WITH NO DATA;
 
 -- Consumer: P0.3 §9.4's audit-volume line and measurement-by-design Q15
 -- ("audit-event rate and row width, after 20 live sessions").
+--
+-- X2 finding B-4. This used pg_column_size(payload), which is STABLE, not IMMUTABLE,
+-- and TimescaleDB warned: "using non-immutable functions in continuous aggregate view
+-- may lead to inconsistent results on rematerialization" (once per occurrence).
+--
+-- pg_column_size reports the STORED size, so the same logical payload measures
+-- differently depending on the column's TOAST compression. Measured on this pinned
+-- environment with one identical 40 KB jsonb value:
+--     lz4 column 192 B | pglz column 487 B | uncompressed literal 40,020 B
+-- Storage representation is not a function of the value, which is exactly why the
+-- planner refuses to call it immutable.
+--
+-- Routine refresh is safe today because audit_log rows are immutable (§9.2 triggers),
+-- so nothing rewrites them and recomputation is stable -- verified. The exposure is a
+-- change of storage representation: a pg_dump/restore into a cluster with a different
+-- default_toast_compression, an ALTER COLUMN ... SET COMPRESSION, or a VACUUM FULL.
+-- Any of those re-TOASTs the rows, and this cagg's refresh policy reaches back
+-- start_offset => 35 days, so already-materialised buckets would be silently rewritten
+-- with different byte counts than they originally reported. For a DR restore -- which
+-- P0.1 config.dr puts in scope -- that is a live path.
+--
+-- octet_length(payload::text) is IMMUTABLE (jsonb_out IMMUTABLE, octet_length(text)
+-- IMMUTABLE) and depends only on the value. It is also the quantity Q15 actually wants:
+-- P0.3 §9.4 models 37.8 GB uncompressed against a ~1,000 B assumption and derives the
+-- 9.45 GB compressed figure separately, so the measurement must be the UNCOMPRESSED
+-- logical size. On 200 real ~1 KB probe rows: octet_length 1002.16 vs pg_column_size
+-- 1043.00 -- the immutable form is also the closer answer to the assumption under test.
+--
+-- Still payload-only: the other 14 columns of the row are excluded. That understatement
+-- is unchanged by this fix and is recorded as a separate finding, not silently altered
+-- here.
 CREATE MATERIALIZED VIEW trading.cagg_audit_events_daily
     WITH (timescaledb.continuous, timescaledb.materialized_only = true) AS
 SELECT extensions.time_bucket(INTERVAL '1 day', occurred_at) AS bucket,
        event_class,
        is_paper,
        is_backtest,
-       count(*)                                   AS event_count,
-       sum(pg_column_size(payload))::bigint       AS payload_bytes,
-       avg(pg_column_size(payload))::numeric(12,2) AS mean_payload_bytes
+       count(*)                                        AS event_count,
+       sum(octet_length(payload::text))::bigint        AS payload_bytes,
+       avg(octet_length(payload::text))::numeric(12,2) AS mean_payload_bytes
   FROM trading.audit_log
  GROUP BY bucket, event_class, is_paper, is_backtest
 WITH NO DATA;
