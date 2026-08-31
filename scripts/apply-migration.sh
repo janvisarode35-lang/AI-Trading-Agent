@@ -53,9 +53,23 @@ log "$SERVICE is healthy"
 #    The database is recreated on every run so "does this migration apply?" is always
 #    answered against a pristine database. This drops $DB and nothing else.
 # ---------------------------------------------------------------------------
-log "recreating database '$DB' from template0"
+#    B-3. 0001 also creates FOUR CLUSTER-SCOPED roles (trading_owner, app_rw, backtest_ro,
+#    metrics_ro). Dropping the database does not drop those, so a second run of this script
+#    against a persistent volume died at 0001_initial.sql:14 with
+#    'role "trading_owner" already exists' (psql exit 3).
+#
+#    That is NOT a defect in the migration. SPEC-P1.2 §6 says 0001 "runs as a superuser
+#    once" and §11 puts application under Alembic, which applies each revision exactly
+#    once. 0001 is deliberately not idempotent, and adding IF NOT EXISTS guards would mask
+#    a real misconfiguration (0001 run against a cluster that already has these roles).
+#    The harness is what must reset, because it re-runs a once-only revision on purpose.
+#
+#    Roles are dropped AFTER the database, so they own nothing by the time they are
+#    dropped. Order within the DROP ROLE is irrelevant; none of them owns another.
+log "recreating database '$DB' and its cluster-scoped roles"
 docker compose exec -T "$SERVICE" psql -v ON_ERROR_STOP=1 -U "$USER" -d "$MAINT_DB" \
     -c "DROP DATABASE IF EXISTS $DB WITH (FORCE);" \
+    -c "DROP ROLE IF EXISTS app_rw, backtest_ro, metrics_ro, trading_owner;" \
     -c "CREATE DATABASE $DB TEMPLATE template0;" >/dev/null \
     || fail "could not provision database '$DB'"
 
