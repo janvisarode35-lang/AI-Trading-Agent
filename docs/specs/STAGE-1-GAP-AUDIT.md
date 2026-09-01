@@ -48,22 +48,31 @@ result in the audit.
 
 ### 1.2 Measured test coverage — the weakest result
 
-| Module | Lines executed | Coverage | Public functions never executed |
-|---|---|---|---|
-| `src/domain/models.py` | 1342 / 2144 | **62.6%** | **14 / 60** |
-| `src/audit/events.py` | 423 / 509 | **83.1%** | 1 / 11 |
-| `src/audit/chain.py` | 225 / 366 | **61.5%** | 2 / 14 |
-| `src/config/loader.py` | 539 / 814 | **66.2%** | 2 / 20 |
+Measured at the time of the audit, and again after conditions 1, 2 and 6 were closed (§5.1).
+
+| Module | Coverage (audit → after) | Public functions never executed (audit → after) |
+|---|---|---|
+| `src/domain/models.py` | 62.6% → **64.0%** | **14 / 60** → **3 / 60** |
+| `src/audit/events.py` | 83.1% → 83.1% | 1 / 11 → 1 / 11 |
+| `src/audit/chain.py` | 61.5% → 61.5% | 2 / 14 → 2 / 14 |
+| `src/config/loader.py` | 66.2% → **67.0%** | 2 / 20 → **0 / 20** |
 
 The line-coverage denominator counts every non-blank non-comment line, including docstring
-bodies, so true statement coverage is somewhat higher than shown. The **function** column is
-exact: a function counts as exercised only if at least one line in its body ran.
+bodies, so true statement coverage is somewhat higher than shown, and it moves little here
+because the closed functions are short. The **function** column is the one that matters and it is
+exact — a function counts as exercised only if at least one line in its body ran. It moves from
+**19 unexercised to 6**.
 
 ---
 
 ## 2. Silent gaps
 
 ### 2.1 GAP-1 — nineteen public functions are specified, implemented, and never executed
+
+> **UPDATE 2026-08-31: thirteen of the nineteen are now covered.** Conditions 1, 2 and 6 were
+> closed by `tests/verify_p11_x5_conditions.py`; the count stands at **6**. See §5.1. The table
+> below is the audit as first taken, kept intact so the closure has something to be measured
+> against. Rows still open are marked ▸.
 
 X5 requires three ticks. These have two. They are not obscure helpers; they cluster on
 exposure, valuation, kill-switch gating and change authorisation.
@@ -78,38 +87,47 @@ exposure, valuation, kill-switch gating and change authorisation.
 | `permits_new_entries` | models.py:2674 | Regime gating | Fail-closed on `RegimeLabel.UNKNOWN` |
 | `has_unreconciled` | models.py:2449 | Reconciliation state | Whether an unreconciled position blocks trading |
 | `open_positions` | models.py:2446 | Portfolio enumeration | Input to sector and count limits |
-| `settlement_date_for` | models.py:1226 | Settlement date | Tied to **Q-P1.1-1**, which blocks P2.9 |
-| `resolve_symbol` | models.py:1357 | Symbol resolution | Ticker changes, corporate actions |
-| `feature_timestamp` | models.py:1594 | Feature timing | **Look-ahead bias surface** |
+| ▸ `settlement_date_for` | models.py:1226 | Settlement date | Tied to **Q-P1.1-1**, which blocks P2.9 |
+| ▸ `resolve_symbol` | models.py:1357 | Symbol resolution | Ticker changes, corporate actions |
+| ▸ `feature_timestamp` | models.py:1594 | Feature timing | **Look-ahead bias surface** |
 | `remaining` / `is_complete` | models.py:2150/2153 | Order completion | The dust-remainder rule at SPEC-P1.1 §267 |
 | `dedupe_key` | models.py:2192 | Fill dedupe | Brokers re-send fills on reconnect (P1.2 §901) |
-| `is_effectful` | events.py:697 | Effectful-event classification | Drives **write-before-act** (invariant 5) |
-| `link` / `to_payload` | chain.py:71/194 | Chain linking | Audit chain construction |
+| ▸ `is_effectful` | events.py:697 | Effectful-event classification | Drives **write-before-act** (invariant 5) |
+| ▸ `link` / `to_payload` | chain.py:71/194 | Chain linking | Audit chain construction |
 | `loosens` | loader.py:615 | Whether a change **loosens** a limit | Triggers the **two-person rule** (§5.3) |
 | `assert_no_env_risk_reads` | loader.py:1040 | Risk-numbers-from-env lint | Block A: risk numbers are never set by the AI |
 
 `lint_no_env_risk_reads` (the inner function) *is* tested; its raising wrapper is not.
 
-**Blunt reading:** the audit trail and the policy DSL are well tested. The **portfolio and
-exposure layer is not**. Every function that computes a number the risk engine will compare
-against a constitutional limit is currently unexercised.
+**Blunt reading, as first taken:** the audit trail and the policy DSL are well tested. The
+**portfolio and exposure layer is not**. Every function that computes a number the risk engine
+will compare against a constitutional limit is currently unexercised.
+
+**As of 2026-08-31 that sentence no longer holds** — the exposure, valuation and gating cluster
+is covered (§5.1). What remains unexercised is settlement, symbol resolution, feature timing and
+two audit-chain helpers.
 
 ### 2.2 Areas X5 names explicitly — checked individually
 
 | Area | Spec | Code | Test | Verdict |
 |---|---|---|---|---|
 | Timezone / DST / half-day | ✓ P1.1, P1.2 | ✓ `_require_utc` rejects naive | ✓ `verify_p11_invariants` | **OK** |
-| Corporate actions | ✓ | ✓ `CorporateAction`, `successor_link` | ✓ | OK, but `resolve_symbol` untested (GAP-1) |
+| Corporate actions | ✓ | ✓ `CorporateAction`, `successor_link` | ✓ | OK, but `resolve_symbol` still untested (GAP-1 ▸) |
 | Halts | ✓ P1.1, P1.2, P1.3 | ✓ `InstrumentStatus.HALTED`, `POOL_HALTED` | ✓ kill-switch transitions tested | **OK** |
-| Partial fills | ✓ P1.1 §267 dust rule | ✓ `PARTIALLY_FILLED` + state machine | ~ `t_f1_basis_after_partial_consumption` | **PARTIAL** — the dust rule itself (`is_complete`) is untested |
+| Partial fills | ✓ P1.1 §267 dust rule | ✓ `PARTIALLY_FILLED` + state machine | ✓ `t_c1_order_remaining_and_dust_completion` | **OK as of 2026-08-31** — the dust rule and its strict `<` boundary are now tested |
 | Restarts / recovery | ✓ | ✓ `recover_incomplete_intents` | ✓ `verify_p14_audit` | **OK** |
 | Second market (India) | ✓ | ✓ `universe.IN` fully parameterised, `IN_POOL`, INR | ✓ | **OK** — no US-only leakage found |
 
 ### 2.3 GAP-2 — `-O` makes the harness vacuous (carried as B-5)
 
-Every Python harness except one test uses bare `assert`. Under `python -O` those are stripped,
-so the reported "PASSED 42 / 39 / 36" in optimised mode verifies almost nothing. Only
-`t_m2_allocate_postcondition_survives_dash_O` uses explicit raises.
+Every Python harness except one uses bare `assert`. Under `python -O` those are stripped, so the
+reported "PASSED 42 / 39 / 36" in optimised mode verifies almost nothing.
+
+**Partially addressed 2026-08-31.** `tests/verify_p11_x5_conditions.py` contains zero bare
+`assert` statements — it uses a `require()` helper that raises unconditionally — and is the
+conversion pattern for the rest. Verified by sabotage: inverting `blocks_new_entries` to return
+`False` and running under `-O` produced 2 FAILED, exit 1. The other five harnesses still cannot
+detect that, so condition 5 remains **PARTIAL**.
 
 ### 2.4 GAP-3 — `Q-P1.2-6`'s five runtime assertions remain untested
 
@@ -161,21 +179,59 @@ domain model and storage schema, and it does not consume any of the untested exp
 
 Conditions, each tied to the phase it gates:
 
-| # | Condition | Gates | Severity |
-|---|---|---|---|
-| **1** | Test the exposure/valuation cluster — `gross_notional`, `market_value`, `quantity`, `fifo_lots`, `open_positions` | **P2.8, P2.9** | **BLOCKER for P2.9** |
-| **2** | Test the kill-switch and regime gates — `blocks_new_entries`, `permits_new_entries`, `has_unreconciled` | **P2.10** | **BLOCKER for P2.10** |
-| **3** | Close Q-P1.1-1 (US settlement/good-faith) and test `settlement_date_for` | **P2.9** | BLOCKER for P2.9 |
-| **4** | Close Q-P1.1-6 | **P2.2** | BLOCKER for P2.2 |
-| **5** | Convert the harnesses off bare `assert` (B-5 / GAP-2) | all | HIGH — currently `-O` runs prove almost nothing |
-| **6** | Test `loosens` and `assert_no_env_risk_reads` | P6.2, any limit change | HIGH — two-person rule and the risk-from-env lint are unexercised |
-| **7** | Close Q-P1.2-6's five runtime assertions | P6.4 | MEDIUM |
-| **8** | Resolve C-1, C-2, C-5 | — | LOW, documentary |
+| # | Condition | Gates | Severity | State |
+|---|---|---|---|---|
+| **1** | Test the exposure/valuation cluster — `gross_notional`, `market_value`, `quantity`, `fifo_lots`, `open_positions` | **P2.8, P2.9** | BLOCKER for P2.9 | **CLOSED 2026-08-31** |
+| **2** | Test the kill-switch and regime gates — `blocks_new_entries`, `permits_new_entries`, `has_unreconciled` | **P2.10** | BLOCKER for P2.10 | **CLOSED 2026-08-31** |
+| **3** | Close Q-P1.1-1 (US settlement/good-faith) and test `settlement_date_for` | **P2.9** | BLOCKER for P2.9 | **OPEN** — blocked on an external fact, not on effort |
+| **4** | Close Q-P1.1-6 | **P2.2** | BLOCKER for P2.2 | **OPEN** |
+| **5** | Convert the harnesses off bare `assert` (B-5 / GAP-2) | all | HIGH | **PARTIAL** — the new harness is `-O`-immune and is the conversion pattern; the other five are not converted |
+| **6** | Test `loosens` and `assert_no_env_risk_reads` | P6.2, any limit change | HIGH | **CLOSED 2026-08-31** |
+| **7** | Close Q-P1.2-6's five runtime assertions | P6.4 | MEDIUM | OPEN |
+| **8** | Resolve C-1, C-2, C-5 | — | LOW, documentary | OPEN |
 
-**Why not GO:** conditions 1, 2 and 6 mean the code that computes the numbers the risk engine
-compares against constitutional limits has never been run by a test. Block A invariant 1 makes
-the risk engine the thing that overrides every AI output; its inputs being unexercised is not
-acceptable at P2.9.
+### 5.1 Closure record — conditions 1, 2 and 6
+
+Closed by `tests/verify_p11_x5_conditions.py` (12 tests). Re-measured with the same tracer:
+
+| Module | Never-executed public functions, before → after |
+|---|---|
+| `src/domain/models.py` | 14 / 60 → **3 / 60** |
+| `src/config/loader.py` | 2 / 20 → **0 / 20** |
+| `src/audit/events.py` | 1 / 11 → 1 / 11 (condition 3+) |
+| `src/audit/chain.py` | 2 / 14 → 2 / 14 (condition 3+) |
+| **Total** | **19 → 6** |
+
+Line coverage: `models.py` 62.6% → 64.0%, `loader.py` 66.2% → 67.0%.
+
+The six that remain are outside conditions 1/2/6: `settlement_date_for` (condition 3, blocked on
+Q-P1.1-1 — an unresolved external fact, not an effort problem), `resolve_symbol`,
+`feature_timestamp`, `is_effectful`, `link`, `to_payload`.
+
+**The new harness contains zero bare `assert` statements.** Verified by sabotage: inverting
+`blocks_new_entries` to return `False` and running under `python -O` produced 2 FAILED, exit 1.
+The other five harnesses cannot do that — which is why condition 5 stays PARTIAL rather than
+closed.
+
+Two facts the closure surfaced, both recorded in the tests rather than papered over:
+
+- `Quantity` truncates (**ROUND_DOWN**) at 6 dp — `99.9999996` stores as `99.999999`. The first
+  version of the dust test expected half-up and failed. The code is right: rounding a share count
+  up would claim shares the account does not hold.
+- `LimitChange.loosens` deliberately raises `NotImplementedError`. Direction is judged against the
+  rule's comparison — raising a threshold loosens an `lte` rule and *tightens* a `gte` rule — so
+  the bare property refuses to guess. Guessing backwards would let a limit be relaxed down the
+  tightening path, which needs no approval at all.
+
+**Why not GO** *(as first assessed, 2026-08-31)*: conditions 1, 2 and 6 meant the code that
+computes the numbers the risk engine compares against constitutional limits had never been run by
+a test. Block A invariant 1 makes the risk engine the thing that overrides every AI output; its
+inputs being unexercised is not acceptable at P2.9.
+
+**Those three are now CLOSED** (§5.1). The verdict stays **GO WITH CONDITIONS** because
+conditions 3, 4, 5, 7 and 8 remain — P2.2 still waits on Q-P1.1-6, and P2.9 still waits on
+Q-P1.1-1. What changed is that the blockers standing on *untested code* are gone; the ones that
+remain stand on *unanswered questions*, which no amount of testing closes.
 
 **Why not NO GO:** nothing is contradictory, no constitutional number is wrong, the schema
 executes, the audit chain provably detects tampering, and P2.1 touches none of the gaps.
