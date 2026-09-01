@@ -1,10 +1,11 @@
 ---
 id: SPEC-P1.1-DOMAIN
 version: 0.3
-status: DRAFT
+status: FROZEN
 phase: P1.1 — Domain Model & Type System
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, STAGE-0-FREEZE v1.1, master-research-summary.md]
 produces: [src/domain/models.py, src/domain/errors.py, type.Money, type.Price, type.Quantity, type.InstrumentId, type.TradingCalendar, enum.Market, enum.Exchange, enum.Currency, enum.InstrumentType, enum.InstrumentStatus, enum.AccountType, enum.PoolId, enum.CorporateActionType, enum.OrderState, enum.OrderSide, enum.OrderType, enum.TimeInForce, enum.PositionState, enum.KillSwitchState, enum.KillSwitchScope, enum.RiskDecision, enum.SignalDirection, enum.ScoreKind, enum.RegimeLabel, enum.CostBasisMethod, enum.SessionType, enum.RunType, enum.ApproverRole, enum.AuditEventClass, model.Instrument, model.SymbolMapping, model.SuccessorLink, model.ExchangeSession, model.Bar, model.Quote, model.Trade, model.FundamentalsSnapshot, model.CorporateAction, model.NewsItem, model.Candidate, model.Score, model.Signal, model.Thesis, model.InvalidationCondition, model.Decision, model.RiskVerdict, model.PositionSizeRequest, model.Order, model.Fill, model.Lot, model.Position, model.Portfolio, model.NAV, model.Account, model.Regime, model.KillSwitch, model.AuditEvent, model.RunContext, model.StalenessPolicy]
+frozen_by: STAGE-1-FREEZE.md (2026-08-31)
 ---
 
 # SPEC-P1.1 — Domain Model & Type System

@@ -1,10 +1,11 @@
 ---
 id: SPEC-P1.3-CONFIG
 version: 0.1
-status: DRAFT
+status: FROZEN
 phase: P1.3 — Configuration & Policy DSL
 depends_on: [SPEC-P1.1-DOMAIN v0.2, SPEC-P1.2-STORAGE v0.1, SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, STAGE-0-FREEZE v1.1]
 produces: [config/policy.yaml, src/config/loader.py, class.PolicyLoader, class.PolicyGate, class.PolicyDocument, class.Rule, class.EffectiveConfig, class.PolicyVerdict, class.VaultRef, enum.RuleAction, enum.RuleMode, enum.RuleScope, enum.Comparison, enum.Severity, enum.KillScope, enum.Layer, fn.content_hash, fn.canonical_bytes, fn.verify_signature, fn.merge_layers, fn.assert_change_authorised, fn.lint_no_env_risk_reads, fn.infra_env, const.INFRA_ENV_ALLOWLIST, const.ACTION_PRECEDENCE, RULE-IDS EXP-001..LLM-003]
+frozen_by: STAGE-1-FREEZE.md (2026-08-31)
 ---
 
 # SPEC-P1.3 — Configuration & Policy DSL

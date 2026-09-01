@@ -1,10 +1,11 @@
 ---
 id: SPEC-P1.4-AUDIT
 version: 0.1
-status: DRAFT
+status: FROZEN
 phase: P1.4 — Audit Trail & Event Model
 depends_on: [SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.1, SPEC-P1.3-CONFIG v0.1, SPEC-P0.1-DECISIONS v0.3, SPEC-P0.3-BUDGET v0.5, STAGE-0-FREEZE v1.1]
 produces: [src/audit/events.py, src/audit/chain.py, fn.uuid7, fn.canonical_json, fn.canonical_bytes, class.AuditEnvelope, class.ReproducibilityBundle, class.EventSpec, enum.EventType, enum.Producer, const.EVENT_REGISTRY, const.EFFECTFUL_EVENT_TYPES, const.REPRODUCIBLE_EVENT_TYPES, fn.verify_chain, fn.assert_chain_intact, class.Anchor, fn.verify_against_anchor, fn.write_before_act, fn.recover_incomplete_intents, fn.replay_run, fn.export_for_regulator, const.CANONICAL_SCHEMA_VERSION]
+frozen_by: STAGE-1-FREEZE.md (2026-08-31)
 ---
 
 # SPEC-P1.4 — Audit Trail & Event Model
