@@ -15,6 +15,17 @@ sys.path.insert(0, str(ROOT / "src"))
 from audit import chain as K  # noqa: E402
 from audit import events as V  # noqa: E402
 
+
+def require(cond, msg=""):
+    """Unconditional check. Replaces bare `assert`, which `python -O` strips (X5 GAP-2).
+
+    Raises AssertionError so existing callers - check(), raises(), the runner's except
+    clause - behave exactly as they did when these were asserts.
+    """
+    if not cond:
+        raise AssertionError(msg)
+
+
 PASS, FAIL = [], []
 U0 = datetime(2026, 8, 27, 12, 0, tzinfo=timezone.utc)
 RUN = uuid4()
@@ -79,7 +90,7 @@ def t_AAA_mutated_row_fails_verification():
     """
     events = build_chain(12)
     clean = K.verify_chain(events, require_genesis=True, deep=True)
-    assert clean.intact, f"a freshly built chain must verify: {clean.breaks}"
+    require(clean.intact, f"a freshly built chain must verify: {clean.breaks}")
 
     # ---- 1. CONTENT MUTATION: edit a payload, leave every hash alone -------
     tampered = list(events)
@@ -88,10 +99,10 @@ def t_AAA_mutated_row_fails_verification():
         update={"payload": {**victim.payload, "row_count": "999999"}}
     )
     r = K.verify_chain(tampered, require_genesis=True, deep=True)
-    assert not r.intact, "a mutated payload MUST fail verification"
+    require(not r.intact, "a mutated payload MUST fail verification")
     kinds = {b.kind for b in r.breaks}
-    assert K.BreakKind.CONTENT_MUTATED in kinds, kinds
-    assert any(b.at_seq == 5 for b in r.breaks), "the break must name the mutated seq"
+    require(K.BreakKind.CONTENT_MUTATED in kinds, kinds)
+    require(any(b.at_seq == 5 for b in r.breaks), "the break must name the mutated seq")
     raises(K.ChainError, lambda: K.assert_chain_intact(r))
 
     # ---- 2. RE-HASHED MUTATION: edit the payload AND fix that row's hash ---
@@ -103,14 +114,14 @@ def t_AAA_mutated_row_fails_verification():
     t2 = list(events)
     t2[5] = fixed
     r2 = K.verify_chain(t2, require_genesis=True, deep=True)
-    assert not r2.intact, "a re-hashed mutation MUST still fail via linkage"
-    assert K.BreakKind.FORK in {b.kind for b in r2.breaks}, r2.breaks
+    require(not r2.intact, "a re-hashed mutation MUST still fail via linkage")
+    require(K.BreakKind.FORK in {b.kind for b in r2.breaks}, r2.breaks)
 
     # ---- 3. DELETION: remove a row entirely --------------------------------
     t3 = [e for e in events if e.seq != 7]
     r3 = K.verify_chain(t3, require_genesis=True, deep=True)
-    assert not r3.intact, "a deleted row MUST fail verification"
-    assert K.BreakKind.GAP in {b.kind for b in r3.breaks}, r3.breaks
+    require(not r3.intact, "a deleted row MUST fail verification")
+    require(K.BreakKind.GAP in {b.kind for b in r3.breaks}, r3.breaks)
 
     print("    [self-check] mutated / re-hashed / deleted rows all caught:")
     for label, res in (("mutated", r), ("re-hashed", r2), ("deleted", r3)):
@@ -141,12 +152,18 @@ def t_AAB_full_tail_rewrite_is_caught_only_by_the_anchor():
         rebuilt.append(nxt)
 
     internal = K.verify_chain(rebuilt, require_genesis=True, deep=True)
-    assert internal.intact, "a fully rewritten tail is internally consistent — that is the point"
+    require(
+        internal.intact,
+        "a fully rewritten tail is internally consistent — that is the point")
 
     breach = K.verify_against_anchor(rebuilt, anchor)
-    assert breach is not None, "the anchor MUST catch a full-tail rewrite"
-    assert breach.kind is K.BreakKind.ANCHOR_MISMATCH
-    assert K.verify_against_anchor(events, anchor) is None, "the honest chain must still match"
+    require(breach is not None, "the anchor MUST catch a full-tail rewrite")
+    require(
+        breach.kind is K.BreakKind.ANCHOR_MISMATCH,
+        'breach.kind is K.BreakKind.ANCHOR_MISMATCH')
+    require(
+        K.verify_against_anchor(events, anchor) is None,
+        "the honest chain must still match")
     print(f"    [self-check] full-tail rewrite passed internal verification, "
           f"caught by anchor: {breach.detail[:60]}...")
 
@@ -156,10 +173,14 @@ def t_AAB_full_tail_rewrite_is_caught_only_by_the_anchor():
 # =============================================================================
 def t_uuid7_is_version_7_and_time_ordered():
     ids = [V.uuid7() for _ in range(2000)]
-    assert all(u.version == 7 for u in ids)
-    assert all(u.variant == "specified in RFC 4122" for u in ids[:5])
-    assert [str(u) for u in ids] == sorted(str(u) for u in ids), "must sort in creation order"
-    assert len(set(ids)) == len(ids), "no collisions"
+    require(all(u.version == 7 for u in ids), 'all(u.version == 7 for u in ids)')
+    require(
+        all(u.variant == "specified in RFC 4122" for u in ids[:5]),
+        'all(u.variant == "specified in RFC 4122" for u in ids[:5])')
+    require(
+        [str(u) for u in ids] == sorted(str(u) for u in ids),
+        "must sort in creation order")
+    require(len(set(ids)) == len(ids), "no collisions")
 
 
 def t_uuid7_monotonic_across_threads():
@@ -173,12 +194,14 @@ def t_uuid7_monotonic_across_threads():
     ts = [threading.Thread(target=w) for _ in range(8)]
     [t.start() for t in ts]
     [t.join() for t in ts]
-    assert len(set(out)) == len(out), "concurrent minting must not collide"
+    require(len(set(out)) == len(out), "concurrent minting must not collide")
 
 
 def t_uuid7_timestamp_recoverable():
     u = V.uuid7(now_ms=1_800_000_000_000)
-    assert V.uuid7_timestamp_ms(u) == 1_800_000_000_000
+    require(
+        V.uuid7_timestamp_ms(u) == 1_800_000_000_000,
+        'V.uuid7_timestamp_ms(u) == 1_800_000_000_000')
     raises(ValueError, lambda: V.uuid7_timestamp_ms(uuid4()))
 
 
@@ -188,7 +211,9 @@ def t_uuid7_timestamp_recoverable():
 def t_canonical_is_key_order_independent():
     a = V.canonical_json({"b": "2", "a": "1", "c": {"z": "9", "y": "8"}})
     b = V.canonical_json({"c": {"y": "8", "z": "9"}, "a": "1", "b": "2"})
-    assert a == b == '{"a":"1","b":"2","c":{"y":"8","z":"9"}}'
+    require(
+        a == b == '{"a":"1","b":"2","c":{"y":"8","z":"9"}}',
+        'a == b == \'{"a":"1","b":"2","c":{"y":"8","z":"9"}}\'')
 
 
 def t_canonical_rejects_json_numbers():
@@ -200,8 +225,12 @@ def t_canonical_rejects_json_numbers():
 
 
 def t_canonical_is_stable_and_utf8():
-    assert V.canonical_bytes({"k": "café"}) == '{"k":"café"}'.encode("utf-8")
-    assert V.canonical_json({"k": "x"}) == V.canonical_json({"k": "x"})
+    require(
+        V.canonical_bytes({"k": "café"}) == '{"k":"café"}'.encode("utf-8"),
+        'V.canonical_bytes({"k": "café"}) == \'{"k":"café"}\'.encode("utf-8")')
+    require(
+        V.canonical_json({"k": "x"}) == V.canonical_json({"k": "x"}),
+        'V.canonical_json({"k": "x"}) == V.canonical_json({"k": "x"})')
 
 
 # =============================================================================
@@ -218,15 +247,15 @@ def t_taxonomy_covers_every_required_event():
         "KILL_SWITCH_TRIPPED", "KILL_SWITCH_RESET", "CONFIG_CHANGED", "MODEL_DEPLOYED",
     ]
     have = {e.value for e in V.EventType}
-    assert set(required) <= have, f"missing: {sorted(set(required) - have)}"
+    require(set(required) <= have, f"missing: {sorted(set(required) - have)}")
 
 
 def t_every_event_type_has_a_complete_spec():
     for t in V.EventType:
         s = V.EVENT_REGISTRY.get(t)
-        assert s is not None, f"{t.value} has no registry entry"
-        assert s.producer and s.trigger and s.required_payload_keys, t.value
-        assert len(s.trigger) >= 10, t.value
+        require(s is not None, f"{t.value} has no registry entry")
+        require(s.producer and s.trigger and s.required_payload_keys, t.value)
+        require(len(s.trigger) >= 10, t.value)
 
 
 def t_effectful_events_are_the_ones_const5_governs():
@@ -234,16 +263,18 @@ def t_effectful_events_are_the_ones_const5_governs():
     for t in (V.EventType.ORDER_INTENT, V.EventType.ORDER_SENT, V.EventType.FILL_RECEIVED,
               V.EventType.DECISION_MADE, V.EventType.KILL_SWITCH_TRIPPED,
               V.EventType.CONFIG_CHANGED, V.EventType.MODEL_DEPLOYED):
-        assert t in eff, t.value
+        require(t in eff, t.value)
     # a pure observation is not effectful
-    assert V.EventType.CANDIDATE_SCREENED not in eff
-    assert V.EventType.GATE_CLOSED not in eff
+    require(
+        V.EventType.CANDIDATE_SCREENED not in eff,
+        'V.EventType.CANDIDATE_SCREENED not in eff')
+    require(V.EventType.GATE_CLOSED not in eff, 'V.EventType.GATE_CLOSED not in eff')
 
 
 def t_model_and_llm_events_require_reproducibility():
     for t in (V.EventType.SCORE_COMPUTED, V.EventType.LLM_CALLED,
               V.EventType.DECISION_MADE, V.EventType.RISK_EVALUATED):
-        assert t in V.REPRODUCIBLE_EVENT_TYPES, t.value
+        require(t in V.REPRODUCIBLE_EVENT_TYPES, t.value)
 
 
 def t_registry_class_is_authoritative():
@@ -275,9 +306,15 @@ def t_reproducible_event_without_bundle_is_rejected():
 
 
 def t_promotion_to_action_class():
-    assert V.promote_to_action(V.EventClass.EVALUATION, True) is V.EventClass.ACTION
-    assert V.promote_to_action(V.EventClass.EVALUATION, False) is V.EventClass.EVALUATION
-    assert V.promote_to_action(V.EventClass.ACTION, True) is V.EventClass.ACTION
+    require(
+        V.promote_to_action(V.EventClass.EVALUATION, True) is V.EventClass.ACTION,
+        'V.promote_to_action(V.EventClass.EVALUATION, True) is V.EventClass.ACTION')
+    require(
+        V.promote_to_action(V.EventClass.EVALUATION, False) is V.EventClass.EVALUATION,
+        'V.promote_to_action(V.EventClass.EVALUATION, False) is V.EventClass.EVALUATION')
+    require(
+        V.promote_to_action(V.EventClass.ACTION, True) is V.EventClass.ACTION,
+        'V.promote_to_action(V.EventClass.ACTION, True) is V.EventClass.ACTION')
 
 
 # =============================================================================
@@ -301,7 +338,9 @@ def t_paper_xor_backtest():
 
 def t_genesis_rules():
     e = build_chain(1)[0]
-    assert e.seq == 0 and e.prev_hash == V.GENESIS_HASH
+    require(
+        e.seq == 0 and e.prev_hash == V.GENESIS_HASH,
+        'e.seq == 0 and e.prev_hash == V.GENESIS_HASH')
     raises(Exception, lambda: V.AuditEnvelope.model_validate(
         e.model_dump() | {"seq": 3}))          # seq>0 with the genesis hash
 
@@ -315,14 +354,14 @@ def t_hash_preimage_order_is_explicit_not_field_order():
     # matters is the exact KEY SET, which is pinned.
     import json
     keys = set(json.loads(pre))
-    assert keys == {
+    require(keys == {
         "canonical_schema", "schema_version", "seq", "prev_hash", "event_id",
         "causation_id", "run_id", "event_type", "event_class", "occurred_at",
         "actor", "is_paper", "is_backtest", "input_hash", "payload",
-    }, sorted(keys)
+    }, sorted(keys))
     # recorded_at is deliberately NOT hashed: it is when we wrote it down, not what
     # happened, and a replayed write would otherwise never reproduce the hash.
-    assert "recorded_at" not in keys
+    require("recorded_at" not in keys, '"recorded_at" not in keys')
 
 
 def t_causation_chain_is_walkable():
@@ -332,7 +371,7 @@ def t_causation_chain_is_walkable():
     while cur.causation_id is not None:
         cur = by_id[cur.causation_id]
         depth += 1
-    assert depth == 5 and cur.seq == 0
+    require(depth == 5 and cur.seq == 0, 'depth == 5 and cur.seq == 0')
 
 
 def t_event_cannot_cause_itself():
@@ -347,28 +386,33 @@ def t_event_cannot_cause_itself():
 def t_slice_verification_is_first_class():
     events = build_chain(20)
     r = K.verify_chain(events[5:12], expected_prev_hash=events[4].payload_hash)
-    assert r.intact, r.breaks
+    require(r.intact, r.breaks)
     bad = K.verify_chain(events[5:12], expected_prev_hash="f" * 64)
-    assert not bad.intact and K.BreakKind.FORK in {b.kind for b in bad.breaks}
+    require(
+        not bad.intact and K.BreakKind.FORK in {b.kind for b in bad.breaks},
+        'not bad.intact and K.BreakKind.FORK in {b.kind for b in bad.breaks}')
 
 
 def t_duplicate_seq_detected():
     events = build_chain(5)
     r = K.verify_chain([*events, events[2]])
-    assert K.BreakKind.DUPLICATE_SEQ in {b.kind for b in r.breaks}
+    require(
+        K.BreakKind.DUPLICATE_SEQ in {b.kind for b in r.breaks},
+        'K.BreakKind.DUPLICATE_SEQ in {b.kind for b in r.breaks}')
 
 
 def t_shallow_scan_misses_content_mutation_by_design():
     events = build_chain(8)
     t = list(events)
     t[3] = t[3].model_copy(update={"payload": {**t[3].payload, "row_count": "0"}})
-    assert not K.verify_chain(t, deep=True).intact
-    assert K.verify_chain(t, deep=False).intact, \
-        "deep=False is documented as structural-only; if this ever fails, the doc is wrong"
+    require(not K.verify_chain(t, deep=True).intact, 'not K.verify_chain(t, deep=True).intact')
+    require(
+        K.verify_chain(t, deep=False).intact,
+        "deep=False is documented as structural-only; if this ever fails, the doc is wrong")
 
 
 def t_empty_chain_is_vacuously_intact():
-    assert K.verify_chain([]).intact
+    require(K.verify_chain([]).intact, 'K.verify_chain([]).intact')
 
 
 # =============================================================================
@@ -378,8 +422,8 @@ def t_verification_cost_at_10m_events():
     eps, secs = K.benchmark_verification(build_chain, n=8000)
     print(f"    [cost] deep verification: {eps:,.0f} events/s -> "
           f"10M events in {secs/60:.1f} min ({secs:.0f} s)")
-    assert eps > 1000, f"only {eps:.0f} events/s — too slow to audit annually"
-    assert secs < 6 * 3600, f"10M events would take {secs/3600:.1f} h"
+    require(eps > 1000, f"only {eps:.0f} events/s — too slow to audit annually")
+    require(secs < 6 * 3600, f"10M events would take {secs/3600:.1f} h")
 
 
 # =============================================================================
@@ -400,7 +444,7 @@ def t_audit_failure_means_the_action_does_not_happen():
         write_intent=boom,
         perform_effect=lambda i: effects.append("SENT"),
         write_outcome=lambda i, e: None))
-    assert effects == [], "[CONST-5]: no audit write means NO SIDE EFFECT"
+    require(effects == [], "[CONST-5]: no audit write means NO SIDE EFFECT")
 
 
 def t_death_between_effect_and_outcome_is_reconcilable_not_lost():
@@ -408,8 +452,10 @@ def t_death_between_effect_and_outcome_is_reconcilable_not_lost():
         write_intent=_intent,
         perform_effect=lambda i: "broker-ack",
         write_outcome=lambda i, e: (_ for _ in ()).throw(RuntimeError("process died")))
-    assert outcome is K.ActOutcome.UNKNOWN_NEEDS_RECONCILE
-    assert intent.idempotency_key == "cli-1"
+    require(
+        outcome is K.ActOutcome.UNKNOWN_NEEDS_RECONCILE,
+        'outcome is K.ActOutcome.UNKNOWN_NEEDS_RECONCILE')
+    require(intent.idempotency_key == "cli-1", 'intent.idempotency_key == "cli-1"')
 
 
 def t_recovery_is_idempotent_and_covers_all_three_answers():
@@ -425,22 +471,24 @@ def t_recovery_is_idempotent_and_covers_all_three_answers():
         return None
 
     a1 = K.recover_incomplete_intents(intents, outcomes, broker)
-    assert [k for _, k in a1] == ["RECORD_OUTCOME", "ABANDONED"], a1
+    require([k for _, k in a1] == ["RECORD_OUTCOME", "ABANDONED"], a1)
     a2 = K.recover_incomplete_intents(intents, outcomes, broker)
-    assert [k for _, k in a1] == [k for _, k in a2], "recovery must be idempotent"
+    require([k for _, k in a1] == [k for _, k in a2], "recovery must be idempotent")
 
     def flaky(key):
         raise TimeoutError("broker unreachable")
 
     a3 = K.recover_incomplete_intents(intents, outcomes, flaky)
-    assert all(k == "UNRECONCILED" for _, k in a3), "an unanswerable broker is fail-closed"
+    require(all(k == "UNRECONCILED" for _, k in a3), "an unanswerable broker is fail-closed")
 
 
 def t_happy_path_commits():
     outcome, effect = K.write_before_act(
         write_intent=_intent, perform_effect=lambda i: "ack",
         write_outcome=lambda i, e: None)
-    assert outcome is K.ActOutcome.COMMITTED and effect == "ack"
+    require(
+        outcome is K.ActOutcome.COMMITTED and effect == "ack",
+        'outcome is K.ActOutcome.COMMITTED and effect == "ack"')
 
 
 # =============================================================================
@@ -468,15 +516,19 @@ def _score_event(seq, prev, value, cause=None):
 def t_replay_identical_run_has_no_diff():
     ev = [_score_event(0, V.GENESIS_HASH, "0.712")]
     r = K.replay_run(ev, RUN, re_derive=lambda e: dict(e.payload))
-    assert r.identical, (r.diffs, r.missing_reproducibility)
+    require(r.identical, (r.diffs, r.missing_reproducibility))
 
 
 def t_replay_detects_non_determinism():
     ev = [_score_event(0, V.GENESIS_HASH, "0.712")]
     r = K.replay_run(ev, RUN, re_derive=lambda e: dict(e.payload) | {"value": "0.713"})
-    assert not r.identical
-    assert len(r.diffs) == 1 and "value" in r.diffs[0].field
-    assert "0.712" in r.diffs[0].recorded and "0.713" in r.diffs[0].replayed
+    require(not r.identical, 'not r.identical')
+    require(
+        len(r.diffs) == 1 and "value" in r.diffs[0].field,
+        'len(r.diffs) == 1 and "value" in r.diffs[0].field')
+    require(
+        "0.712" in r.diffs[0].recorded and "0.713" in r.diffs[0].replayed,
+        '"0.712" in r.diffs[0].recorded and "0.713" in r.diffs[0].replayed')
 
 
 def t_replay_reports_missing_bundle_separately_from_a_mismatch():
@@ -486,7 +538,9 @@ def t_replay_reports_missing_bundle_separately_from_a_mismatch():
     stripped = V.AuditEnvelope.model_construct(
         **(e.model_dump() | {"reproducibility": None}))
     r = K.replay_run([stripped], RUN, re_derive=lambda x: dict(x.payload))
-    assert r.missing_reproducibility == (0,) and not r.diffs
+    require(
+        r.missing_reproducibility == (0,) and not r.diffs,
+        'r.missing_reproducibility == (0,) and not r.diffs')
 
 
 def t_reproducibility_bundle_requires_llm_fields_together():
@@ -507,17 +561,17 @@ def t_export_is_ndjson_and_independently_verifiable():
     import json
     events = build_chain(6)
     lines = list(K.export_for_regulator(events))
-    assert len(lines) == 6
+    require(len(lines) == 6, 'len(lines) == 6')
     rows = [json.loads(x) for x in lines]
-    assert [int(r["seq"]) for r in rows] == list(range(6)), "must export in seq order"
+    require([int(r["seq"]) for r in rows] == list(range(6)), "must export in seq order")
     # A recipient can re-chain it without trusting our verifier.
     prev = V.GENESIS_HASH
     for r in rows:
-        assert r["prev_hash"] == prev
+        require(r["prev_hash"] == prev, 'r["prev_hash"] == prev')
         prev = r["payload_hash"]
-    assert all("payload" in r for r in rows)
-    assert all("payload" not in json.loads(x)
-               for x in K.export_for_regulator(events, include_payload=False))
+    require(all("payload" in r for r in rows), 'all("payload" in r for r in rows)')
+    require(all("payload" not in json.loads(x)
+               for x in K.export_for_regulator(events, include_payload=False)), 'all("payload" not in json.loads(x) for x in K.export_for_regulator(events, include_payload=False))')
 
 
 # =============================================================================

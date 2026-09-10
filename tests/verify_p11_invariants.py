@@ -9,6 +9,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 from domain import models as m  # noqa: E402
 
+
+def require(cond, msg=""):
+    """Unconditional check. Replaces bare `assert`, which `python -O` strips (X5 GAP-2).
+
+    Raises AssertionError so existing callers - check(), raises(), the runner's except
+    clause - behave exactly as they did when these were asserts.
+    """
+    if not cond:
+        raise AssertionError(msg)
+
+
 PASS, FAIL = [], []
 
 
@@ -38,14 +49,14 @@ D = Decimal
 # ---- Money closure (spec 3.2) ----------------------------------------------
 def t_money_closed():
     a = m.Money.of("1.005", USD)          # quantises half-up
-    assert a.amount == D("1.01"), a.amount
+    require(a.amount == D("1.01"), a.amount)
     b = m.Money.of("2.00", USD)
-    assert (a + b).amount == D("3.01")
-    assert (b - a).amount == D("0.99")
-    assert (b * 3).amount == D("6.00")
-    assert (3 * b).amount == D("6.00")
+    require((a + b).amount == D("3.01"), '(a + b).amount == D("3.01")')
+    require((b - a).amount == D("0.99"), '(b - a).amount == D("0.99")')
+    require((b * 3).amount == D("6.00"), '(b * 3).amount == D("6.00")')
+    require((3 * b).amount == D("6.00"), '(3 * b).amount == D("6.00")')
     for v in (a + b, b - a, b * 3):
-        assert v.amount.as_tuple().exponent == -2, v
+        require(v.amount.as_tuple().exponent == -2, v)
 
 
 def t_money_no_division():
@@ -62,8 +73,8 @@ def t_cross_currency():
     raises(m.CurrencyMismatchError, lambda: u + i)
     raises(m.CurrencyMismatchError, lambda: u - i)
     raises(m.CurrencyMismatchError, lambda: u < i)
-    assert (u == i) is False          # equality must NOT raise
-    assert len({u, i}) == 2           # hashable
+    require((u == i) is False, '(u == i) is False')
+    require(len({u, i}) == 2, 'len({u, i}) == 2')
 
 
 def t_float_rejected():
@@ -74,16 +85,22 @@ def t_float_rejected():
 def t_allocate_exact():
     # the classic penny-split
     parts = m.Money.of("0.01", USD).allocate([D(1), D(1), D(1)])
-    assert [p.amount for p in parts] == [D("0.01"), D("0.00"), D("0.00")], parts
-    assert sum(p.amount for p in parts) == D("0.01")
+    require([p.amount for p in parts] == [D("0.01"), D("0.00"), D("0.00")], parts)
+    require(
+        sum(p.amount for p in parts) == D("0.01"),
+        'sum(p.amount for p in parts) == D("0.01")')
     # uneven weights, 100 ways
     total = m.Money.of("100.00", USD)
     parts = total.allocate([D(1), D(1), D(1)])
-    assert sum(p.amount for p in parts) == D("100.00")
-    assert [p.amount for p in parts] == [D("33.34"), D("33.33"), D("33.33")]
+    require(
+        sum(p.amount for p in parts) == D("100.00"),
+        'sum(p.amount for p in parts) == D("100.00")')
+    require(
+        [p.amount for p in parts] == [D("33.34"), D("33.33"), D("33.33")],
+        '[p.amount for p in parts] == [D("33.34"), D("33.33"), D("33.33")]')
     # negative total (realised loss)
     neg = m.Money.of("-10.00", USD).allocate([D(3), D(7)])
-    assert sum(p.amount for p in neg) == D("-10.00"), neg
+    require(sum(p.amount for p in neg) == D("-10.00"), neg)
     raises(ValueError, lambda: total.allocate([D(1), D(0)]))
     raises(ValueError, lambda: total.allocate([]))
 
@@ -92,7 +109,7 @@ def t_allocate_exact():
 def t_tick_rejects_never_rounds():
     p = m.Price(value=D("10.005"), currency=USD)
     raises(m.TickSizeViolation, lambda: p.validate_tick(D("0.01")))
-    assert p.value == D("10.005000")           # unchanged: never rounded
+    require(p.value == D("10.005000"), 'p.value == D("10.005000")')
     m.Price(value=D("10.00"), currency=USD).validate_tick(D("0.01"))
     p.validate_tick(D("0.005"))                # legal under the Nov-2027 regime
 
@@ -101,16 +118,22 @@ def t_notional_one_rounding():
     px = m.Price(value=D("10.123456"), currency=USD)
     q = m.Quantity(value=D("3"))
     n = px.notional(q)
-    assert n.amount == D("30.37"), n.amount     # 30.370368 -> half-up
-    assert n.currency is USD
+    require(n.amount == D("30.37"), n.amount)
+    require(n.currency is USD, 'n.currency is USD')
 
 
 # ---- Quantity (ADR-12 sign, P0.1 rounding) ---------------------------------
 def t_quantity_rules():
     raises(m.NegativeQuantityError, lambda: m.Quantity(value=D("-1")))
-    assert m.Quantity.round_to_increment(D("13.7"), D(1)).value == D("13.000000")
-    assert m.Quantity.round_to_increment(D("0.4"), D(1)).is_zero()
-    assert m.Quantity.round_to_increment(D("137"), D(50)).value == D("100.000000")
+    require(
+        m.Quantity.round_to_increment(D("13.7"), D(1)).value == D("13.000000"),
+        'm.Quantity.round_to_increment(D("13.7"), D(1)).value == D("13.000000")')
+    require(
+        m.Quantity.round_to_increment(D("0.4"), D(1)).is_zero(),
+        'm.Quantity.round_to_increment(D("0.4"), D(1)).is_zero()')
+    require(
+        m.Quantity.round_to_increment(D("137"), D(50)).value == D("100.000000"),
+        'm.Quantity.round_to_increment(D("137"), D(50)).value == D("100.000000")')
     raises(m.QuantityIncrementError, lambda: m.Quantity(value=D("137")).validate_increment(D(50)))
     raises(m.MissingReferenceDataError, lambda: m.Quantity.round_to_increment(D(10), D(0)))
 
@@ -129,10 +152,12 @@ def t_calendar():
         regular_close_utc=datetime(2026, 8, 26, 20, 0, tzinfo=timezone.utc),
         settlement_date=date(2026, 8, 27))
     cal = m.TradingCalendar(exchange=m.Exchange.NYSE, sessions=(s,))
-    assert cal.session(date(2026, 8, 26)) is s
-    assert s.utc_accounting_date == date(2026, 8, 26)
+    require(cal.session(date(2026, 8, 26)) is s, 'cal.session(date(2026, 8, 26)) is s')
+    require(
+        s.utc_accounting_date == date(2026, 8, 26),
+        's.utc_accounting_date == date(2026, 8, 26)')
     raises(m.MissingSessionError, lambda: cal.session(date(2026, 8, 27)))  # absence == closed
-    assert cal.is_open(date(2026, 8, 27)) is False
+    require(cal.is_open(date(2026, 8, 27)) is False, 'cal.is_open(date(2026, 8, 27)) is False')
 
 
 def t_muhurat_excluded():
@@ -147,7 +172,7 @@ def t_muhurat_excluded():
                             regular_close_utc=datetime(2026, 11, 3, 14, 0, tzinfo=timezone.utc),
                             settlement_date=date(2026, 11, 4), counts_for_sequencing=False)
     cal = m.TradingCalendar(exchange=m.Exchange.NSE, sessions=(reg, muh))
-    assert len(cal.sequenced_sessions()) == 1
+    require(len(cal.sequenced_sessions()) == 1, 'len(cal.sequenced_sessions()) == 1')
 
 
 # ---- Identity --------------------------------------------------------------
@@ -159,8 +184,12 @@ def t_symbol_reuse_after_delisting():
         m.SymbolMapping(instrument_id=new, market=m.Market.US, exchange=m.Exchange.NASDAQ,
                         symbol="ABCD", valid_from=date(2022, 3, 1)),
     )
-    assert m.resolve_instrument(maps, m.Market.US, "ABCD", date(2018, 5, 1)) == old
-    assert m.resolve_instrument(maps, m.Market.US, "ABCD", date(2024, 5, 1)) == new
+    require(
+        m.resolve_instrument(maps, m.Market.US, "ABCD", date(2018, 5, 1)) == old,
+        'm.resolve_instrument(maps, m.Market.US, "ABCD", date(2018, 5, 1)) == old')
+    require(
+        m.resolve_instrument(maps, m.Market.US, "ABCD", date(2024, 5, 1)) == new,
+        'm.resolve_instrument(maps, m.Market.US, "ABCD", date(2024, 5, 1)) == new')
     raises(m.UnknownSymbolError,
            lambda: m.resolve_instrument(maps, m.Market.US, "ABCD", date(2021, 1, 1)))
 
@@ -175,7 +204,9 @@ def t_ambiguous_symbol():
 
 def t_corporate_action_deny_by_default():
     raises(m.UnknownCorporateActionError, lambda: m.parse_corporate_action_type("WEIRD_VENDOR_CODE"))
-    assert m.parse_corporate_action_type("split") is m.CorporateActionType.SPLIT
+    require(
+        m.parse_corporate_action_type("split") is m.CorporateActionType.SPLIT,
+        'm.parse_corporate_action_type("split") is m.CorporateActionType.SPLIT')
 
 
 def t_india_requires_lot_size():
@@ -230,13 +261,15 @@ def t_news_point_in_time():
                     source="benzinga", vendor_id="V1", revision_seq=1, headline="H",
                     body_sanitised="B", sanitiser_version="s1", vendor_published_at=t,
                     first_seen_at=t)
-    assert n1.is_point_in_time_record
+    require(n1.is_point_in_time_record, 'n1.is_point_in_time_record')
     n2 = m.NewsItem(instrument_id=uuid4(), market=m.Market.US, as_of=t, retrieved_at=U(1),
                     source="benzinga", vendor_id="V1", revision_seq=2, headline="H2",
                     body_sanitised="B2", sanitiser_version="s1", vendor_published_at=t,
                     vendor_updated_at=U(1), first_seen_at=t)
-    assert not n2.is_point_in_time_record
-    assert not hasattr(n1, "body_raw") and not hasattr(n1, "content")
+    require(not n2.is_point_in_time_record, 'not n2.is_point_in_time_record')
+    require(
+        not hasattr(n1, "body_raw") and not hasattr(n1, "content"),
+        'not hasattr(n1, "body_raw") and not hasattr(n1, "content")')
 
 
 # ---- [CONST-2] structural gate ---------------------------------------------
@@ -257,7 +290,7 @@ def t_risk_deny_is_final():
 def t_thesis_has_no_size_fields():
     banned = {"quantity", "target_quantity", "size", "weight", "limit_price", "price",
               "notional", "position_pct", "nav", "cash"}
-    assert banned & set(m.Thesis.model_fields) == set(), banned & set(m.Thesis.model_fields)
+    require(banned & set(m.Thesis.model_fields) == set(), banned & set(m.Thesis.model_fields))
     ic = m.InvalidationCondition(condition_id=uuid4(), kind=m.InvalidationKind.PRICE_BELOW,
                                  threshold_price=_px("9"), description="stop")
     raises(ValueError, lambda: m.Thesis(
@@ -279,7 +312,7 @@ def t_no_override_parameters():
     for name, obj in vars(m).items():
         if inspect.isfunction(obj):
             params = set(inspect.signature(obj).parameters)
-            assert not (params & banned), f"{name} accepts {params & banned}"
+            require(not (params & banned), f"{name} accepts {params & banned}")
 
 
 def t_llm_cannot_emit_signal():
@@ -291,7 +324,9 @@ def t_llm_cannot_emit_signal():
 
 
 def t_no_sell_short():
-    assert "SELL_SHORT" not in {e.name for e in m.SignalDirection}
+    require(
+        "SELL_SHORT" not in {e.name for e in m.SignalDirection},
+        '"SELL_SHORT" not in {e.name for e in m.SignalDirection}')
 
 
 def t_holding_band():
@@ -308,14 +343,20 @@ def t_order_transitions():
     m.assert_order_transition(m.OrderState.PENDING_NEW, m.OrderState.FILLED, oid)
     m.assert_order_transition(m.OrderState.PENDING_CANCEL, m.OrderState.FILLED, oid)
     for term in m.TERMINAL_ORDER_STATES:
-        assert m.ORDER_TRANSITIONS[term] == frozenset()
+        require(
+            m.ORDER_TRANSITIONS[term] == frozenset(),
+            'm.ORDER_TRANSITIONS[term] == frozenset()')
         raises(m.IllegalOrderTransition,
                lambda t=term: m.assert_order_transition(t, m.OrderState.NEW, oid))
     raises(m.IllegalOrderTransition,
            lambda: m.assert_order_transition(m.OrderState.CANCELED, m.OrderState.FILLED, oid))
-    assert m.parse_order_state("some_broker_state") is m.OrderState.UNKNOWN
+    require(
+        m.parse_order_state("some_broker_state") is m.OrderState.UNKNOWN,
+        'm.parse_order_state("some_broker_state") is m.OrderState.UNKNOWN')
     # every state has a table entry
-    assert set(m.ORDER_TRANSITIONS) == set(m.OrderState)
+    require(
+        set(m.ORDER_TRANSITIONS) == set(m.OrderState),
+        'set(m.ORDER_TRANSITIONS) == set(m.OrderState)')
 
 
 def t_position_transitions():
@@ -325,13 +366,19 @@ def t_position_transitions():
                                                 m.PositionState.CLOSED, iid))
     m.assert_position_transition(m.PositionState.OPEN, m.PositionState.PENDING_CLOSE, iid)
     m.assert_position_transition(m.PositionState.CLOSED, m.PositionState.UNRECONCILED, iid)
-    assert set(m.POSITION_TRANSITIONS) == set(m.PositionState)
+    require(
+        set(m.POSITION_TRANSITIONS) == set(m.PositionState),
+        'set(m.POSITION_TRANSITIONS) == set(m.PositionState)')
 
 
 def t_kill_switch():
-    assert m.BOOT_KILL_SWITCH_STATE is m.KillSwitchState.TRIPPED
+    require(
+        m.BOOT_KILL_SWITCH_STATE is m.KillSwitchState.TRIPPED,
+        'm.BOOT_KILL_SWITCH_STATE is m.KillSwitchState.TRIPPED')
     ks = m.KillSwitch.at_boot(uuid4(), uuid4())
-    assert ks.state is m.KillSwitchState.TRIPPED and not ks.permits_trading()
+    require(
+        ks.state is m.KillSwitchState.TRIPPED and not ks.permits_trading(),
+        'ks.state is m.KillSwitchState.TRIPPED and not ks.permits_trading()')
     # every toward-halt transition is automatic
     m.assert_kill_switch_transition(m.KillSwitchState.ARMED, m.KillSwitchState.TRIPPED, None)
     m.assert_kill_switch_transition(m.KillSwitchState.POOL_HALTED,
@@ -347,7 +394,9 @@ def t_kill_switch():
     raises(m.IllegalKillSwitchTransition, lambda: m.KillSwitch(
         kill_switch_id=uuid4(), scope=m.KillSwitchScope.GLOBAL,
         state=m.KillSwitchState.ARMED, audit_event_id=uuid4()))
-    assert not any(n in dir(m.KillSwitch) for n in ("force_arm", "reset", "arm"))
+    require(
+        not any(n in dir(m.KillSwitch) for n in ("force_arm", "reset", "arm")),
+        'not any(n in dir(m.KillSwitch) for n in ("force_arm", "reset", "arm"))')
 
 
 # ---- Lots, wash sale, FX, NAV ----------------------------------------------
@@ -364,10 +413,16 @@ def t_lot_basis_exact():
     lot = _lot()
     c1 = lot.consumed_cost(m.Quantity(value=D(1)))
     c2 = lot.consumed_cost(m.Quantity(value=D(2)))
-    assert c1.amount + c2.amount == D("100.00"), (c1, c2)   # exact, no lost cent
-    assert lot.consumed_cost(m.Quantity(value=D(3))).amount == D("100.00")
-    assert "cost_basis_per_share" not in m.Lot.model_fields   # never stored
-    assert lot.derived_basis_per_share().value == D("33.333333")
+    require(c1.amount + c2.amount == D("100.00"), (c1, c2))
+    require(
+        lot.consumed_cost(m.Quantity(value=D(3))).amount == D("100.00"),
+        'lot.consumed_cost(m.Quantity(value=D(3))).amount == D("100.00")')
+    require(
+        "cost_basis_per_share" not in m.Lot.model_fields,
+        '"cost_basis_per_share" not in m.Lot.model_fields')
+    require(
+        lot.derived_basis_per_share().value == D("33.333333"),
+        'lot.derived_basis_per_share().value == D("33.333333")')
 
 
 def t_wash_sale_india_blocked():
@@ -383,7 +438,9 @@ def t_account_settled_cash():
                   account_type=m.AccountType.CASH, broker_id="alpaca",
                   equity=m.Money.of("100000.00", USD), total_cash=m.Money.of("50000.00", USD),
                   settled_cash=m.Money.of("30000.00", USD), day_trades_5d=0, as_of=U())
-    assert a.entry_buying_power().amount == D("30000.00")   # settled, not total
+    require(
+        a.entry_buying_power().amount == D("30000.00"),
+        'a.entry_buying_power().amount == D("30000.00")')
     raises(ValueError, lambda: m.Account(
         account_id=uuid4(), pool_id=m.PoolId.US_POOL, market=m.Market.US,
         account_type=m.AccountType.CASH, broker_id="alpaca",
@@ -400,7 +457,7 @@ def t_fx_missing_blocks_both_pools():
                     total_value=m.Money.of("500000.00", INR), cash=m.Money.of("500000.00", INR),
                     positions_value=m.Money.zero(INR),
                     peak_value=m.Money.of("500000.00", INR), audit_event_id=uuid4(), computed_at=U())
-    assert us.drawdown_pct() == D("0.090909")
+    require(us.drawdown_pct() == D("0.090909"), 'us.drawdown_pct() == D("0.090909")')
     raises(m.MissingFxRateError, lambda: m.ConsolidatedNAV(
         nav_id=uuid4(), utc_accounting_date=date(2026, 8, 26),
         total_value_usd=m.Money.of("105000.00", USD),
@@ -417,7 +474,9 @@ def t_fx_missing_blocks_both_pools():
 def t_fx_convert_only_direction():
     fx = m.FxRate(fx_rate_id=uuid4(), as_of_date=date(2026, 8, 26), base=INR, quote=USD,
                   rate=D("0.011950"), source="RBI_REFERENCE", retrieved_at=U())
-    assert fx.convert(m.Money.of("500000.00", INR)).amount == D("5975.00")
+    require(
+        fx.convert(m.Money.of("500000.00", INR)).amount == D("5975.00"),
+        'fx.convert(m.Money.of("500000.00", INR)).amount == D("5975.00")')
     raises(m.CurrencyMismatchError, lambda: fx.convert(m.Money.of("100.00", USD)))
 
 
@@ -456,7 +515,9 @@ def t_run_context_n11():
               strategy_version="v1", model_id="mdl")
     live = m.RunContext(**kw, run_type=m.RunType.PIPELINE, is_paper=False, is_backtest=False)
     paper = m.RunContext(**kw, run_type=m.RunType.PAPER, is_paper=True, is_backtest=False)
-    assert live.may_cite_for_cost_model() and not paper.may_cite_for_cost_model()
+    require(
+        live.may_cite_for_cost_model() and not paper.may_cite_for_cost_model(),
+        'live.may_cite_for_cost_model() and not paper.may_cite_for_cost_model()')
     raises(ValueError, lambda: m.RunContext(**kw, run_type=m.RunType.BACKTEST,
                                             is_paper=True, is_backtest=True))
 
@@ -466,7 +527,7 @@ def t_all_enums_are_str():
     import enum as _e
     for name, obj in vars(m).items():
         if isinstance(obj, type) and issubclass(obj, _e.Enum) and obj is not _e.Enum:
-            assert issubclass(obj, str), f"{name} is not str-valued"
+            require(issubclass(obj, str), f"{name} is not str-valued")
 
 
 def t_all_models_frozen_and_forbid():
@@ -475,28 +536,36 @@ def t_all_models_frozen_and_forbid():
         if isinstance(obj, type) and issubclass(obj, BaseModel) and obj is not BaseModel:
             if name.startswith("_"):
                 continue
-            assert obj.model_config.get("frozen") is True, f"{name} not frozen"
-            assert obj.model_config.get("extra") == "forbid", f"{name} allows extras"
+            require(obj.model_config.get("frozen") is True, f"{name} not frozen")
+            require(obj.model_config.get("extra") == "forbid", f"{name} allows extras")
 
 
 def t_decimal_serialises_to_string():
     import json
     payload = json.loads(m.Money.of("1.23", USD).model_dump_json())
-    assert isinstance(payload["amount"], str), payload
+    require(isinstance(payload["amount"], str), payload)
 
 
 def t_instrument_allowlist():
-    assert m.TRADEABLE_INSTRUMENT_TYPES_V1 == frozenset({m.InstrumentType.COMMON_STOCK})
-    assert m.InstrumentType.FUTURE in m.PERMANENTLY_BANNED_INSTRUMENT_TYPES
-    assert m.InstrumentType.OPTION in m.PERMANENTLY_BANNED_INSTRUMENT_TYPES
+    require(
+        m.TRADEABLE_INSTRUMENT_TYPES_V1 == frozenset({m.InstrumentType.COMMON_STOCK}),
+        'm.TRADEABLE_INSTRUMENT_TYPES_V1 == frozenset({m.InstrumentType.COMMON_STOCK})')
+    require(
+        m.InstrumentType.FUTURE in m.PERMANENTLY_BANNED_INSTRUMENT_TYPES,
+        'm.InstrumentType.FUTURE in m.PERMANENTLY_BANNED_INSTRUMENT_TYPES')
+    require(
+        m.InstrumentType.OPTION in m.PERMANENTLY_BANNED_INSTRUMENT_TYPES,
+        'm.InstrumentType.OPTION in m.PERMANENTLY_BANNED_INSTRUMENT_TYPES')
     inst = m.Instrument(instrument_id=uuid4(), market=m.Market.US, exchange=m.Exchange.NASDAQ,
                         instrument_type=m.InstrumentType.ETF, status=m.InstrumentStatus.ACTIVE,
                         currency=USD, qty_increment=D(1))
-    assert not inst.is_tradeable_v1()          # ETFs read-only in v1
+    require(not inst.is_tradeable_v1(), 'not inst.is_tradeable_v1()')
 
 
 def t_pool_segregation():
-    assert m.PoolId.US_POOL.currency is USD and m.PoolId.IN_POOL.currency is INR
+    require(
+        m.PoolId.US_POOL.currency is USD and m.PoolId.IN_POOL.currency is INR,
+        'm.PoolId.US_POOL.currency is USD and m.PoolId.IN_POOL.currency is INR')
     raises(m.CurrencyMismatchError, lambda: _lot(
         market=m.Market.US, pool=m.PoolId.US_POOL, cost_total=m.Money.of("100.00", INR)))
 

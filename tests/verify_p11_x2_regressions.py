@@ -12,6 +12,17 @@ from domain import models as m  # noqa: E402
 from audit import events as ae  # noqa: E402
 from audit import chain as ac  # noqa: E402
 
+
+def require(cond, msg=""):
+    """Unconditional check. Replaces bare `assert`, which `python -O` strips (X5 GAP-2).
+
+    Raises AssertionError so existing callers - check(), raises(), the runner's except
+    clause - behave exactly as they did when these were asserts.
+    """
+    if not cond:
+        raise AssertionError(msg)
+
+
 PASS, FAIL = [], []
 USD, INR = m.Currency.USD, m.Currency.INR
 U = datetime(2026, 8, 27, 12, 0, tzinfo=timezone.utc)
@@ -48,17 +59,29 @@ def _lot(opened, remaining, cost="1000.00", market=m.Market.US, pool=m.PoolId.US
 # ---- F-1 BLOCKER: lot cost basis after partial consumption -----------------
 def t_f1_basis_after_partial_consumption():
     lot = _lot(100, 50)                       # 50 already sold, cost_total untouched
-    assert lot.remaining_cost().amount == D("500.00"), lot.remaining_cost()
-    assert lot.consumed_cost(m.Quantity(value=D(25))).amount == D("250.00")
-    assert lot.consumed_cost(m.Quantity(value=D(50))).amount == D("500.00")
-    assert lot.consumed_cost(m.Quantity(value=D(0))).amount == D("0.00")
+    require(lot.remaining_cost().amount == D("500.00"), lot.remaining_cost())
+    require(
+        lot.consumed_cost(m.Quantity(value=D(25))).amount == D("250.00"),
+        'lot.consumed_cost(m.Quantity(value=D(25))).amount == D("250.00")')
+    require(
+        lot.consumed_cost(m.Quantity(value=D(50))).amount == D("500.00"),
+        'lot.consumed_cost(m.Quantity(value=D(50))).amount == D("500.00")')
+    require(
+        lot.consumed_cost(m.Quantity(value=D(0))).amount == D("0.00"),
+        'lot.consumed_cost(m.Quantity(value=D(0))).amount == D("0.00")')
 
 
 def t_f1_full_lot_unchanged():
     lot = _lot(100, 100)
-    assert lot.remaining_cost().amount == D("1000.00")
-    assert lot.consumed_cost(m.Quantity(value=D(100))).amount == D("1000.00")
-    assert lot.consumed_cost(m.Quantity(value=D(30))).amount == D("300.00")
+    require(
+        lot.remaining_cost().amount == D("1000.00"),
+        'lot.remaining_cost().amount == D("1000.00")')
+    require(
+        lot.consumed_cost(m.Quantity(value=D(100))).amount == D("1000.00"),
+        'lot.consumed_cost(m.Quantity(value=D(100))).amount == D("1000.00")')
+    require(
+        lot.consumed_cost(m.Quantity(value=D(30))).amount == D("300.00"),
+        'lot.consumed_cost(m.Quantity(value=D(30))).amount == D("300.00")')
 
 
 def t_f1_consumption_path_is_exactly_additive():
@@ -71,15 +94,15 @@ def t_f1_consumption_path_is_exactly_additive():
                 lot = _lot(100, remaining, cost=cost)
                 released = released + lot.consumed_cost(m.Quantity(value=D(step)))
                 remaining -= step
-            assert remaining == 0
-            assert released.amount == D(cost), (cost, steps, released.amount)
+            require(remaining == 0, 'remaining == 0')
+            require(released.amount == D(cost), (cost, steps, released.amount))
 
 
 def t_f1_position_cost_basis_uses_remaining():
     lot = _lot(100, 50)
     pos = m.Position(instrument_id=lot.instrument_id, market=m.Market.US,
                      pool_id=m.PoolId.US_POOL, state=m.PositionState.OPEN, lots=(lot,))
-    assert pos.cost_basis().amount == D("500.00"), pos.cost_basis()
+    require(pos.cost_basis().amount == D("500.00"), pos.cost_basis())
 
 
 def t_f1_overconsume_still_raises():
@@ -104,11 +127,11 @@ def t_f2_rounding_is_thread_independent():
     t.join()
     # Under bankers' rounding 1.015 -> 1.02 as well, but 1.005 -> 1.00. The second
     # value is the one that discriminates.
-    assert out["money"] == D("1.01"), f"half-up violated on a worker thread: {out['money']}"
-    assert out["money2"] == D("1.02"), out["money2"]
-    assert out["price"] == D("1.000001"), out["price"]
-    assert out["qty"] == D("13.000000"), out["qty"]
-    assert out["per_share"] == D("333.333333"), out["per_share"]
+    require(out["money"] == D("1.01"), f"half-up violated on a worker thread: {out['money']}")
+    require(out["money2"] == D("1.02"), out["money2"])
+    require(out["price"] == D("1.000001"), out["price"])
+    require(out["qty"] == D("13.000000"), out["qty"])
+    require(out["per_share"] == D("333.333333"), out["per_share"])
 
 
 def t_f2_float_still_rejected_off_thread():
@@ -124,7 +147,7 @@ def t_f2_float_still_rejected_off_thread():
     t = threading.Thread(target=worker)
     t.start()
     t.join()
-    assert out["r"] == "REJECTED", out
+    require(out["r"] == "REJECTED", out)
 
 
 # ---- F-3 HIGH: chain verification must accept a contiguous slice ------------
@@ -153,27 +176,41 @@ def _chain(n, start=0):
 
 def t_f3_slice_verifies():
     full = _chain(6)
-    assert ac.verify_chain(full, require_genesis=True).intact
-    assert ac.verify_chain(full[2:], expected_prev_hash=full[1].payload_hash).intact
-    assert ac.verify_chain(full[3:5], expected_prev_hash=full[2].payload_hash).intact
-    assert ac.verify_chain([]).intact          # empty is vacuously intact
+    require(
+        ac.verify_chain(full, require_genesis=True).intact,
+        'ac.verify_chain(full, require_genesis=True).intact')
+    require(
+        ac.verify_chain(full[2:], expected_prev_hash=full[1].payload_hash).intact,
+        'ac.verify_chain(full[2:], expected_prev_hash=full[1].payload_hash).intact')
+    require(
+        ac.verify_chain(full[3:5], expected_prev_hash=full[2].payload_hash).intact,
+        'ac.verify_chain(full[3:5], expected_prev_hash=full[2].payload_hash).intact')
+    require(ac.verify_chain([]).intact, 'ac.verify_chain([]).intact')
 
 
 def t_f3_gap_and_fork_still_caught():
     full = _chain(6)
     gap = ac.verify_chain([full[0], full[2]])
-    assert ac.BreakKind.GAP in {b.kind for b in gap.breaks}
+    require(
+        ac.BreakKind.GAP in {b.kind for b in gap.breaks},
+        'ac.BreakKind.GAP in {b.kind for b in gap.breaks}')
     forked = list(full)
     forked[3] = forked[3].model_copy(update={"prev_hash": "f" * 64})
     fork = ac.verify_chain(forked)
-    assert ac.BreakKind.FORK in {b.kind for b in fork.breaks}
+    require(
+        ac.BreakKind.FORK in {b.kind for b in fork.breaks},
+        'ac.BreakKind.FORK in {b.kind for b in fork.breaks}')
 
 
 
 def t_f3_require_genesis_still_available():
-    assert ac.verify_chain(_chain(4), require_genesis=True).intact
+    require(
+        ac.verify_chain(_chain(4), require_genesis=True).intact,
+        'ac.verify_chain(_chain(4), require_genesis=True).intact')
     r = ac.verify_chain(_chain(6)[2:], require_genesis=True)
-    assert ac.BreakKind.GENESIS_MISSING in {b.kind for b in r.breaks}
+    require(
+        ac.BreakKind.GENESIS_MISSING in {b.kind for b in r.breaks},
+        'ac.BreakKind.GENESIS_MISSING in {b.kind for b in r.breaks}')
 
 
 # ---- F-4 HIGH: a price must be denominated in its pool's currency ----------
@@ -209,12 +246,14 @@ def t_f4_order_rejects_foreign_currency_price():
 # ---- F-5 HIGH: fields the P1.2 schema requires ------------------------------
 def t_f5_audit_event_carries_class_and_provenance():
     for f in ("event_class", "is_paper", "is_backtest"):
-        assert f in ae.AuditEnvelope.model_fields, f
+        require(f in ae.AuditEnvelope.model_fields, f)
     e = _chain(1)[0]
-    assert e.event_class is m.AuditEventClass.SYSTEM
+    require(
+        e.event_class is m.AuditEventClass.SYSTEM,
+        'e.event_class is m.AuditEventClass.SYSTEM')
     # RULE-B4's durability split needs every class the schema enumerates.
-    assert {c.value for c in m.AuditEventClass} == {
-        "ACTION", "EVALUATION", "NAV", "RISK", "KILL_SWITCH", "APPROVAL", "SYSTEM"}
+    require({c.value for c in m.AuditEventClass} == {
+        "ACTION", "EVALUATION", "NAV", "RISK", "KILL_SWITCH", "APPROVAL", "SYSTEM"}, '{c.value for c in m.AuditEventClass} == { "ACTION", "EVALUATION", "NAV", "RISK", "KILL_SWITCH", "APPROVAL", "SYSTEM"}')
 
 
 def t_f5_audit_event_paper_xor_backtest():
@@ -229,12 +268,14 @@ def t_f5_audit_event_paper_xor_backtest():
 
 
 def t_f5_run_context_has_finished_at():
-    assert "finished_at" in m.RunContext.model_fields
+    require(
+        "finished_at" in m.RunContext.model_fields,
+        '"finished_at" in m.RunContext.model_fields')
     kw = dict(run_id=uuid4(), run_type=m.RunType.PIPELINE, market=m.Market.US,
               trading_date=date(2026, 8, 27), started_at=U, code_version="abc1234",
               config_hash="f" * 64, strategy_version="v1", model_id="mdl",
               is_paper=False, is_backtest=False)
-    assert m.RunContext(**kw).finished_at is None
+    require(m.RunContext(**kw).finished_at is None, 'm.RunContext(**kw).finished_at is None')
     raises(ValueError, lambda: m.RunContext(
         **kw, finished_at=datetime(2026, 8, 27, 11, 0, tzinfo=timezone.utc)))
 
@@ -258,11 +299,13 @@ def t_f6_lookup_is_fast_and_correct():
     cal = _cal()
     n = 2000
     per = timeit.timeit(lambda: cal.sequenced_sessions(), number=n) / n
-    assert per * 1500 < 0.05, f"{per*1500:.3f}s per session across 1,500 names"
+    require(per * 1500 < 0.05, f"{per*1500:.3f}s per session across 1,500 names")
     ref = date.fromordinal(date(2016, 1, 4).toordinal() + 300)
-    assert cal.nth_prior_session(ref, 0).trading_date == ref
-    assert cal.nth_prior_session(ref, 20).trading_date == \
-        date.fromordinal(date(2016, 1, 4).toordinal() + 280)
+    require(
+        cal.nth_prior_session(ref, 0).trading_date == ref,
+        'cal.nth_prior_session(ref, 0).trading_date == ref')
+    require(cal.nth_prior_session(ref, 20).trading_date == \
+        date.fromordinal(date(2016, 1, 4).toordinal() + 280), 'cal.nth_prior_session(ref, 20).trading_date == \\ date.fromordinal(date(2016, 1, 4).toordinal() + 280)')
     raises(m.MissingSessionError, lambda: cal.nth_prior_session(date(2016, 1, 5), 20))
     raises(m.MissingSessionError, lambda: cal.nth_prior_session(date(1999, 1, 1), 0))
 
@@ -271,8 +314,12 @@ def t_f6_sessions_between_bounds_inclusive():
     cal = _cal(50)
     base = date(2016, 1, 4).toordinal()
     got = cal.sessions_between(date.fromordinal(base + 10), date.fromordinal(base + 14))
-    assert [s.trading_date for s in got] == [date.fromordinal(base + i) for i in range(10, 15)]
-    assert cal.sessions_between(date(1999, 1, 1), date(1999, 1, 2)) == ()
+    require(
+        [s.trading_date for s in got] == [date.fromordinal(base + i) for i in range(10, 15)],
+        '[s.trading_date for s in got] == [date.fromordinal(base + i) for i in range(10, 15)]')
+    require(
+        cal.sessions_between(date(1999, 1, 1), date(1999, 1, 2)) == (),
+        'cal.sessions_between(date(1999, 1, 1), date(1999, 1, 2)) == ()')
 
 
 def t_f6_construction_sorts_input():
@@ -280,7 +327,7 @@ def t_f6_construction_sorts_input():
     shuffled = tuple(reversed(cal.sessions))
     resorted = m.TradingCalendar(exchange=m.Exchange.NYSE, sessions=shuffled)
     dates = [s.trading_date for s in resorted.sessions]
-    assert dates == sorted(dates)
+    require(dates == sorted(dates), 'dates == sorted(dates)')
 
 
 # ---- F-7 MEDIUM: bounded untrusted news body -------------------------------
@@ -302,8 +349,12 @@ def t_f8_llm_signal_raises_its_own_error():
               model_id="x", computed_at=U)
     m.Signal(**kw)
     raises(m.LlmOutputNotPermitted, lambda: m.Signal(**kw, is_llm_derived=True))
-    assert not issubclass(m.LlmOutputNotPermitted, m.RiskDenyIsFinal)
-    assert issubclass(m.LlmOutputNotPermitted, m.DomainError)
+    require(
+        not issubclass(m.LlmOutputNotPermitted, m.RiskDenyIsFinal),
+        'not issubclass(m.LlmOutputNotPermitted, m.RiskDenyIsFinal)')
+    require(
+        issubclass(m.LlmOutputNotPermitted, m.DomainError),
+        'issubclass(m.LlmOutputNotPermitted, m.DomainError)')
 
 
 # ---- M-2 MEDIUM: the allocate postcondition must survive `python -O` --------

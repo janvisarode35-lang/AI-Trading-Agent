@@ -8,6 +8,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from config import loader as L  # noqa: E402
 
+
+def require(cond, msg=""):
+    """Unconditional check. Replaces bare `assert`, which `python -O` strips (X5 GAP-2).
+
+    Raises AssertionError so existing callers - check(), raises(), the runner's except
+    clause - behave exactly as they did when these were asserts.
+    """
+    if not cond:
+        raise AssertionError(msg)
+
+
 PASS, FAIL = [], []
 
 
@@ -35,9 +46,11 @@ DOC = CFG.document
 
 # ---- the real file loads and validates -------------------------------------
 def t_policy_loads():
-    assert DOC.policy_version == "0.1.0"
-    assert len(DOC.rules) >= 35, len(DOC.rules)
-    assert CFG.content_hash and len(CFG.content_hash) == 64
+    require(DOC.policy_version == "0.1.0", 'DOC.policy_version == "0.1.0"')
+    require(len(DOC.rules) >= 35, len(DOC.rules))
+    require(
+        CFG.content_hash and len(CFG.content_hash) == 64,
+        'CFG.content_hash and len(CFG.content_hash) == 64')
 
 
 def t_every_const_limit_has_a_rule():
@@ -58,7 +71,7 @@ def t_every_const_limit_has_a_rule():
         "EXEC-001",  # limit default, market only for emergency exit
     }
     have = {r.id for r in DOC.rules}
-    assert want <= have, f"missing constitutional rules: {sorted(want - have)}"
+    require(want <= have, f"missing constitutional rules: {sorted(want - have)}")
 
 
 def t_const_thresholds_match_the_constitution():
@@ -70,32 +83,32 @@ def t_const_thresholds_match_the_constitution():
     }
     for rid, expected in want.items():
         got = DOC.rule(rid).threshold
-        assert D(str(got)) == D(str(expected)), f"{rid}: {got} != {expected}"
+        require(D(str(got)) == D(str(expected)), f"{rid}: {got} != {expected}")
 
 
 def t_every_rule_names_its_authority():
     for r in DOC.rules:
-        assert r.authority and len(r.authority) >= 3, r.id
+        require(r.authority and len(r.authority) >= 3, r.id)
 
 
 def t_every_rule_fails_closed():
     """[CONST-6]: no rule may fail open when its inputs are unavailable."""
     for r in DOC.rules:
-        assert r.on_missing_input in (L.RuleAction.DENY, L.RuleAction.KILL), r.id
+        require(r.on_missing_input in (L.RuleAction.DENY, L.RuleAction.KILL), r.id)
 
 
 def t_every_rule_declares_inputs_and_window():
     for r in DOC.rules:
-        assert r.inputs, r.id
-        assert r.measurement.window and r.measurement.timing and r.measurement.basis, r.id
+        require(r.inputs, r.id)
+        require(r.measurement.window and r.measurement.timing and r.measurement.basis, r.id)
 
 
 def t_drawdown_trips_the_kill_switch():
     for rid, scope in (("LOSS-003", L.KillScope.POOL), ("LOSS-004", L.KillScope.GLOBAL)):
         r = DOC.rule(rid)
-        assert r.action is L.RuleAction.KILL and r.kill_scope is scope, rid
+        require(r.action is L.RuleAction.KILL and r.kill_scope is scope, rid)
         # An unknown drawdown against a kill rule halts rather than declines.
-        assert r.on_missing_input is L.RuleAction.KILL, rid
+        require(r.on_missing_input is L.RuleAction.KILL, rid)
 
 
 # ---- model-level guards -----------------------------------------------------
@@ -152,11 +165,11 @@ def t_loosening_direction_respects_comparison():
                        old_value=D("0.05"), new_value=D("0.08"))
     down = L.LimitChange(rule_id="PORT-001", field="threshold",
                          old_value=D("0.20"), new_value=D("0.10"))
-    assert L.loosens_for(up, lte) is True
-    assert L.loosens_for(down, gte) is True
+    require(L.loosens_for(up, lte) is True, 'L.loosens_for(up, lte) is True')
+    require(L.loosens_for(down, gte) is True, 'L.loosens_for(down, gte) is True')
     tighten = L.LimitChange(rule_id="EXP-001", field="threshold",
                             old_value=D("0.05"), new_value=D("0.03"))
-    assert L.loosens_for(tighten, lte) is False
+    require(L.loosens_for(tighten, lte) is False, 'L.loosens_for(tighten, lte) is False')
 
 
 def t_two_distinct_approvers_required_to_loosen():
@@ -198,7 +211,9 @@ def t_operator_override_may_touch_an_operational_knob():
         [(L.Layer.DEFAULTS, {"latency": {"exit": {"audit_write_budget_ms": 100}}}),
          (L.Layer.OPERATOR_OVERRIDE, {"latency": {"exit": {"audit_write_budget_ms": 250}}})],
         DOC.layering.order, DOC.layering.operator_override_denied_prefixes)
-    assert merged["latency"]["exit"]["audit_write_budget_ms"] == 250
+    require(
+        merged["latency"]["exit"]["audit_write_budget_ms"] == 250,
+        'merged["latency"]["exit"]["audit_write_budget_ms"] == 250')
 
 
 def t_layer_precedence_is_last_wins():
@@ -207,19 +222,23 @@ def t_layer_precedence_is_last_wins():
          (L.Layer.MARKET, {"b": 2, "c": 2}),
          (L.Layer.ENVIRONMENT, {"c": 3})],
         DOC.layering.order, DOC.layering.operator_override_denied_prefixes)
-    assert merged == {"a": 1, "b": 2, "c": 3}
+    require(merged == {"a": 1, "b": 2, "c": 3}, 'merged == {"a": 1, "b": 2, "c": 3}')
 
 
 # ---- hashing and signature ---------------------------------------------------
 def t_content_hash_is_order_independent_and_change_sensitive():
     a = L.content_hash({"x": 1, "y": {"p": 2, "q": 3}})
     b = L.content_hash({"y": {"q": 3, "p": 2}, "x": 1})
-    assert a == b, "hash must not depend on key order"
-    assert a != L.content_hash({"x": 1, "y": {"p": 2, "q": 4}})
+    require(a == b, "hash must not depend on key order")
+    require(
+        a != L.content_hash({"x": 1, "y": {"p": 2, "q": 4}}),
+        'a != L.content_hash({"x": 1, "y": {"p": 2, "q": 4}})')
 
 
 def t_decimal_hashes_as_string_not_float():
-    assert L.canonical_bytes({"v": D("0.050")}) == b'{"v":"0.050"}'
+    require(
+        L.canonical_bytes({"v": D("0.050")}) == b'{"v":"0.050"}',
+        'L.canonical_bytes({"v": D("0.050")}) == b\'{"v":"0.050"}\'')
 
 
 def t_signature_is_required_by_default():
@@ -235,7 +254,7 @@ def t_signature_roundtrip_and_tamper_detection():
     good = sk.sign(CFG.content_hash.encode("ascii"))
     cfg = L.PolicyLoader(ROOT / "config").load(
         signature=good, public_key_pem=pem, require_signature=True)
-    assert cfg.content_hash == CFG.content_hash
+    require(cfg.content_hash == CFG.content_hash, 'cfg.content_hash == CFG.content_hash')
     # a signature over a DIFFERENT hash must not verify
     wrong = sk.sign(b"0" * 64)
     raises(L.PolicySignatureError, lambda: L.PolicyLoader(ROOT / "config").load(
@@ -250,8 +269,12 @@ def t_signature_roundtrip_and_tamper_detection():
 # ---- secrets ----------------------------------------------------------------
 def t_vault_ref_syntax():
     r = L.VaultRef.parse("vault://kv/data/trading/alpaca#api_key")
-    assert (r.mount, r.path, r.key) == ("kv", "data/trading/alpaca", "api_key")
-    assert r.render() == "vault://kv/data/trading/alpaca#api_key"
+    require(
+        (r.mount, r.path, r.key) == ("kv", "data/trading/alpaca", "api_key"),
+        '(r.mount, r.path, r.key) == ("kv", "data/trading/alpaca", "api_key")')
+    require(
+        r.render() == "vault://kv/data/trading/alpaca#api_key",
+        'r.render() == "vault://kv/data/trading/alpaca#api_key"')
     for bad in ("vault://kv/data#", "vault://#k", "kv/data/x#k",
                 "vault://kv/data/x", "https://kv/data/x#k"):
         raises(L.VaultReferenceError, lambda b=bad: L.VaultRef.parse(b))
@@ -270,18 +293,21 @@ def t_literal_secret_is_refused():
 
 def t_policy_file_contains_no_literal_secret():
     for name, ref in DOC.secret_refs.items():
-        assert ref.startswith("vault://"), name
+        require(ref.startswith("vault://"), name)
         L.VaultRef.parse(ref)
 
 
 def t_effective_dump_carries_no_secret_value():
     payload = CFG.audit_payload()
     blob = str(payload)
-    assert "vault://" in blob, "references should survive into the dump"
-    assert payload["rule_count"] == len(DOC.rules)
-    assert payload["content_hash"] == CFG.content_hash
-    assert payload["enforced_rule_count"] < payload["rule_count"], \
-        "at least one rule is in monitor mode, so the counts must differ"
+    require("vault://" in blob, "references should survive into the dump")
+    require(payload["rule_count"] == len(DOC.rules), 'payload["rule_count"] == len(DOC.rules)')
+    require(
+        payload["content_hash"] == CFG.content_hash,
+        'payload["content_hash"] == CFG.content_hash')
+    require(
+        payload["enforced_rule_count"] < payload["rule_count"],
+        "at least one rule is in monitor mode, so the counts must differ")
 
 
 # ---- the gate: precedence and conflict resolution ---------------------------
@@ -297,8 +323,10 @@ def _facts():
 
 def t_all_pass_is_allow():
     v = L.PolicyGate(CFG).evaluate(_facts(), evaluator=_evaluator(set()))
-    assert v.action is L.RuleAction.ALLOW and v.binding_rule_id is None
-    assert v.permits_trade
+    require(
+        v.action is L.RuleAction.ALLOW and v.binding_rule_id is None,
+        'v.action is L.RuleAction.ALLOW and v.binding_rule_id is None')
+    require(v.permits_trade, 'v.permits_trade')
 
 
 def t_deny_beats_modify():
@@ -306,21 +334,23 @@ def t_deny_beats_modify():
     gate = L.PolicyGate(CFG)
     # SIZE-001 is MODIFY, EXP-001 is DENY. Both fail.
     v = gate.evaluate(_facts(), evaluator=_evaluator({"SIZE-001", "EXP-001"}))
-    assert v.action is L.RuleAction.DENY, v.action
-    assert v.binding_rule_id == "EXP-001"
-    assert not v.permits_trade
+    require(v.action is L.RuleAction.DENY, v.action)
+    require(v.binding_rule_id == "EXP-001", 'v.binding_rule_id == "EXP-001"')
+    require(not v.permits_trade, 'not v.permits_trade')
     # MODIFY alone still modifies
     v2 = gate.evaluate(_facts(), evaluator=_evaluator({"SIZE-001"}))
-    assert v2.action is L.RuleAction.MODIFY and v2.modifications
-    assert v2.permits_trade
+    require(
+        v2.action is L.RuleAction.MODIFY and v2.modifications,
+        'v2.action is L.RuleAction.MODIFY and v2.modifications')
+    require(v2.permits_trade, 'v2.permits_trade')
 
 
 def t_kill_beats_deny():
     gate = L.PolicyGate(CFG)
     v = gate.evaluate(_facts(), evaluator=_evaluator({"EXP-001", "LOSS-003"}))
-    assert v.action is L.RuleAction.KILL
-    assert v.binding_rule_id == "LOSS-003"
-    assert v.kill_scope is L.KillScope.POOL
+    require(v.action is L.RuleAction.KILL, 'v.action is L.RuleAction.KILL')
+    require(v.binding_rule_id == "LOSS-003", 'v.binding_rule_id == "LOSS-003"')
+    require(v.kill_scope is L.KillScope.POOL, 'v.kill_scope is L.KillScope.POOL')
 
 
 def t_global_kill_beats_pool_kill_by_rule_id_order():
@@ -328,63 +358,69 @@ def t_global_kill_beats_pool_kill_by_rule_id_order():
     in the audit record is reproducible across runs."""
     gate = L.PolicyGate(CFG)
     v = gate.evaluate(_facts(), evaluator=_evaluator({"LOSS-003", "LOSS-004"}))
-    assert v.action is L.RuleAction.KILL
-    assert v.binding_rule_id == "LOSS-003"     # lexicographically first
+    require(v.action is L.RuleAction.KILL, 'v.action is L.RuleAction.KILL')
+    require(v.binding_rule_id == "LOSS-003", 'v.binding_rule_id == "LOSS-003"')
 
 
 def t_monitor_mode_records_but_does_not_bind():
     gate = L.PolicyGate(CFG)
     monitors = [r.id for r in DOC.rules if r.mode is L.RuleMode.MONITOR]
-    assert monitors, "the fixture needs at least one monitor rule"
+    require(monitors, "the fixture needs at least one monitor rule")
     v = gate.evaluate(_facts(), evaluator=_evaluator(set(monitors)))
-    assert v.action is L.RuleAction.ALLOW, v.binding_rule_id
+    require(v.action is L.RuleAction.ALLOW, v.binding_rule_id)
     recorded = {o.rule_id for o in v.outcomes if not o.passed}
-    assert set(monitors) <= recorded, "a monitor breach must still be recorded"
+    require(set(monitors) <= recorded, "a monitor breach must still be recorded")
 
 
 def t_missing_input_fails_closed():
     gate = L.PolicyGate(CFG)
     v = gate.evaluate({}, evaluator=_evaluator(set()))     # no facts at all
-    assert v.action in (L.RuleAction.KILL, L.RuleAction.DENY)
-    assert not v.permits_trade
+    require(
+        v.action in (L.RuleAction.KILL, L.RuleAction.DENY),
+        'v.action in (L.RuleAction.KILL, L.RuleAction.DENY)')
+    require(not v.permits_trade, 'not v.permits_trade')
     reasons = [o.reason for o in v.outcomes if "missing input" in o.reason]
-    assert len(reasons) == len(DOC.rules)
+    require(len(reasons) == len(DOC.rules), 'len(reasons) == len(DOC.rules)')
 
 
 def t_evaluator_exception_fails_closed():
     def boom(rule, facts):
         raise RuntimeError("evaluator blew up")
     v = L.PolicyGate(CFG).evaluate(_facts(), evaluator=boom)
-    assert not v.permits_trade
-    assert all("fail-closed" in o.reason for o in v.outcomes)
+    require(not v.permits_trade, 'not v.permits_trade')
+    require(
+        all("fail-closed" in o.reason for o in v.outcomes),
+        'all("fail-closed" in o.reason for o in v.outcomes)')
 
 
 def t_every_rule_appears_in_the_outcome_record():
     """No short-circuit: an investigator needs to know which OTHER limits failed."""
     v = L.PolicyGate(CFG).evaluate(_facts(), evaluator=_evaluator({"EXP-001"}))
-    assert len(v.outcomes) == len(DOC.rules)
+    require(len(v.outcomes) == len(DOC.rules), 'len(v.outcomes) == len(DOC.rules)')
 
 
 def t_evaluation_order_is_deterministic_and_id_sorted():
     order = [r.id for r in DOC.evaluation_order()]
-    assert order == sorted(order)
-    assert order == [r.id for r in DOC.evaluation_order()]
+    require(order == sorted(order), 'order == sorted(order)')
+    require(
+        order == [r.id for r in DOC.evaluation_order()],
+        'order == [r.id for r in DOC.evaluation_order()]')
 
 
 def t_kill_switch_liquidation_exemption():
     gate = L.PolicyGate(CFG)
     # KILL-002 passes (it IS a liquidation) and exempts the settlement rules.
     v = gate.evaluate(_facts(), evaluator=_evaluator({"CASH-001", "KILL-001"}))
-    assert v.action is L.RuleAction.ALLOW, (v.action, v.binding_rule_id)
+    require(v.action is L.RuleAction.ALLOW, (v.action, v.binding_rule_id))
     # But it does NOT exempt exposure rules: liquidation only reduces exposure.
     v2 = gate.evaluate(_facts(), evaluator=_evaluator({"EXP-001"}))
-    assert v2.action is L.RuleAction.DENY
+    require(v2.action is L.RuleAction.DENY, 'v2.action is L.RuleAction.DENY')
 
 
 # ---- §7: no risk number from the environment --------------------------------
 def t_lint_finds_no_violation_in_src():
     violations = L.lint_no_env_risk_reads(ROOT / "src")
-    assert not violations, "\n".join(violations)
+    require(not violations, "\n".join(violations))
 
 
 def t_lint_catches_a_planted_violation(tmp=ROOT / "src" / "_lint_probe_tmp"):
@@ -394,14 +430,14 @@ def t_lint_catches_a_planted_violation(tmp=ROOT / "src" / "_lint_probe_tmp"):
         probe.write_text("import os\nMAX_POS = float(os.environ['MAX_POSITION_PCT'])\n",
                          encoding="utf-8")
         v = L.lint_no_env_risk_reads(ROOT / "src")
-        assert any("bad.py" in x for x in v), v
+        require(any("bad.py" in x for x in v), v)
         probe.write_text("from os import environ\nX = environ.get('DAILY_LOSS_PCT')\n",
                          encoding="utf-8")
         v = L.lint_no_env_risk_reads(ROOT / "src")
-        assert any("bad.py" in x for x in v), "from-import form must be caught too"
+        require(any("bad.py" in x for x in v), "from-import form must be caught too")
         probe.write_text("import os\nX = os.getenv('WEEKLY_LOSS')\n", encoding="utf-8")
         v = L.lint_no_env_risk_reads(ROOT / "src")
-        assert any("bad.py" in x for x in v), "os.getenv form must be caught too"
+        require(any("bad.py" in x for x in v), "os.getenv form must be caught too")
     finally:
         probe.unlink(missing_ok=True)
         tmp.rmdir()

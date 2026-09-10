@@ -460,4 +460,441 @@ B-1, B-2, B-3 and B-4 were closed before this freeze and are recorded in the git
 
 ---
 
-# STAGE 1 FROZEN
+---
+
+## 11. Change log against the freeze
+
+STAGE-0-FREEZE §8: *"A re-opening that does not produce a §9 entry has not happened. That is the
+whole mechanism."* This section is that record for Stage 1.
+
+| Date | Artifact | From → To | Trigger | Authority | Summary |
+|---|---|---|---|---|---|
+| 2026-09-01 | SPEC-P1.2-STORAGE + `migrations/0001_initial.sql` | v0.1 → **v0.2** | **T5** — a downstream verification proved the artifact did not do what it claimed | Phase author (§8, *"an additive rule that changes no decision"*) | **Finding B**: `verify_audit_chain()` gains the CONTENT check. **Finding A**: four false claims about `ENABLE ALWAYS` corrected. **No decision, number, table, constraint or grant changed** |
+| 2026-09-01 | SPEC-P1.2-STORAGE + `migrations/0001_initial.sql` | v0.2 → **v0.3** | **T5** — a downstream verification proved the hash preimage was not deterministic | Phase author (§8, *"an additive rule that changes no decision"*) | **Finding C, first half**: `audit_chain_assign()` pins `TimeZone='UTC'`. **No existing hash invalidated** — the pin reproduces the UTC rendering byte for byte. **No decision, number, table, constraint or grant changed** |
+| 2026-09-05 | SPEC-P1.2-STORAGE + `migrations/0001_initial.sql` | v0.4 → **v0.5** | **X2 BLOCKER-1 (second review)** — the independent X2 re-review proved the hash preimage did not cover the P1.4 §6.1 key set | Phase author (§8, *"an additive rule that changes no decision"*) | **Preimage conformance**: `event_id`, `is_paper` and `is_backtest` added to the preimage in **both** functions. All three are `audit_log` columns that SPEC-P1.4 §6.1 pins in the key set and none was hashed; an in-place edit of the paper/real-money flag passed verification. **THIS INVALIDATES EVERY HASH COMPUTED UNDER THE OLD PREIMAGE** — permissible only because §11.4's no-history finding still holds. **No decision, number, table, constraint or grant changed** |
+| 2026-09-04 | SPEC-P1.2-STORAGE + `migrations/0001_initial.sql` | v0.3 → **v0.4** | **X2 BLOCKER-1** — the independent X2 review proved v0.3 closed only half of Finding C | Phase author (§8, *"an additive rule that changes no decision"*) | **Finding C, second half**: both functions additionally pin `DateStyle='ISO, MDY'`; `occurred_at::text` depends on DateStyle as well as TimeZone. **X2 BLOCKER-2**: a stale claim that the insert trigger does not pin the setting, contradicted by v0.3 itself, removed from migration and spec. **No existing hash invalidated** — verified byte-for-byte against three reference rows. **No decision, number, table, constraint or grant changed** |
+
+### 11.1 Why this was re-opened
+
+**Finding B — the verifier could not detect the tamper it exists to detect.**
+`trading.verify_audit_chain()` checked SEQUENCE and LINKAGE but never recomputed
+`payload_hash`. Measured 2026-09-01: an `UPDATE` setting `actor='tampered'` left the function
+reporting `broken_rows = 0`.
+
+This changes **no decision**. SPEC-P1.4 §6 already mandates all three checks, and §2 row 7 already
+requires a structural-only scan to be *"documented as NOT catching content mutation, so nobody
+mistakes the fast path for the real one"*. P1.2 §11.2 rule 3 makes `verify_audit_chain()` the gate
+a migration aborts on — so it is not a fast path, and it must do check 3. The function was simply
+non-conformant with an already-frozen decision. Bringing it into conformance is additive, which is
+why the authority is Phase author and not Owner.
+
+**Finding A — the DDL asserted something untrue.** `ENABLE ALWAYS` does not survive
+`session_replication_role = 'replica'` on a hypertable: DML routes to chunks, chunk triggers are
+ORIGIN, and TimescaleDB refuses to promote them (`operation not supported on chunk tables`).
+Correcting a comment that states a falsehood changes no decision either.
+
+### 11.2 Scope of the change
+
+Strictly limited to those two items.
+
+| Changed | Not changed |
+|---|---|
+| `verify_audit_chain()` — added CONTENT branch, `extensions` on search_path, `TimeZone='UTC'` | Any table, column, constraint, index, grant, role, policy or hypertable setting |
+| Four false `ENABLE ALWAYS` claims (DDL comment ×2, §1553, edge-case row 14, DECISIONS row 10) | Any number, threshold or decision |
+| Spec version 0.1 → 0.2 | The `ALTER TABLE … ENABLE ALWAYS` statements themselves — retained, and correct for the parent |
+
+### 11.3 Findings left open by this change
+
+Superseded in part by §11.4 and §11.5 below (taken 2026-09-01) and by §11.7 (2026-09-04).
+
+| # | Severity | Status now |
+|---|---|---|
+| **A** | HIGH | **ACCEPTED as a documented architectural limitation** — Owner decision, §11.5. Not closed, not fixable in the current architecture. Detection covers **in-place mutation of every hashed column** (all 11 P1.4 §6.1 keys that have a column, since §11.8). It does **not** cover a fabricated *append* under replica role: the chain-assign trigger is skipped there too, so an attacker can choose `seq`, `prev_hash` and `payload_hash` and produce an internally consistent row. That residual is P1.4 §6.3's, and the anchor is its answer — still gated on Q-P1.4-1 |
+| **C** | MEDIUM | **FIXED at v0.4, not at v0.3** — §11.4 (TimeZone) plus §11.7 (DateStyle). v0.3 pinned `TimeZone` only and this table then claimed C was fixed; X2 proved otherwise. `occurred_at::text` renders under **both** `TimeZone` and `DateStyle`, so half the defect survived with the same signature. Both GUCs are now pinned on both functions and the property is regression-tested in four directions (§11.7) |
+
+### 11.4 Finding C — timezone-dependent hash preimage (2026-09-01)
+
+**Why re-opened.** `payload_hash` was not a pure function of the row's logical content. The
+preimage includes `occurred_at::text`, whose rendering depends on the session TimeZone, and
+`audit_chain_assign()` pinned none. Measured on the pinned environment for the single instant
+`2026-08-27 12:00:00+00`:
+
+| Session TimeZone | Digest (first 16) |
+|---|---|
+| UTC | `5ceae9dc855d68d9` |
+| Asia/Kolkata | `db99e8d94bdb40bb` |
+| America/New_York | `36eacb365c5ae4f8` |
+
+A row written under a non-UTC session would therefore verify as **CONTENT MUTATED** against any
+other session — a false tamper alarm on a legitimate row, and, with Finding B's CONTENT check now
+live, a false alarm that would actually fire.
+
+**Classification.** A reproducibility defect in the DB-side preimage. It is *not* covered by the
+frozen canonicalisation rule `jcs-nonum-1` (Q-P1.2-1), which governs the **application-supplied
+payload** only; `occurred_at::text` is rendered by PostgreSQL and sat outside that rule.
+
+**Why this changes no decision.** The frozen rule already intends a deterministic preimage. The
+DB side simply did not conform. Bringing it into conformance is additive — hence Phase author
+authority under §8, not Owner.
+
+**Existing hashes: none invalidated.** The fix pins the function's TimeZone rather than rewriting
+the expression. `(occurred_at AT TIME ZONE 'UTC')::text` would also be deterministic but renders
+differently and would invalidate every `payload_hash` already computed — precisely what §11.2
+rule 1 forbids. The pinned digest **is** the current UTC digest (`5ceae9dc855d68d9` in both), so
+every hash written under the existing `TZ=UTC`/`PGTZ=UTC` container config remains valid.
+
+**Deployment state, explicitly.** `0001_initial.sql` has never been deployed. There is no
+`ansible/`, `terraform/`, `deploy/` or `infra/` tree; P6.4 (Deployment, CI/CD and Disaster
+Recovery) has not been run; the only workflow is `ci-migration.yml`. The local database held 100
+`audit_log` rows, all ephemeral `actor='b4'` fixtures rebuilt by `scripts/apply-migration.sh`.
+**There is no production audit history to invalidate.** This is why the fix is taken now: after
+deployment it would become a §11.2 rule 2 event — a new table plus a chain-linking event.
+
+**Scope.** `SET TimeZone = 'UTC'` added to `audit_chain_assign()`, in the migration and in the
+spec's §9.4 DDL block. The preimage expression itself is untouched. Nothing else changed.
+
+### 11.5 Finding A — accepted as a documented architectural limitation (2026-09-01)
+
+Owner decision, 2026-09-01: **`audit_log` remains a hypertable.** Finding A is accepted, not fixed.
+
+| Dimension | Position |
+|---|---|
+| Prevention | **Unavailable.** `ALTER TABLE … ENABLE ALWAYS TRIGGER` on a chunk returns `operation not supported on chunk tables`. No supported mechanism exists |
+| Detection | **Works**, since Finding B. Verified: a replica-role UPDATE reports `content mutated` |
+| Mitigation | Unchanged and already frozen — off-VM WAL archive (§10.3), `log_statement='ddl'` to an off-VM sink, anchoring (P1.4 §6.3, gated on Q-P1.4-1) |
+| Frozen decision violated? | **No.** P1.4 §6.5: *"Tamper-EVIDENT. Not tamper-proof… What this design guarantees is that a mutation cannot go unnoticed."* The guarantee is detection |
+
+Worth recording plainly: **before Finding B was fixed the system did violate that guarantee** — a
+content mutation genuinely could go unnoticed. Finding A alone never did, and accepting A does not
+re-open the gap.
+
+**Corrected 2026-09-05.** This paragraph previously read *"Finding B's CONTENT check is what
+brought the system into conformance"*. That was **false when written**. Finding B's check covered
+8 of the 13 `audit_log` columns and missed `is_paper`, `is_backtest`, `event_id` and
+`recorded_at`; `recorded_at` is correctly excluded, the other three were not. Until §11.8 an
+`UPDATE` flipping `is_paper` on an `ACTION` row still left `verify_audit_chain()` reporting zero
+breaks, so P1.4 §6.5's *"a mutation cannot go unnoticed"* did not hold for the flag that
+separates a paper order from a real-money one. **Conformance was reached at §11.8, not here** —
+Finding B built the mechanism, §11.8 gave it the key set. This is the same defect class as
+Finding A, in this record rather than in the DDL, and is corrected on the same reasoning.
+
+The Finding A regression test (`verify_p12_runtime_behaviours.sh` check 7.1b) is **retained
+unweakened**. It asserts the bypass still reproduces, so if prevention is ever fixed the test
+fails loudly and Finding A must be revisited deliberately rather than by accident.
+
+### 11.6 Re-freeze status
+
+**NOT re-frozen.** SPEC-P1.2-STORAGE v0.4 still carries `status: FROZEN` from the 2026-08-31
+freeze, but this drop has not completed the review the process requires.
+
+The governing rule (PROMPT-PACK appendix): *"Every code drop goes through X2 in a separate
+conversation. The author never reviews itself. A BLOCKER finding means the drop does not land."*
+Findings B and C were fixed by the same author who found them, so **X2 in a fresh context is a
+precondition**, not a formality.
+
+**Status 2026-09-04.** X2 ran and returned **BLOCKER** — two of them, plus a proof that one
+regression check was vacuous. All three were resolved (§11.7) and the corrections were verified
+by deliberate sabotage.
+
+**Status 2026-09-05.** X2 ran **again**, against the v0.4 drop, and returned **BLOCKER** once
+more — one this time: the CONTENT check added for Finding B covered 8 of 13 `audit_log` columns
+and did not cover the P1.4 §6.1 key set, so `is_paper`, `is_backtest` and `event_id` were
+mutable undetected. Resolved at v0.5 (§11.8). That review also confirmed, by deliberate
+sabotage, that the v0.4 corrections themselves hold: Findings A, B and C reproduce as recorded
+and CONDITION 5 is met.
+
+That review also recorded here that *"the runtime suite is discriminating in eight directions"*.
+**That claim is withdrawn as a statement about the suite.** It was true of the eight sabotages it
+actually referred to — all of them against the GUC pins and the presence of the CONTENT branch —
+and it did not extend to the correction v0.5 had just made. The third X2 measured exactly that
+gap. See §11.9.
+
+**Status 2026-09-06.** X2 ran a **third** time, against the v0.5 drop, and returned **BLOCKER** —
+one, **BLOCKER-A**: the `event_id`, `is_paper` and `is_backtest` terms v0.5 added to the preimage
+had no regression coverage, so the correction could silently revert with every suite green. That
+review re-confirmed the v0.5 code fix itself as correct on every measure it took. BLOCKER-A is
+resolved at §11.9, which changes **no frozen artifact** — the fix is test coverage — so there is
+no version bump and no §11 change-log row.
+
+The §11.9 coverage is **again author-written**, so step 1 applies to it exactly as it applied to
+v0.3, v0.4 and v0.5 — with particular force here, because the artifact being extended is the very
+test file whose blind spot BLOCKER-A was. That is the state right now — corrected, verified by
+sabotage, and **awaiting a fourth X2 re-review**. Nothing below step 1 has been started.
+
+Required sequence before re-freeze:
+
+1. **X2 RE-REVIEW** of the corrected uncommitted drop, in a separate conversation ← **current step**
+2. Resolve any BLOCKER findings
+3. **Commit**
+4. **X3 re-run** — the consolidated contracts, contradictions and coverage in §3–§7 were built at
+   `605ff40` and SPEC-P1.2 has since moved 0.1 → 0.4
+5. **X5 re-run** — `STAGE-1-GAP-AUDIT` was taken at `605ff40`; conditions 1, 2, 5, 6 and 7 have
+   since changed state
+6. Create `DECISIONS.md` at the repo root — required by the PROMPT-PACK appendix, currently
+   absent. It must **index** the existing records (SPEC-P0.1-DECISIONS's ADRs, STAGE-0-FREEZE §6,
+   this §11), not duplicate them
+7. Update these freeze records, then **re-freeze**
+
+Only after that does P2.1 become available.
+
+### 11.7 X2 review corrections — Finding C completed, and a vacuous check replaced (2026-09-04)
+
+The independent X2 review of the v0.3 drop returned **BLOCKER**. Three items were actioned; the
+remaining X2 findings (N-2 through N-11) were deliberately **left open** and are not touched here.
+
+**BLOCKER-1 — Finding C was half-fixed.** `occurred_at::text` renders under `DateStyle` as well
+as `TimeZone`. v0.3 pinned only the latter, so the identical defect survived with a different
+GUC. With `TimeZone` already pinned to UTC, the single instant `2026-08-27 12:00:00+00` still
+rendered four ways:
+
+| DateStyle | Rendering |
+|---|---|
+| `ISO, MDY` | `2026-08-27 12:00:00+00` — what every hash to date was built on |
+| `SQL, DMY` | `27/08/2026 12:00:00 UTC` |
+| `Postgres, DMY` | `Thu 27 Aug 12:00:00 2026 UTC` |
+| `German, DMY` | `27.08.2026 12:00:00 UTC` |
+
+X2 demonstrated both failure directions on an untampered chain, using only libpq's
+`PGDATESTYLE` and **no SQL statement at all** — the same exposure class as `PGTZ`:
+
+- a legitimate row *written* under `PGDATESTYLE='German, DMY'` verified as **content mutated**;
+- a legitimate chain *verified from* such a session reported **every row** mutated.
+
+Because P1.2 §11.2 rule 3 makes `verify_audit_chain()` the gate a migration aborts on, that is a
+spurious tamper alarm and an aborted migration on correct data.
+
+**Fix.** `SET DateStyle = 'ISO, MDY'` added beside the existing `SET TimeZone = 'UTC'` on **both**
+`audit_chain_assign()` (§9.4) and `verify_audit_chain()` (§9.5), in the migration and in the
+spec's DDL blocks. **The preimage expression is untouched.**
+
+**Existing hashes: none invalidated.** `ISO, MDY` is the PostgreSQL default and is what every
+hash to date was computed under, so the pin reproduces the existing rendering byte for byte —
+the same argument §11.4 makes for `TimeZone`, and the reason the pin is on the function rather
+than on the expression. Verified rather than asserted: three reference rows spanning fractional
+seconds, multiple event classes and multiple payload shapes hashed **byte-for-byte identically**
+before and after the change (`092f7844…`, `a7f054e2…`, `c1f34f2e…`).
+
+**BLOCKER-2 — a stale claim contradicted by v0.3 itself.** The §9.5 comment block asserted *"The
+insert trigger does NOT pin it — see Finding C"*, which v0.3 had already falsified 80 lines
+earlier by adding the pin to `audit_chain_assign()`. Removed from both the migration and the
+spec, and replaced with a statement of the actual invariant: the two functions carry an identical
+pair of pins and must, or every row reports as mutated. This is the same defect class as
+Finding A — a comment stating a falsehood — and is corrected on the same reasoning.
+
+**N-1 — the false-positive check was vacuous.** X2 proved that check 7.1e could not fail. It
+asked for `count(*) … WHERE broken_at <> SEQ`, but `BASE = max(seq)+1` and the probe insert then
+takes that seq, so `BASE == SEQ`, the scan range held exactly one row, and the filter excluded
+it. The query counted an empty set. Demonstrated: with the CONTENT check **entirely deleted from
+the verifier**, 7.1e still reported `PASS`. That absent coverage is why BLOCKER-1 went unnoticed
+by the drop's own suite.
+
+Replaced with a precision assertion over a **populated** range — six untampered rows alongside
+the one tampered row — demanding that the CONTENT check name *exactly* the tampered row. It now
+fails in both directions, each proven by deliberate sabotage:
+
+| Sabotage applied | New 7.1e result |
+|---|---|
+| CONTENT check deleted from the verifier | **FAIL** — reported `NONE` over a range with a known tamper |
+| Verifier preimage made to drift from the writer's | **FAIL** — reported `{0,1,2,3,4,5,6}`, expected `{0}` |
+
+**Regression coverage added.** New section 7.8 in `verify_p12_runtime_behaviours.sh`, seven
+checks covering all five properties X2 required, each confirmed discriminating by removing the
+pin and observing the failure:
+
+| Check | Proves | Fails when |
+|---|---|---|
+| 7.8a | both functions pin `DateStyle` | either pin removed (2 checks) |
+| 7.8b | control: unpinned digests **differ** across DateStyles; pinned digests **match** | the control stops discriminating |
+| 7.8c | rows written under 4 DateStyles — `ISO, MDY` as the benign control plus 3 hostile — verify clean | the **writer's** pin is removed → 3 false positives, one per hostile DateStyle |
+| 7.8d | untampered chain verifies clean from 2 hostile *verifier* sessions | the **verifier's** pin is removed → 4 false positives each |
+
+7.8d deliberately closes, for `DateStyle`, the blind spot X2 recorded as N-4 against the
+`TimeZone` half: 7.7c cannot detect a missing verify-side pin because the container session is
+already UTC, whereas 7.8d makes the calling session hostile on purpose. **N-4 itself is left open
+for the `TimeZone` half** — it is outside the scope authorised for this correction.
+
+**Scope.** Two `SET` clauses × two functions × two files; one stale comment removed from two
+files; one test check replaced; one test section added; these freeze records. The preimage
+expression, and every table, column, constraint, index, grant, role, policy and hypertable
+setting, are untouched.
+
+**Not re-frozen, and not reviewed.** These corrections were written by the author of the code
+they correct. §11.6 step 1 applies to them exactly as it applied to v0.3.
+
+### 11.8 X2 BLOCKER-1, second review — the preimage key set (2026-09-05)
+
+The independent X2 re-review of the v0.4 drop returned **BLOCKER**, one finding. Findings A, B
+and C were re-measured and held; CONDITION 5, the freeze procedure and the runtime suite passed.
+The blocker was that **Finding B's CONTENT check was hashing the wrong key set.**
+
+**The defect.** `trading.audit_log` has 13 columns. The preimage covered 8:
+`prev_hash, seq, event_type, event_class, occurred_at, actor, run_id, payload`. It omitted
+`event_id`, `is_paper`, `is_backtest` and `recorded_at`. `recorded_at` is correctly omitted —
+P1.4 §6.1 requires its absence (`[DEFAULT-A2]`). The other three are not: **SPEC-P1.4 §6.1 pins
+the preimage key set explicitly and names `is_paper` and `is_backtest` in it.**
+
+Measured on the v0.4 drop, under `session_replication_role = 'replica'`:
+
+| Mutation | `verify_audit_chain(0)` reported |
+|---|---|
+| `is_paper` true→false **and** `is_backtest` false→true on an `ACTION` row | **0 breaks** |
+| `recorded_at` +400 days, `event_id` → `…deadbeef` | **0 breaks** |
+| `actor` → `'tampered'` (control) | 1 — `content mutated` |
+
+`is_paper` is the flag that separates a paper order from a real-money one. P1.4 §6.5's
+*"a mutation cannot go unnoticed"* did not hold for it, and §11.5 nevertheless claimed
+conformance had been restored. Both the code and that claim are corrected here.
+
+**Why this changes no decision.** P1.4 §6.1 has pinned this key set since it was written. The
+database preimage simply did not implement it. Bringing it into conformance is additive — hence
+Phase author authority under §8, the same basis as Findings B and C.
+
+**Fix.** `event_id::text`, `is_paper::text` and `is_backtest::text` appended to the preimage in
+**both** `audit_chain_assign()` (§9.4) and `verify_audit_chain()` (§9.5), in the migration and in
+the spec's DDL blocks. Every pre-existing field keeps its exact position and rendering;
+`payload::text` stays last because it is the only unbounded field and its leading `{` anchors the
+final boundary. Among themselves the three follow P1.4 §6.1's order.
+
+The preimage now covers **11 of 11** P1.4 §6.1 keys that have an `audit_log` column. The four
+that do not — `canonical_schema`, `schema_version`, `causation_id`, `input_hash` — have no column
+to hash and are recorded as **Q-P1.2-7** below, not silently absorbed.
+
+**Existing hashes: EVERY ONE IS INVALIDATED.** This is the one place this record must not repeat
+the argument §11.4 and §11.7 made. Those fixes pinned a GUC and reproduced the previous rendering
+byte for byte. **This one does not, and cannot:** adding a field to a digest changes it. Measured
+on three reference rows — old-preimage digest vs stored digest: `8b1ded46…`/`d940baf4…`,
+`faf5d35f…`/`9b1a0fc4…`, `14946aad…`/`b0cd27e7…`, **none equal**.
+
+It is permissible only because §11.4's deployment finding still holds, re-verified 2026-09-05:
+no `ansible/`, `terraform/`, `deploy/` or `infra/` tree exists; the only workflow is
+`ci-migration.yml`, which tears its database down; `scripts/apply-migration.sh` drops and
+recreates the database on every run; and the only `audit_log` rows anywhere are ephemeral
+fixtures. **There is no production audit history to invalidate.** After deployment this would be
+a §11.2 rule 2 event — a new table plus a chain-linking event — and not available as an edit.
+That is precisely why it is taken now.
+
+**One regression introduced and caught during this correction.** The first draft of the §9.4
+comment contained the literal words `TimeZone` and `DateStyle` inside the function body. Checks
+7.7a and 7.8a guard the pins with `pg_get_functiondef(...) ~* 'TimeZone'`, which matches comment
+prose as readily as a `SET` clause — so the writer-side pin guards went vacuous, and sabotage S5
+dropped from 4 failures to 3, S6 from 2 to 1. Demonstrated: with the `SET DateStyle` clause
+removed, `proconfig` read `search_path=… | TimeZone=UTC` while the grep guard still answered
+`true`. The comment was reworded and both guards restored to 4 and 2. **The underlying fragility
+is not fixed and is recorded as a finding for the harness author:** these two checks should read
+`pg_proc.proconfig`, not the function text. Left open deliberately — the test file is outside the
+scope authorised for this correction. **Still open after §11.9**, which does extend that file but
+only for BLOCKER-A; 7.7a and 7.8a are untouched. §11.9's own new check 7.1h is written the way
+this finding says these two should be — comments stripped before the text is read — but it guards
+the preimage key set, not the GUC pins, so it does not close this.
+
+**Scope.** Three fields × two functions × two files; one comment block added to each function in
+each file; §11.3 and §11.5's conformance claims corrected; this section; the §11 change-log row;
+the spec version bump; **Q-P1.2-7** opened. The preimage's pre-existing field order, and every
+table, column, constraint, index, grant, role, policy and hypertable setting, are untouched.
+
+**Deliberately NOT fixed here.** The second X2 raised eight non-blocking findings. None is
+required for this blocker and none is touched: N-1 (the M-1 lines that entered §9.5 undeclared),
+N-2 (§9.4's DDL still omits the H-1 `READ COMMITTED` guard the migration carries), N-3 (no CI runs
+the regression suites), N-4 (this record's own `version:` and `depends_on:`), N-5 (the §2 hash
+table), N-6, N-7, N-8. They remain open for the governed sequence.
+
+**Not re-frozen, and not reviewed.** Written by the author of the code it corrects. §11.6 step 1
+applies.
+
+### 11.9 X2 BLOCKER-A, third review — regression coverage for the v0.5 preimage (2026-09-06)
+
+The independent X2 re-review of the v0.5 drop returned **BLOCKER**, one finding. The v0.5 *code*
+was re-measured and held on every dimension: writer and verifier preimages byte-identical, all 11
+P1.4 §6.1 keys that have an `audit_log` column covered, `recorded_at` absent, digests identical
+across nine `DateStyle` × `TimeZone` combinations, and each of the three added columns detected on
+mutation. The blocker was that **none of it was tested.**
+
+**The defect.** Checks 7.1c, 7.1d and 7.1e drive the CONTENT check through a single `actor`
+mutation, and `actor` was already hashed before v0.5. Nothing anywhere mutated `event_id`,
+`is_paper` or `is_backtest`. Measured by that review: with all three terms deleted from the
+preimage in **both** `audit_chain_assign()` and `verify_audit_chain()` — in the migration, with
+the database rebuilt from it — every one of the nine suites exited 0, `verify_p12_runtime_behaviours`
+included at 28/28, while an `UPDATE` flipping `is_paper` on an `ACTION` row reported 0 breaks. The
+correction that closed the previous BLOCKER-1 could be reverted and nothing would say so.
+
+**Why this is a blocker rather than a finding.** §11.7 closed the previous X2 BLOCKER by adding a
+new §7.8 with seven checks and recorded it here as *"Regression coverage added."* §11.8 closed a
+blocker of the same class and added none, on a scope this record set for itself. That is the
+standard being applied inconsistently to two consecutive corrections of the same expression, and
+it is the second time a defect in that expression survived a fully green suite.
+
+**Fix — three new check groups in `tests/verify_p12_runtime_behaviours.sh`, §7.1.** No frozen
+artifact is touched.
+
+- **7.1f — one mutation probe per hashed column.** `is_paper`, `is_backtest`, `event_id`, and
+  `actor` through the identical harness as a like-for-like control. Each probe gets its **own row
+  and its own scan range**: a shared row would let any one still-covered column mask the loss of
+  another, because a single `UPDATE` touching all three is detected as long as one of them is
+  hashed. Each also carries two untampered rows in range, so it fails in the false-positive
+  direction too. Each reads the column back after the `UPDATE` and reports "the mutation did not
+  land, see 7.1b" rather than "not detected" if the replica bypass ever closes — the two have
+  opposite meanings.
+- **7.1g — the negative probe, plus its own control.** `recorded_at` must **not** be reported.
+  `[DEFAULT-A2]` keeps it out of the preimage because hashing when we wrote a row down means a
+  replayed write can never reproduce the hash, which kills the replay tool (P1.4 §6.4). A
+  correction that over-reaches and hashes "every column" would pass all of 7.1f. Because a
+  negative assertion also passes with the CONTENT branch deleted entirely, the probe is followed
+  by a mutation of `actor` **on the same row in the same range**, which must be reported. Only
+  then does "recorded_at was not reported" mean it is excluded rather than that nothing was
+  checked.
+- **7.1h — mechanical key-set conformance from the catalogue.** The digest expression is read back
+  out of `pg_get_functiondef()`, **SQL comments stripped first** so the N-9 trap cannot apply,
+  split on `||` and reduced to a field list. Two assertions: writer and verifier must produce the
+  same *ordered* term list, and the field *set* must be exactly the 11 P1.4 §6.1 keys that have a
+  column. Set equality, so it fails on an omission and on an addition alike.
+
+The suite goes from 28 checks to 36.
+
+**Discrimination, measured.** Every sabotage removes the field from **both** functions, so writer
+and verifier stay in agreement and nothing can fail merely because they diverged. Before this
+change all four rows below were green.
+
+| Sabotage (removed from BOTH functions) | Runtime suite | Which checks failed |
+|---|---|---|
+| **A1** `is_paper` | **exit 1** — 34 passed, 2 failed | 7.1f `is_paper`, 7.1h key set |
+| **A2** `is_backtest` | **exit 1** — 34 passed, 2 failed | 7.1f `is_backtest`, 7.1h key set |
+| **A3** `event_id` | **exit 1** — 34 passed, 2 failed | 7.1f `event_id`, 7.1h key set |
+| **A4** all three | **exit 1** — 32 passed, 4 failed | 7.1f ×3, 7.1h key set |
+| **A4 end-to-end** — the same three deleted from `0001_initial.sql`, database rebuilt from it | **exit 1** — 32 passed, 4 failed | 7.1f ×3, 7.1h key set |
+
+In **all five**, 7.1e and 7.1h's writer/verifier-agreement check still passed. The failures are
+attributable to the field being absent, not to the two functions disagreeing — which is the whole
+point, and the reason a verifier-only sabotage would have proved nothing.
+
+The A4 end-to-end run also re-reproduced the original defect against the sabotaged build:
+`is_paper`, `is_backtest`, `event_id` and all three together each reported **0 breaks**, with
+`actor` reporting 1. That is BLOCKER-1 exactly as first measured — and it is now accompanied by a
+red suite instead of a green one.
+
+**The six Python suites stay green under every sabotage above, and that is correct, not a gap.**
+They exercise `src/audit/chain.py`'s own preimage, which is a different implementation over a
+different key set and never reaches the database. That the two disagree is **Q-P1.2-7**, untouched
+here.
+
+**Scope.** One file — `tests/verify_p12_runtime_behaviours.sh` — plus this section and the two
+corrections in §11.6 and §11.8 that describe it. **No frozen artifact changed**: not the
+migration, not SPEC-P1.2, not a table, column, constraint, index, grant, role, policy or
+hypertable setting, and not the preimage itself. There is therefore **no version bump and no §11
+change-log row** — the change-log table records changes to frozen artifacts, and this is test
+coverage for a change already recorded at §11.8.
+
+**Two documentation corrections, both caused directly by this change and limited to it.** §11.6's
+*"the runtime suite is discriminating in eight directions"* is withdrawn as a statement about the
+suite — it was true of the eight sabotages it referred to and did not extend to v0.5's own fix.
+§11.8's *"the test file is outside the scope authorised for this correction"* now carries a
+pointer here, because that file has been extended — for BLOCKER-A only.
+
+**Deliberately NOT fixed here.** N-1, N-2, N-3, N-4, N-5, N-6, N-7, N-8, **N-9** and **Q-P1.2-7**
+are all untouched and all remain open. N-9 in particular: 7.7a and 7.8a still read the raw
+function text and are still satisfiable by comment prose. The new 7.1h is written the way N-9 says
+those two should be, but it guards the preimage key set, not the GUC pins, so it does not close
+them.
+
+**Not re-frozen, and not reviewed.** Written by the author of the code it covers, and the artifact
+added is the very test file whose blind spot BLOCKER-A was — so §11.6 step 1 applies with more
+force here, not less. Nothing has been committed, staged or pushed.

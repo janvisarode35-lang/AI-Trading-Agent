@@ -1322,10 +1322,26 @@ CREATE TRIGGER audit_log_no_delete BEFORE DELETE ON trading.audit_log
 CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON trading.audit_log
     FOR EACH STATEMENT EXECUTE FUNCTION trading.deny_mutation();
 
--- THE LINE THAT MATTERS. A normal trigger is silently skipped when
--- session_replication_role = 'replica', which any superuser can SET. ENABLE
--- ALWAYS makes the trigger fire in that mode too, closing the one bypass that
--- looks like a configuration change rather than an attack.
+-- A normal trigger is silently skipped when session_replication_role = 'replica',
+-- which any superuser can SET. ENABLE ALWAYS is intended to make the trigger fire in
+-- that mode too.
+--
+-- X5 Finding A, 2026-09-01: ON A HYPERTABLE THIS DOES NOT WORK, AND CANNOT BE MADE TO.
+-- audit_log is a hypertable, so DML routes to its chunks, and TimescaleDB creates chunk
+-- triggers as ORIGIN regardless of the parent's setting. ORIGIN triggers are exactly the
+-- ones 'replica' skips. Measured: under replica role, UPDATE and DELETE on audit_log
+-- both SUCCEED. Promoting the chunk triggers is refused outright —
+--   ERROR: operation not supported on chunk tables
+-- so there is no in-database fix at the trigger level.
+--
+-- These ALTERs are kept: they are correct for the parent, they are free, and they would
+-- take effect if audit_log ever became a plain table. But they do NOT close the replica
+-- bypass, and this comment previously claimed they did.
+--
+-- The defence is therefore DETECTION, not prevention, which is what §9.6 always said:
+-- tamper-EVIDENT, not tamper-proof. verify_audit_chain() (§9.5) carries the CONTENT
+-- check that makes an in-place edit detectable — see Finding B. Whether audit_log should
+-- remain a hypertable is a separate architectural question, deliberately not decided here.
 ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_no_update;
 ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_no_delete;
 ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_no_truncate;
@@ -1380,8 +1396,44 @@ END $$;
 -- assigns it under a lock cannot be raced.
 -- pg_advisory_xact_lock serialises the chain head. At ~0.3 writes/second
 -- (15,000 events over a 14.95 h window, P0.3 §6.1) this is not a bottleneck.
+-- X5 Finding C, 2026-09-01. TimeZone is pinned because the preimage below includes
+-- occurred_at::text, and that rendering is TIMEZONE-DEPENDENT. The same instant hashes
+-- three different ways under three session timezones — measured on this pinned
+-- environment for 2026-08-27 12:00:00+00:
+--     UTC 5ceae9dc855d68d9 | Asia/Kolkata db99e8d94bdb40bb | America/New_York 36eacb36...
+-- so payload_hash was not a pure function of the row's logical content. A row written by
+-- a session that happened to carry a non-UTC TimeZone would verify as CONTENT MUTATED
+-- against any other session — a false tamper alarm on a legitimate row.
+--
+-- X2 BLOCKER-1, 2026-09-04. PINNING TimeZone ALONE WAS NOT ENOUGH. occurred_at::text
+-- depends on DateStyle as well, so the v0.3 fix closed half the defect and left the other
+-- half with the same signature. With TimeZone already pinned to UTC, that one instant
+-- STILL renders four ways:
+--     ISO, MDY       2026-08-27 12:00:00+00      <- what every hash to date was built on
+--     SQL, DMY       27/08/2026 12:00:00 UTC
+--     Postgres, DMY  Thu 27 Aug 12:00:00 2026 UTC
+--     German, DMY    27.08.2026 12:00:00 UTC
+-- and DateStyle needs no SQL to reach: libpq's PGDATESTYLE carries it, exactly as PGTZ
+-- carries TimeZone. Measured before this fix, with no SET statement anywhere: an
+-- UNTAMPERED row written under PGDATESTYLE='German, DMY' verified as CONTENT MUTATED, and
+-- an untampered chain verified from such a session reported EVERY row mutated. Both GUCs
+-- are therefore pinned, on both functions.
+--
+-- The pins are deliberately on the FUNCTION rather than a rewrite of the expression.
+-- (occurred_at AT TIME ZONE 'UTC')::text would also be deterministic, but it renders
+-- differently and would silently invalidate every payload_hash already computed —
+-- exactly what §11.2 rule 1 forbids. Pinning reproduces the existing rendering byte for
+-- byte: 'UTC' and 'ISO, MDY' are what this environment already ran under, so the pinned
+-- digest IS the current digest. Verified — three reference rows spanning fractional
+-- seconds and multiple event classes hash identically before and after this change.
+--
+-- verify_audit_chain() (§9.5) carries the identical PAIR of pins. The two must agree or
+-- every row reports as mutated, which is a loud failure rather than a silent one.
 CREATE OR REPLACE FUNCTION trading.audit_chain_assign() RETURNS trigger
-LANGUAGE plpgsql SET search_path = trading, extensions, pg_temp AS $$
+LANGUAGE plpgsql
+SET search_path = trading, extensions, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY' AS $$
 DECLARE
     v_prev text;
     v_seq  bigint;
@@ -1424,9 +1476,42 @@ BEGIN
     -- keys, Decimal as string, no insignificant whitespace) and P1.4 owns that
     -- rule. See Q-P1.2-1 — this is the interim form, and it is interim in the
     -- canonicalisation rule only, not in the chain construction.
+    --
+    -- X2 BLOCKER-1 (second review), 2026-09-05. THE KEY SET WAS SHORT BY THREE COLUMNS.
+    -- SPEC-P1.4 §6.1 pins the preimage key set explicitly and NAMES is_paper and
+    -- is_backtest in it. audit_log carries both, and event_id, and none of the three was
+    -- hashed. Measured: under replica role an UPDATE setting is_paper=false and
+    -- is_backtest=true on an ACTION row left verify_audit_chain() reporting 0 breaks,
+    -- while the same UPDATE against actor reported 1. is_paper is the flag that separates
+    -- a paper order from a real-money one, so P1.4 §6.5's "a mutation cannot go unnoticed"
+    -- did not hold for it. This is a CONFORMANCE correction to an already-frozen decision,
+    -- not a new one: P1.4 §6.1 has required these fields since it was written.
+    --
+    -- The three are APPENDED immediately before payload::text. Every pre-existing field
+    -- keeps its exact position and rendering. payload stays last because it is the only
+    -- unbounded field and its leading '{' (CHECK audit_payload_is_object) anchors the
+    -- final boundary; run_id::text and event_id::text are both fixed 36-char canonical
+    -- UUIDs and boolean::text is always 'true' or 'false', so every new boundary is rigid.
+    -- Among themselves the three follow P1.4 §6.1's order. recorded_at stays OUT, exactly
+    -- as P1.4 §6.1 requires ([DEFAULT-A2]).
+    --
+    -- Both new renderings are GUC-independent: uuid_out is always lowercase canonical and
+    -- boolean_out is always 'true'/'false'. The two session-setting pins declared above the
+    -- function body remain the only session state this preimage depends on. (Those two GUC
+    -- names are deliberately NOT spelled here: checks 7.7a/7.8a grep the function text for
+    -- them, so naming them inside the body would satisfy the guard with prose and let a
+    -- removed pin pass. See §11.8.)
+    --
+    -- THIS INVALIDATES EVERY HASH COMPUTED UNDER THE OLD PREIMAGE. Adding a field to a
+    -- digest cannot do otherwise, and unlike Findings B and C this change does NOT
+    -- reproduce the previous rendering. It is taken now, and only now, on the rationale
+    -- §11.4 already established and measured: 0001_initial.sql has never been deployed and
+    -- there is no production audit history to invalidate. After deployment this would be a
+    -- §11.2 rule 2 event — a new table plus a chain-linking event — not an edit.
     NEW.payload_hash := encode(digest(
         NEW.prev_hash || NEW.seq::text || NEW.event_type || NEW.event_class ||
         NEW.occurred_at::text || NEW.actor || NEW.run_id::text ||
+        NEW.event_id::text || NEW.is_paper::text || NEW.is_backtest::text ||
         NEW.payload::text, 'sha256'), 'hex');
     RETURN NEW;
 END $$;
@@ -1436,9 +1521,40 @@ CREATE TRIGGER audit_log_assign_chain BEFORE INSERT ON trading.audit_log
 ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_assign_chain;
 
 -- ===== section 9.5 =====
+-- X5 condition 7 / Finding B. This function previously checked SEQUENCE and LINKAGE only.
+-- It never recomputed payload_hash, so a row whose CONTENT was altered in place passed
+-- verification: the stored hash still matched its neighbours' expectations because nobody
+-- asked whether it still matched its own row. Reproduced 2026-09-01 — an UPDATE that set
+-- actor='tampered' left verify_audit_chain() reporting broken_rows = 0.
+--
+-- SPEC-P1.4 §2 row 7 already names this: a structural-only scan is "documented as NOT
+-- catching content mutation, so nobody mistakes the fast path for the real one". This
+-- function is not a fast path — P1.2 §11.2 rule 3 makes it the gate a migration aborts on
+-- — so it must do the content check, not be labelled as skipping it.
+--
+-- SPEC-P1.4 §6 states the three checks and why all three are needed:
+--   1 SEQUENCE — seq increments by one          catches a DELETED row
+--   2 LINKAGE  — prev_hash = predecessor's hash  catches an INSERTED or REORDERED row
+--   3 CONTENT  — stored hash = recomputed hash   catches a MUTATED row
+-- Omitting 3 means an attacker need rewrite only ONE row instead of every row after it.
+--
+-- Two mechanical points, both load-bearing:
+--   * `extensions` is added to search_path. digest() is pgcrypto, which lives in schema
+--     extensions; the previous search_path (trading, pg_temp) could not resolve it.
+--   * TimeZone AND DateStyle are pinned. The preimage includes occurred_at::text, whose
+--     rendering depends on both ('...+00' under UTC vs '...+05:30' under Asia/Kolkata;
+--     '2026-08-27 12:00:00+00' under ISO, MDY vs '27.08.2026 12:00:00 UTC' under
+--     German, DMY). Without both pins, whether a chain verifies would depend on the
+--     CLIENT's session — a false tamper alarm on a legitimate row. audit_chain_assign()
+--     (§9.4) carries the IDENTICAL pair, and must: the two functions have to render the
+--     preimage the same way or every row reports as mutated. See Finding C for the
+--     TimeZone half and X2 BLOCKER-1 for the DateStyle half.
 CREATE OR REPLACE FUNCTION trading.verify_audit_chain(p_from bigint DEFAULT 0)
 RETURNS TABLE (broken_at bigint, reason text)
-LANGUAGE sql STABLE SET search_path = trading, pg_temp AS $$
+LANGUAGE sql STABLE
+SET search_path = trading, extensions, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY' AS $$
     WITH ordered AS (
         -- X2 finding M-1: ORDER BY seq alone is not deterministic when a duplicate seq
         -- exists, so lag() could pair the rows either way between runs. occurred_at is
@@ -1461,5 +1577,23 @@ LANGUAGE sql STABLE SET search_path = trading, pg_temp AS $$
      WHERE prior_seq IS NOT NULL AND seq <> prior_seq + 1 AND seq <> prior_seq
     UNION ALL
     SELECT seq, 'fork: prev_hash does not match preceding payload_hash'
-      FROM ordered WHERE expected_prev IS NOT NULL AND prev_hash <> expected_prev;
+      FROM ordered WHERE expected_prev IS NOT NULL AND prev_hash <> expected_prev
+    UNION ALL
+    -- CONTENT. The preimage is byte-for-byte the one audit_chain_assign() hashes on
+    -- INSERT; if the two ever diverge every row reports as mutated, which is a loud
+    -- failure rather than a silent one.
+    --
+    -- X2 BLOCKER-1 (second review), 2026-09-05: event_id, is_paper and is_backtest are
+    -- hashed here too. They are columns of audit_log that SPEC-P1.4 §6.1 pins in the
+    -- preimage key set, and until this change none of the three was covered — an in-place
+    -- edit of the paper/real-money flag passed verification. See §9.4 for the measurement
+    -- and for why the fields are appended rather than interleaved.
+    SELECT seq, 'content mutated: stored payload_hash does not match the row it covers'
+      FROM trading.audit_log
+     WHERE seq >= p_from
+       AND payload_hash <> encode(digest(
+               prev_hash || seq::text || event_type || event_class ||
+               occurred_at::text || actor || run_id::text ||
+               event_id::text || is_paper::text || is_backtest::text ||
+               payload::text, 'sha256'), 'hex');
 $$;

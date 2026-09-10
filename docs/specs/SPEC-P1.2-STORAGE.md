@@ -1,11 +1,11 @@
 ---
 id: SPEC-P1.2-STORAGE
-version: 0.1
+version: 0.5
 status: FROZEN
 phase: P1.2 — Storage Schema
 depends_on: [SPEC-P1.1-DOMAIN v0.1, SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, STAGE-0-FREEZE v1.1]
 produces: [migrations/0001_initial.sql, role.trading_owner, role.app_rw, role.backtest_ro, role.metrics_ro, table.instrument, table.symbol_mapping, table.successor_link, table.exchange_session, table.tick_size_regime, table.corporate_action, table.fundamentals_snapshot, table.universe_membership, table.bar_daily, table.bar_intraday_5m, table.bar_intraday_5m_validation, table.news_item, table.fx_rate, table.candidate, table.score, table.thesis, table.invalidation_condition, table.risk_evaluation, table.decision, table.order_intent, table.fill, table.lot, table.position_state, table.portfolio_snapshot, table.nav_pool, table.nav_consolidated, table.kill_switch_event, table.audit_log, table.model_registry, table.config_version, table.llm_call, table.provider_quota_usage, table.stage_latency_observation, cagg.llm_spend_daily, cagg.audit_events_daily, cagg.bar_weekly, fn.fundamentals_asof, fn.news_asof, fn.universe_asof, fn.instrument_asof, fn.symbol_asof]
-frozen_by: STAGE-1-FREEZE.md (2026-08-31)
+frozen_by: STAGE-1-FREEZE.md (2026-08-31); reopened 2026-09-01 for Findings B and C (§11), corrected 2026-09-04 for X2 BLOCKER-1 and BLOCKER-2 (§11.7), corrected 2026-09-05 for X2 BLOCKER-1 of the second review — preimage key set (§11.8) — NOT re-frozen, awaiting X2 re-review
 ---
 
 # SPEC-P1.2 — Storage Schema
@@ -1550,7 +1550,7 @@ have failed every FIFO exit with `permission denied` on the first live sell.
 
 **Q-P1.2-6** records the execution that must still happen: run the extracted migration against
 `timescale/timescaledb:*-pg16`, then assert the runtime behaviours a static check cannot reach —
-that the `ENABLE ALWAYS` triggers fire under `session_replication_role = 'replica'`, that the
+that the `ENABLE ALWAYS` triggers fire under `session_replication_role = 'replica'` (X5 Finding A: they do NOT on a hypertable — the assertion now records the gap), that the
 `EXCLUDE` constraints reject an overlapping mapping, that a `DENY` verdict cannot be inserted into
 `decision`, and that `backtest_ro` receives `permission denied` on a base table.
 
@@ -1791,10 +1791,26 @@ CREATE TRIGGER audit_log_no_delete BEFORE DELETE ON trading.audit_log
 CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON trading.audit_log
     FOR EACH STATEMENT EXECUTE FUNCTION trading.deny_mutation();
 
--- THE LINE THAT MATTERS. A normal trigger is silently skipped when
--- session_replication_role = 'replica', which any superuser can SET. ENABLE
--- ALWAYS makes the trigger fire in that mode too, closing the one bypass that
--- looks like a configuration change rather than an attack.
+-- A normal trigger is silently skipped when session_replication_role = 'replica',
+-- which any superuser can SET. ENABLE ALWAYS is intended to make the trigger fire in
+-- that mode too.
+--
+-- X5 Finding A, 2026-09-01: ON A HYPERTABLE THIS DOES NOT WORK, AND CANNOT BE MADE TO.
+-- audit_log is a hypertable, so DML routes to its chunks, and TimescaleDB creates chunk
+-- triggers as ORIGIN regardless of the parent's setting. ORIGIN triggers are exactly the
+-- ones 'replica' skips. Measured: under replica role, UPDATE and DELETE on audit_log
+-- both SUCCEED. Promoting the chunk triggers is refused outright —
+--   ERROR: operation not supported on chunk tables
+-- so there is no in-database fix at the trigger level.
+--
+-- These ALTERs are kept: they are correct for the parent, they are free, and they would
+-- take effect if audit_log ever became a plain table. But they do NOT close the replica
+-- bypass, and this comment previously claimed they did.
+--
+-- The defence is therefore DETECTION, not prevention, which is what §9.6 always said:
+-- tamper-EVIDENT, not tamper-proof. verify_audit_chain() (§9.5) carries the CONTENT
+-- check that makes an in-place edit detectable — see Finding B. Whether audit_log should
+-- remain a hypertable is a separate architectural question, deliberately not decided here.
 ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_no_update;
 ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_no_delete;
 ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_no_truncate;
@@ -1852,8 +1868,44 @@ END $$;
 -- assigns it under a lock cannot be raced.
 -- pg_advisory_xact_lock serialises the chain head. At ~0.3 writes/second
 -- (15,000 events over a 14.95 h window, P0.3 §6.1) this is not a bottleneck.
+-- X5 Finding C, 2026-09-01. TimeZone is pinned because the preimage below includes
+-- occurred_at::text, and that rendering is TIMEZONE-DEPENDENT. The same instant hashes
+-- three different ways under three session timezones — measured on this pinned
+-- environment for 2026-08-27 12:00:00+00:
+--     UTC 5ceae9dc855d68d9 | Asia/Kolkata db99e8d94bdb40bb | America/New_York 36eacb36...
+-- so payload_hash was not a pure function of the row's logical content. A row written by
+-- a session that happened to carry a non-UTC TimeZone would verify as CONTENT MUTATED
+-- against any other session — a false tamper alarm on a legitimate row.
+--
+-- X2 BLOCKER-1, 2026-09-04. PINNING TimeZone ALONE WAS NOT ENOUGH. occurred_at::text
+-- depends on DateStyle as well, so the v0.3 fix closed half the defect and left the other
+-- half with the same signature. With TimeZone already pinned to UTC, that one instant
+-- STILL renders four ways:
+--     ISO, MDY       2026-08-27 12:00:00+00      <- what every hash to date was built on
+--     SQL, DMY       27/08/2026 12:00:00 UTC
+--     Postgres, DMY  Thu 27 Aug 12:00:00 2026 UTC
+--     German, DMY    27.08.2026 12:00:00 UTC
+-- and DateStyle needs no SQL to reach: libpq's PGDATESTYLE carries it, exactly as PGTZ
+-- carries TimeZone. Measured before this fix, with no SET statement anywhere: an
+-- UNTAMPERED row written under PGDATESTYLE='German, DMY' verified as CONTENT MUTATED, and
+-- an untampered chain verified from such a session reported EVERY row mutated. Both GUCs
+-- are therefore pinned, on both functions.
+--
+-- The pins are deliberately on the FUNCTION rather than a rewrite of the expression.
+-- (occurred_at AT TIME ZONE 'UTC')::text would also be deterministic, but it renders
+-- differently and would silently invalidate every payload_hash already computed —
+-- exactly what §11.2 rule 1 forbids. Pinning reproduces the existing rendering byte for
+-- byte: 'UTC' and 'ISO, MDY' are what this environment already ran under, so the pinned
+-- digest IS the current digest. Verified — three reference rows spanning fractional
+-- seconds and multiple event classes hash identically before and after this change.
+--
+-- verify_audit_chain() (§9.5) carries the identical PAIR of pins. The two must agree or
+-- every row reports as mutated, which is a loud failure rather than a silent one.
 CREATE OR REPLACE FUNCTION trading.audit_chain_assign() RETURNS trigger
-LANGUAGE plpgsql SET search_path = trading, extensions, pg_temp AS $$
+LANGUAGE plpgsql
+SET search_path = trading, extensions, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY' AS $$
 DECLARE
     v_prev text;
     v_seq  bigint;
@@ -1876,9 +1928,42 @@ BEGIN
     -- keys, Decimal as string, no insignificant whitespace) and P1.4 owns that
     -- rule. See Q-P1.2-1 — this is the interim form, and it is interim in the
     -- canonicalisation rule only, not in the chain construction.
+    --
+    -- X2 BLOCKER-1 (second review), 2026-09-05. THE KEY SET WAS SHORT BY THREE COLUMNS.
+    -- SPEC-P1.4 §6.1 pins the preimage key set explicitly and NAMES is_paper and
+    -- is_backtest in it. audit_log carries both, and event_id, and none of the three was
+    -- hashed. Measured: under replica role an UPDATE setting is_paper=false and
+    -- is_backtest=true on an ACTION row left verify_audit_chain() reporting 0 breaks,
+    -- while the same UPDATE against actor reported 1. is_paper is the flag that separates
+    -- a paper order from a real-money one, so P1.4 §6.5's "a mutation cannot go unnoticed"
+    -- did not hold for it. This is a CONFORMANCE correction to an already-frozen decision,
+    -- not a new one: P1.4 §6.1 has required these fields since it was written.
+    --
+    -- The three are APPENDED immediately before payload::text. Every pre-existing field
+    -- keeps its exact position and rendering. payload stays last because it is the only
+    -- unbounded field and its leading '{' (CHECK audit_payload_is_object) anchors the
+    -- final boundary; run_id::text and event_id::text are both fixed 36-char canonical
+    -- UUIDs and boolean::text is always 'true' or 'false', so every new boundary is rigid.
+    -- Among themselves the three follow P1.4 §6.1's order. recorded_at stays OUT, exactly
+    -- as P1.4 §6.1 requires ([DEFAULT-A2]).
+    --
+    -- Both new renderings are GUC-independent: uuid_out is always lowercase canonical and
+    -- boolean_out is always 'true'/'false'. The two session-setting pins declared above the
+    -- function body remain the only session state this preimage depends on. (Those two GUC
+    -- names are deliberately NOT spelled here: checks 7.7a/7.8a grep the function text for
+    -- them, so naming them inside the body would satisfy the guard with prose and let a
+    -- removed pin pass. See §11.8.)
+    --
+    -- THIS INVALIDATES EVERY HASH COMPUTED UNDER THE OLD PREIMAGE. Adding a field to a
+    -- digest cannot do otherwise, and unlike Findings B and C this change does NOT
+    -- reproduce the previous rendering. It is taken now, and only now, on the rationale
+    -- §11.4 already established and measured: 0001_initial.sql has never been deployed and
+    -- there is no production audit history to invalidate. After deployment this would be a
+    -- §11.2 rule 2 event — a new table plus a chain-linking event — not an edit.
     NEW.payload_hash := encode(digest(
         NEW.prev_hash || NEW.seq::text || NEW.event_type || NEW.event_class ||
         NEW.occurred_at::text || NEW.actor || NEW.run_id::text ||
+        NEW.event_id::text || NEW.is_paper::text || NEW.is_backtest::text ||
         NEW.payload::text, 'sha256'), 'hex');
     RETURN NEW;
 END $$;
@@ -1899,20 +1984,81 @@ ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER audit_log_assign_chain;
 ### 9.5 Mechanism 4 — verification, run on boot and nightly
 
 ```sql
+-- X5 condition 7 / Finding B. This function previously checked SEQUENCE and LINKAGE only.
+-- It never recomputed payload_hash, so a row whose CONTENT was altered in place passed
+-- verification: the stored hash still matched its neighbours' expectations because nobody
+-- asked whether it still matched its own row. Reproduced 2026-09-01 — an UPDATE that set
+-- actor='tampered' left verify_audit_chain() reporting broken_rows = 0.
+--
+-- SPEC-P1.4 §2 row 7 already names this: a structural-only scan is "documented as NOT
+-- catching content mutation, so nobody mistakes the fast path for the real one". This
+-- function is not a fast path — P1.2 §11.2 rule 3 makes it the gate a migration aborts on
+-- — so it must do the content check, not be labelled as skipping it.
+--
+-- SPEC-P1.4 §6 states the three checks and why all three are needed:
+--   1 SEQUENCE — seq increments by one          catches a DELETED row
+--   2 LINKAGE  — prev_hash = predecessor's hash  catches an INSERTED or REORDERED row
+--   3 CONTENT  — stored hash = recomputed hash   catches a MUTATED row
+-- Omitting 3 means an attacker need rewrite only ONE row instead of every row after it.
+--
+-- Two mechanical points, both load-bearing:
+--   * `extensions` is added to search_path. digest() is pgcrypto, which lives in schema
+--     extensions; the previous search_path (trading, pg_temp) could not resolve it.
+--   * TimeZone AND DateStyle are pinned. The preimage includes occurred_at::text, whose
+--     rendering depends on both ('...+00' under UTC vs '...+05:30' under Asia/Kolkata;
+--     '2026-08-27 12:00:00+00' under ISO, MDY vs '27.08.2026 12:00:00 UTC' under
+--     German, DMY). Without both pins, whether a chain verifies would depend on the
+--     CLIENT's session — a false tamper alarm on a legitimate row. audit_chain_assign()
+--     (§9.4) carries the IDENTICAL pair, and must: the two functions have to render the
+--     preimage the same way or every row reports as mutated. See Finding C for the
+--     TimeZone half and X2 BLOCKER-1 for the DateStyle half.
 CREATE OR REPLACE FUNCTION trading.verify_audit_chain(p_from bigint DEFAULT 0)
 RETURNS TABLE (broken_at bigint, reason text)
-LANGUAGE sql STABLE SET search_path = trading, pg_temp AS $$
+LANGUAGE sql STABLE
+SET search_path = trading, extensions, pg_temp
+SET TimeZone = 'UTC'
+SET DateStyle = 'ISO, MDY' AS $$
     WITH ordered AS (
+        -- X2 finding M-1: ORDER BY seq alone is not deterministic when a duplicate seq
+        -- exists, so lag() could pair the rows either way between runs. occurred_at is
+        -- the tiebreak because it is the other half of the primary key.
         SELECT seq, prev_hash, payload_hash,
-               lag(payload_hash) OVER (ORDER BY seq) AS expected_prev,
-               lag(seq)          OVER (ORDER BY seq) AS prior_seq
+               lag(payload_hash) OVER (ORDER BY seq, occurred_at) AS expected_prev,
+               lag(seq)          OVER (ORDER BY seq, occurred_at) AS prior_seq
           FROM trading.audit_log WHERE seq >= p_from
     )
+    -- X2 finding M-1. A duplicate seq must be reported as a duplicate. Previously it fell
+    -- through to the gap branch (seq <> prior_seq + 1 is true when seq = prior_seq) and
+    -- was reported as 'gap: prior seq N', sending an operator to look for a missing row
+    -- that does not exist. A duplicate is the H-1 fork signature, not a gap.
+    SELECT seq, 'duplicate seq: ' || count(*)::text || ' rows share this seq'
+      FROM trading.audit_log WHERE seq >= p_from
+     GROUP BY seq HAVING count(*) > 1
+    UNION ALL
     SELECT seq, 'gap: prior seq ' || coalesce(prior_seq::text, 'NULL')
-      FROM ordered WHERE prior_seq IS NOT NULL AND seq <> prior_seq + 1
+      FROM ordered
+     WHERE prior_seq IS NOT NULL AND seq <> prior_seq + 1 AND seq <> prior_seq
     UNION ALL
     SELECT seq, 'fork: prev_hash does not match preceding payload_hash'
-      FROM ordered WHERE expected_prev IS NOT NULL AND prev_hash <> expected_prev;
+      FROM ordered WHERE expected_prev IS NOT NULL AND prev_hash <> expected_prev
+    UNION ALL
+    -- CONTENT. The preimage is byte-for-byte the one audit_chain_assign() hashes on
+    -- INSERT; if the two ever diverge every row reports as mutated, which is a loud
+    -- failure rather than a silent one.
+    --
+    -- X2 BLOCKER-1 (second review), 2026-09-05: event_id, is_paper and is_backtest are
+    -- hashed here too. They are columns of audit_log that SPEC-P1.4 §6.1 pins in the
+    -- preimage key set, and until this change none of the three was covered — an in-place
+    -- edit of the paper/real-money flag passed verification. See §9.4 for the measurement
+    -- and for why the fields are appended rather than interleaved.
+    SELECT seq, 'content mutated: stored payload_hash does not match the row it covers'
+      FROM trading.audit_log
+     WHERE seq >= p_from
+       AND payload_hash <> encode(digest(
+               prev_hash || seq::text || event_type || event_class ||
+               occurred_at::text || actor || run_id::text ||
+               event_id::text || is_paper::text || is_backtest::text ||
+               payload::text, 'sha256'), 'hex');
 $$;
 ```
 
@@ -2148,7 +2294,7 @@ P0.3 §2.3's year-10 on-VM total is **~52.7 GB** against a **250 GB** volume (4.
 | 11 | Missing FX rate for the accounting date | `nav_consolidated` insert has empty `fx_rate_ids` with a non-USD pool | **No new entries in EITHER pool** (invariant I10). Never carried forward, never interpolated |
 | 12 | `Decision` constructed from a `DENY` verdict | `CHECK (risk_decision = 'ALLOW')` | Insert rejected. Unrepresentable, not merely validated |
 | 13 | Bitemporal `UPDATE` touching a fact column | §8.4 trigger | Rejected. Restatements are `INSERT`s |
-| 14 | `UPDATE`/`DELETE`/`TRUNCATE` on `audit_log` | Grants + `ENABLE ALWAYS` trigger | Rejected in both normal and `session_replication_role = replica` modes |
+| 14 | `UPDATE`/`DELETE`/`TRUNCATE` on `audit_log` | Grants + `ENABLE ALWAYS` trigger | Rejected in normal mode. **NOT rejected under `session_replication_role = replica`** — X5 Finding A: `audit_log` is a hypertable, chunk triggers are ORIGIN, and TimescaleDB refuses to promote them (`operation not supported on chunk tables`). Detection, not prevention: `verify_audit_chain()`'s CONTENT check (§9.5) makes the edit visible |
 | 15 | Backtest reads a base table directly | No grant to `backtest_ro` | `permission denied`. Look-ahead is a permission error, not silent contamination |
 | 16 | Disk ≥ 70% / ≥ 85% of the PostgreSQL volume | P6.1, 5-minute median | WARN / CRITICAL (P0.3 §15.1). Median, so a base-backup staging spike does not page at 02:00 |
 | 17 | Compression measured before day 45 or on < 3 chunks | RULE-B2 | The measurement is discarded, not recorded. A 1× reading would undersize the disk |
@@ -2171,7 +2317,7 @@ P0.3 §2.3's year-10 on-VM total is **~52.7 GB** against a **250 GB** volume (4.
 | 7 | **Per-transaction `synchronous_commit`**: `remote_write` for state, `off` for market data | This is what makes ADR-10's "RPO 0 **for state**" achievable on a single VM. Bars are re-fetchable; orders are not | Yes | **Critical** — global `off` loses committed orders on a crash |
 | 8 | **Blocking state commits when the WAL receiver is unreachable is the CORRECT failure** | A system that cannot durably record cannot trade — `[CONST-5]` and `[CONST-6]` at the storage layer | Yes | High — the alternative is trading with an unrecorded audit trail |
 | 9 | **`seq` and `prev_hash` are assigned by a database trigger under an advisory lock**, not by the application | An application that computes its own chain can be made to compute a wrong one; a serialised database assignment cannot be raced | Yes | High |
-| 10 | **`ENABLE ALWAYS TRIGGER` on every append-only table** | A normal trigger is silently skipped under `session_replication_role = 'replica'`, which is a `SET`, not an exploit | Yes | High — it is the bypass that looks like configuration |
+| 10 | **`ENABLE ALWAYS TRIGGER` on every append-only table** | A normal trigger is silently skipped under `session_replication_role = 'replica'`, which is a `SET`, not an exploit. **X5 Finding A (2026-09-01): ineffective on a hypertable** — chunk triggers are ORIGIN and cannot be promoted. Retained for the parent and for any table that is not a hypertable | Yes | High — the bypass that looks like configuration remains OPEN on `audit_log`; mitigated by detection (§9.5 CONTENT check), not closed |
 | 11 | **Tamper-EVIDENT is claimed; tamper-PROOF is not** (§9.6) | No in-database mechanism survives a superuser. Saying otherwise would be the kind of claim a regulator tests | n/a | Medium — an overclaim here is worse than the gap |
 | 12 | **`EXCLUDE USING gist` on `symbol_mapping` and `tick_size_regime`** | Makes P1.1's `AmbiguousSymbolError` and `AmbiguousTickRegimeError` unrepresentable rather than detected after the fact | Yes | High — ambiguous identity silently corrupts every backtest |
 | 13 | **No continuous aggregate for ADDV** | The 20-session **median** is not incrementally materialisable without the TimescaleDB Toolkit, a new dependency `[CONST]` excludes. 30,000 rows/session is sub-second | Yes | Low — if it ever binds, the fix is a plain materialised view refreshed weekly |
@@ -2204,6 +2350,7 @@ P0.3 §2.3's year-10 on-VM total is **~52.7 GB** against a **250 GB** volume (4.
 | **Q-P1.2-4** | What is the real mean `audit_log` row width and events/session? | Measurement-by-design **Q15** | `cagg_audit_events_daily` after 20 live sessions | Not blocking. Feeds P0.3 §9.4's sensitivity and the T4 re-open trigger |
 | **Q-P1.2-5** | Is `pg_advisory_xact_lock` on the chain head acceptable under the P1.4 writer's concurrency? | P1.4 design + load test | Measure insert throughput at the expected 15,000 events over a 14.95 h window (~0.3/s) and at the 10× stress case (~3/s) | **P1.4.** At 10× it is still far from contended, but the number should be measured rather than argued |
 | **Q-P1.2-6** | Does migration 0001 execute, and do its runtime behaviours hold? | Execution against `timescale/timescaledb:*-pg16` | Run the extracted migration, then assert: `ENABLE ALWAYS` triggers fire under `SET session_replication_role = 'replica'`; `EXCLUDE` rejects an overlapping symbol mapping; a `DENY` verdict cannot be inserted into `decision`; `backtest_ro` gets `permission denied` on a base table; the overfill trigger fires on a deferred commit | **P6.4.** Static checks pass (§6.11) but the DDL is unexecuted — Docker's storage layer is read-only on the build host |
+| **Q-P1.2-7** | Four keys P1.4 §6.1 pins in the preimage have no `audit_log` column: `canonical_schema`, `schema_version`, `causation_id`, `input_hash`. Should they become columns, or is the DB preimage deliberately a subset of the application envelope's? | P1.4 owns the envelope; this is a joint P1.2/P1.4 decision | Compare `AuditEnvelope.hash_preimage()` (`src/audit/events.py`) against `audit_chain_assign()` §9.4. The two currently produce **different digests for the same event** — the application builds a canonical-JSON object over 15 keys, the trigger concatenates 11 columns, and the trigger overwrites `NEW.payload_hash` on INSERT | **P1.4 / the persistence layer.** Opened 2026-09-05 by §11.8; the 11 §6.1 keys that DO have a column are all hashed as of v0.5. Not blocking today — no code writes to `audit_log` yet. It blocks the first writer, and it blocks anchoring (P1.4 §6.3), which must anchor the digest actually stored |
 | **M-12** *(carried)* | News revision factor `rf` | Measurement after 3 months of forward collection | `SELECT avg(max_rev) FROM (SELECT vendor_id, max(revision_seq) AS max_rev FROM trading.news_item GROUP BY vendor_id) t;` | Not blocking. P0.3 declares it immaterial |
 | **Q-P1.1-1** *(carried)* | US settlement cycle and good-faith rules | Broker documentation | Feeds `exchange_session.settlement_date` | **P2.9.** This schema stores whatever the loader resolved; it asserts no cycle |
 
