@@ -145,3 +145,116 @@ required later, it must be generated from the specs, never hand-maintained.
 | Name | Kind | Signature or schema | Consumers |
 |---|---|---|---|
 | MERGE-CHANGE-LOG-P1 | document | This file | X5 GAP AUDIT, audit trail of the freeze |
+
+---
+
+# X3 RE-RUN — 2026-10-02
+
+**Run at:** 2026-10-02 · **HEAD:** `b8b1340` · Required by STAGE-1-FREEZE §11.6 step 4, and made
+in its own conversation. The result of record is STAGE-1-FREEZE §12. This section is its CHANGES
+file. The full report and its evidence are in `docs/specs/reviews/X3-RERUN-2026-10-02/`.
+
+**Sections 1 to 5 above describe the 2026-08-31 merge and are left as written.** Where this
+section differs from them, this section is the later finding.
+
+The re-run was read-only. It edited no file in this repository, and it sets no status.
+
+## 6. What moved
+
+Nothing moved. The four specs are still the source of truth and the merge is still by index.
+
+One spec changed between the two merges: SPEC-P1.2-STORAGE, v0.1 → v0.5, with
+`migrations/0001_initial.sql`. The other three specs, and `models.py`, `loader.py`, `policy.yaml`,
+`events.py` and `chain.py`, are byte-identical to `605ff40`.
+
+| Consolidated view | 2026-08-31 | 2026-10-02 | Why it differs |
+|---|---|---|---|
+| Contracts | 118 | 118 | No row added or removed. Rows 69 and 70 changed behaviour, not shape |
+| Assumptions | 32 | 32 rows, **30 distinct** | §1 did not de-duplicate. Two pairs are the same assumption |
+| Open questions | 31 rows, 29 unique | **32 rows, 30 unique** | `Q-P1.2-7` added at v0.5 |
+| Coverage | 23 sections, by citation | **70 requirements, mapped one by one** | §1's method counted citations |
+
+## 7. What conflicted
+
+Full text, with both sources for each, is in STAGE-1-FREEZE §12.3 and §12.4.
+
+**Contract mismatches — §2 C-3 and §5's "no signature mismatches" are withdrawn.**
+
+| Id | Severity | Mismatch | Existed at `605ff40` |
+|---|---|---|---|
+| X3R-M1 | HIGH | P1.4's envelope and P1.2's `audit_log` hash one event two ways; five envelope fields have no column | yes |
+| X3R-M2 | HIGH | P1.3's `EffectiveConfig.audit_payload()` is rejected by P1.4's `AuditEnvelope` | yes |
+| X3R-M3 | MEDIUM | `canonical_bytes` is exported by P1.3 and by P1.4, with different behaviour | yes |
+| X3R-M4 | MEDIUM | P1.1 still exports `AuditEvent`, which no longer exists | yes |
+| X3R-M5, M6, M7 | LOW | As-of function signatures; six contract rows; two DDL blocks that differ from the migration | yes |
+
+**Contradictions.**
+
+| Id | State against §2 above |
+|---|---|
+| X3R-C1 | **C-1 grew from 2 instances to 4.** P1.3 and P1.4 both declare `SPEC-P1.2-STORAGE v0.1`; it is v0.5 |
+| X3R-C2 | **C-2 is in all four specs**, not P1.4 alone |
+| X3R-C5 to C14 | New. Ten contradictions; C5, C9 and C14 are MEDIUM, the rest LOW |
+
+**Coverage gaps.** Eight that no document records, X3R-G1 to G8. X3R-G1, earnings blackout,
+belongs to Stage 1.
+
+**Corrections to this file.**
+
+| Where | Stated | Found |
+|---|---|---|
+| §2 C-3 | No contract name is exported by two specs | `canonical_bytes`, rows 89 and 106 |
+| §2 C-4, and OPEN QUESTIONS row 2 | "`20 orders/min global` appears **only** in `config/policy.yaml` and in no spec prose" | SPEC-P1.3 §10, line 348: "20 orders/min global, 10 per strategy". Open question 2 has no subject |
+| §5 | "**none block P2.1**" | `Q-P1.2-7` blocks any P2.1 code that writes an audit event |
+| §5 | "2 real gaps" | The same 2, plus 8 unrecorded |
+| §4 | 4,440 spec lines | 4,591 at `b8b1340` |
+
+## 8. What was resolved
+
+**Nothing.** X3 step 3 forbids silent resolution, and the re-run was read-only. R-1 and R-2 above
+are not repeated: no status was set and no header was edited.
+
+Recommended statuses, for the Owner to decide, are in STAGE-1-FREEZE §12.8. In one line:
+SPEC-P1.2 should read `DRAFT` until it is re-frozen; the other three stay `FROZEN`.
+
+## 9. State after the re-run
+
+| | |
+|---|---|
+| Stage 1 specs | 4. Three `FROZEN` and unchanged. SPEC-P1.2 v0.5 **not re-frozen** |
+| Consolidated contracts | 118. **2 HIGH, 2 MEDIUM and 3 LOW mismatches** |
+| Open questions | 30 unique, plus 5 raised by the re-run (X3R-Q1 to Q5) |
+| Blocking P2.1 | **`Q-P1.2-7`**, for any audit-writing code |
+| Unresolved conflicts | 12 contradictions; 7 mismatches; 8 coverage gaps |
+| Still required before P2.1 | X5 re-run; `DECISIONS.md`; the Owner's re-freeze (§11.6 steps 5 to 7) |
+
+## DECISIONS MADE — re-run
+
+| # | Decision | Rationale | Reversible? | Blast radius if wrong |
+|---|---|---|---|---|
+| 1 | Full re-merge, not a delta | The 2026-08-31 baseline was wrong in parts the P1.2 change does not touch | Yes | Low |
+| 2 | Map coverage by requirement, not by citation | A section can be cited and still leave a requirement uncovered | Yes | Low |
+| 3 | Resolve nothing and set no status | X3 step 3; the re-run's scope was read-only | Yes | None |
+
+## ASSUMPTIONS — re-run
+
+| # | Assumption | Why I had to assume it | How to verify | Impact if false |
+|---|---|---|---|---|
+| 1 | The database results in STAGE-1-FREEZE §11.12 hold | The re-run started no database | Re-run the three shell suites | Low for this merge: no finding here depends on them |
+| 2 | A text search finds every mention of a requirement | Coverage gaps were established by searching nine files for 28 terms | Read the Stage 0 specs for each gap | Medium — a gap may be a decision worded differently |
+
+## OPEN QUESTIONS — re-run
+
+| # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
+|---|---|---|---|---|
+| X3R-Q1 | Which side changes for X3R-M2 — P1.3's payload or P1.4's no-numbers rule? | Owner | STAGE-1-FREEZE §12.3 | Any run |
+| X3R-Q2 | Where is the `ReproducibilityBundle` stored? | P1.2 and P1.4 jointly | `Q-P1.2-7`, widened | P2.5, P2.6, P2.7, P2.9 |
+| X3R-Q3 | How does a `PolicyVerdict` map to a `RiskVerdict`? | P2.9 | SPEC-P1.1 §8.2 against SPEC-P1.3 §4 | P2.9 |
+| X3R-Q4 | Is earnings blackout in scope, and under which rule id? | Owner | `master-research-summary.md` §4, §6 Phase 8 | P2.9 |
+| X3R-Q5 | India price floor: ₹100 or ₹50? | Owner | `master-research-summary.md` §4 line 118; `policy.yaml` line 117 | India activation |
+
+## CONTRACTS EXPORTED — re-run
+
+| Name | Kind | Signature or schema | Consumers |
+|---|---|---|---|
+| MERGE-CHANGE-LOG-P1, 2026-10-02 section | document | Sections 6 to 9 above | X5 re-run, Owner reconciliation |
