@@ -1,0 +1,230 @@
+diff --git a/docs/specs/STAGE-1-FREEZE.md b/docs/specs/STAGE-1-FREEZE.md
+index 1d7f4e2..42e021c 100644
+--- a/docs/specs/STAGE-1-FREEZE.md
++++ b/docs/specs/STAGE-1-FREEZE.md
+@@ -1193,19 +1193,213 @@ does not close Stage 1.
+ 
+ ---
+ 
+-## 12. X3 re-run — pending
++## 12. X3 re-run — 2026-10-02
+ 
+-**Not run.** §11.6 step 4 requires it, and the pack requires X3 to be used in its own
+-conversation.
++**Run at:** 2026-10-02 · **HEAD:** `b8b1340` · **Template:** X3 — MERGE, all seven steps, in its
++own conversation, as §11.6 step 4 requires.
+ 
+-On 2026-10-02 the reviewer who completed the fourth X2 prepared, in that same session, a delta
+-against the 2026-08-31 merge. **The Owner did not accept it as the X3 re-run**, because it was
+-not made in its own conversation. It has been taken out of this record. It is kept, unchanged,
+-outside this repository, and is to be compared with the re-run of record only **after** that
+-re-run has produced its own result.
++**This section re-freezes nothing and changes no status.** It was produced read-only: no file in
++this repository was edited by the re-run. Whether it is adopted is the Owner's decision.
+ 
+-The X3 re-run of record will replace this notice. It is to derive its findings from the specs,
+-the code and the git history, not from that delta. §3 to §7 above stand as written until then.
++**Independence.** Every count and finding below was derived from the four specs, the code and the
++git history at `b8b1340`. The delta that the fourth X2's reviewer prepared on 2026-10-02 was not
++opened. Finding ids use the prefix `X3R-` because this record already has two colliding `N-`
++series.
+ 
+-The X5 re-run (§11.6 step 5) follows it, in a different conversation of its own, and is recorded
+-in `STAGE-1-GAP-AUDIT.md`.
++**Form.** A **full re-merge**, not a delta against §3 to §7. The baseline was checked first and
++was wrong in places the SPEC-P1.2 change does not touch (X3R-E1, E2, E3 below), so a delta would
++have carried those errors forward. The merge is again by index, not concatenation; §1's deviation
++stands.
++
++**§3 to §7 above are superseded by this section where they differ. They are left as written.**
++
++### 12.1 What was and was not verified
++
++| Verified by this re-run | Not verified by this re-run |
++|---|---|
++| The four standard tables of all four specs, re-extracted | Any database behaviour. No container was started and the development database was not touched |
++| Contracts against `src/` and the migration text | Whether SPEC-P1.3 and SPEC-P1.4 ever had an X2 (question F-2) |
++| SPEC-P1.2's DDL blocks against `migrations/0001_initial.sql`, section by section | N-6, N-7 and N-8 — this record does not say what they are |
++| The six Python suites in both modes, in a copy outside the repository: 42, ALIGNED, 21, 12, 39, 36 — all exit 0 | Whether a Stage 0 spec decided X3R-C6 |
++
++### 12.2 Step 1 — the artifacts
++
++SHA-256 (16) over the **git blob** at `b8b1340`, so they reproduce on any platform.
++
++| Artifact | Version | SHA-256 (16) | Lines | Changed since `605ff40` |
++|---|---|---|---|---|
++| `docs/specs/SPEC-P1.1-DOMAIN.md` | 0.3 | `c8c086c84fb19a24` | 1,210 | no |
++| `docs/specs/SPEC-P1.2-STORAGE.md` | 0.5 | `e3e754eca1df1ef8` | 2,397 | **yes** |
++| `docs/specs/SPEC-P1.3-CONFIG.md` | 0.1 | `5c8e9188df7e9429` | 485 | no |
++| `docs/specs/SPEC-P1.4-AUDIT.md` | 0.1 | `63aec1bd1fe03a3a` | 499 | no |
++| `src/domain/models.py` | P1.1 v0.3 | `f3b510059c447f85` | 2,896 | no |
++| `migrations/0001_initial.sql` | P1.2 v0.5 | `42ca24cf63cc847b` | 1,599 | **yes** |
++| `src/config/loader.py` | P1.3 v0.1 | `047fa57dbcdde5af` | 1,077 | no |
++| `config/policy.yaml` | P1.3 v0.1 | `751385d1765bd60a` | 1,253 | no |
++| `src/audit/events.py` | P1.4 v0.1 | `64313743c4480ca6` | 719 | no |
++| `src/audit/chain.py` | P1.4 v0.1 | `8298a736650d8971` | 481 | no |
++
++**The re-opened spec agrees with its code where it was changed.** SPEC-P1.2's `sql` blocks were
++extracted in §6's assembly order and compared with the migration. §9.5 (`verify_audit_chain()`):
++76 lines each, 0 differing. Eighteen of twenty sections are identical. The two that differ are
++older than the re-open and both existed at `605ff40`: §9.4 lacks the H-1 `READ COMMITTED` guard
++(N-2), and §6.10's `cagg_audit_events_daily` still uses `pg_column_size(payload)` where the
++migration uses `octet_length(payload::text)` (X3R-M7).
++
++### 12.3 Step 2 — contracts
++
++**118 contracts** — P1.1 44, P1.2 33, P1.3 20, P1.4 21. §4's count is correct. The re-open added
++and removed no row. It changed the behaviour behind rows 69 and 70: `payload_hash` now covers 11
++columns, and `verify_audit_chain()` also reports `content mutated` and `duplicate seq`. Its
++declared return shape is unchanged.
++
++**§4's statement "Signature mismatches between producer and consumer: none found" is withdrawn.**
++
++| Id | Sev | Producer → consumer | Mismatch |
++|---|---|---|---|
++| **X3R-M1** | HIGH | P1.4 `AuditEnvelope` ↔ P1.2 `audit_log` | Two hashes for one event: 15 keys as canonical JSON (`hash_preimage()`) against 11 columns concatenated (§9.4). The trigger overwrites the application's `payload_hash`. Five envelope fields have no column: the four in `Q-P1.2-7` **and `reproducibility`**, which `Q-P1.2-7` omits. P1.4's CONTRACTS row naming "P1.2's hash trigger" as consumer of `canonical_json()` is untrue |
++| **X3R-M2** | HIGH | P1.3 `EffectiveConfig.audit_payload()` → P1.4 `AuditEnvelope` | Rejected with `NonCanonicalPayloadError`. The payload has 132 JSON-number leaves, 28 of them floats; P1.4 §6.2 rule 4 bans every JSON number. `EFFECTIVE_CONFIG_RENDERED` cannot be built from what P1.3 returns |
++| **X3R-M3** | MEDIUM | P1.3 and P1.4 both export `canonical_bytes` (rows 89, 106) | P1.3's emits JSON numbers; P1.4's raises on them |
++| **X3R-M4** | MEDIUM | P1.1 exports `AuditEvent` (row 41) | No such class exists. P1.1's header, §10.3 and CONTRACTS row were not updated when P1.4 §0 superseded it |
++| **X3R-M5** | LOW | P1.2 as-of functions (row 75) | "Two mandatory cutoffs" is true of 2 of 6. `bars_asof` exists, is granted to `backtest_ro`, and is exported nowhere |
++| **X3R-M6** | LOW | Six contract rows differ from the code | `Instrument.tick_source` does not exist; `write_before_act()` returns a tuple; `DomainError` has 29 subclasses, not 28; `Producer` has 19 members, 17 used; two more |
++| **X3R-M7** | LOW | SPEC-P1.2 DDL ≠ migration | §12.2 above |
++
++**X3R-M1 and X3R-M2 both existed at `605ff40`.** SPEC-P1.3, SPEC-P1.4, `loader.py` and
++`events.py` are byte-identical to that commit. All six Python suites pass with both present: no
++suite builds an envelope from P1.3's payload, and none compares the two hashes.
++
++Checked and clean: 23 enums against their `CHECK` lists; the Block A numeric limits against the
++loaded policy (13 rule thresholds); P1.3's 47-rule inventory; P1.4's 42-type registry; six
++contract signatures.
++
++### 12.4 Step 3 — contradictions
++
++Each carries a recommended resolution. **None is resolved.**
++
++| Id | Sev | Source A | Source B | Recommended resolution |
++|---|---|---|---|---|
++| **X3R-C1** | LOW | `depends_on` in P1.2, P1.3 (×2) and P1.4 | Actual versions: P1.1 v0.3, P1.2 v0.5 | **4 instances, was 2.** Bump at re-freeze. P1.4's is not only documentary: it was written against an 8-column preimage |
++| **X3R-C2** | LOW | Each spec's `produces:` header | Its own CONTRACTS table and the code | **All four specs, not P1.4 alone.** P1.1's header names four things that do not exist; P1.2's omits `verify_audit_chain`. Regenerate the headers |
++| **X3R-C3** | — | §3 C-3: no duplicate names | `canonical_bytes` | See X3R-M3 |
++| **X3R-C5** | MEDIUM | Research summary §4: India price > **₹100** | `policy.yaml`: `min_price_inr: "50.00"`. SPEC-P1.3 says the summary "gives … not a price floor" | Use ₹100, or record an Owner decision for ₹50. P1.3's statement is false |
++| **X3R-C6** | LOW | Research summary §8: reject data older than **5 s** | `DATA-001`: **600 s** | Record the authority for 600 s |
++| **X3R-C7** | LOW | SPEC-P1.2 §6.11: 240 `CHECK` | SPEC-P1.2 §8: 47 `CHECK` | The migration has 240. Correct §8 |
++| **X3R-C8** | LOW | SPEC-P1.1 §10.3: `prev_hash` is the SHA-256 **of** the previous hash | P1.2 §9.4, P1.4 §6.4: it **equals** the previous hash | Remove with X3R-M4 |
++| **X3R-C9** | MEDIUM | SPEC-P1.1 §8.2: verdict is `ALLOW`/`DENY`; the sizer re-proposes once | SPEC-P1.3 §4: four actions; `MODIFY` re-evaluated up to 4 passes | No spec maps one to the other. P2.9 must. Also three fields named two ways: `binding_constraint`/`binding_rule_id`, `config_hash`/`content_hash`, `KillSwitchScope`/`KillScope` |
++| **X3R-C10** | LOW | SPEC-P1.2 `Q-P1.2-1`: closed | SPEC-P1.2 `Q-P1.2-7`: open, same subject | Fold together |
++| **X3R-C11** | LOW | SPEC-P1.1 §15.4: 43 and 20 tests | Measured: 42 and 21 | Correct the spec |
++| **X3R-C12** | LOW | Footers and comments reading "v0.1"; references to `errors.py`, `env.py`, `verify_p13_no_env_risk.py`, `migrations/versions/` | P1.1 is v0.3 and P1.2 v0.5; none of those four paths exists | Correct at the next amendment |
++| **X3R-C13** | LOW | SPEC-P1.4: `is_paper` and `is_backtest` exclusive; `event_id` is UUIDv7 | `audit_log`: no such `CHECK`; `event_id` defaults to a version 4 UUID | Decide with X3R-M1 |
++| **X3R-C14** | MEDIUM | SPEC-P1.2 header: `status: FROZEN` | Same header: "NOT re-frozen". §8 says v0.1 is frozen; §11.6 says v0.4 | See §12.8 |
++
++There is no X3R-C4: no Block A number is stated two ways. Thirteen rule thresholds were checked
++against the loaded policy.
++
++Not a contradiction: 28 triggers in SPEC-P1.2 §6.11 against 27 in §2. `apply-migration.sh` counts
++`information_schema.triggers`, which omits the one `TRUNCATE` trigger. Reasoned from the script,
++not executed.
++
++### 12.5 Step 4 — assumptions
++
++**32 rows, 30 distinct.** §5 did not de-duplicate. Two pairs are one assumption each: `Price` at
++6 dp (P1.1 #2, P1.2 #2), and the ~1,000 B audit row at 15,000 events per session (P1.2 #4,
++P1.4 #5).
++
++Two assumptions are relied on and appear in no ASSUMPTIONS table:
++
++- **X3R-A1 — new since the re-open.** `0001_initial.sql` has never been deployed, so there is no
++  production audit history. It is the only reason §11.8 could invalidate every stored hash.
++- **X3R-A2.** PDT is a margin-account rule with a $25,000 floor (SPEC-P1.1 §9.4).
++
++Top of the ranking by impact if false: (1) `[CONST-2]` enforced at the `Decision` constructor;
++(2) the off-VM anchor store is write-once — also the only answer to Finding A's residual;
++(3) X3R-A1; (4) settlement is T+1 in both markets; (5) audit row width and event rate;
++(6) round-trip cost.
++
++### 12.6 Step 5 — open questions
++
++**32 rows, 30 unique ids.** §6's 29 was correct on 2026-08-31; the difference is `Q-P1.2-7`.
++`Q-P1.1-1` is still the only id restated across specs.
++
++Raised by this re-run: **X3R-Q1** which side changes for X3R-M2; **X3R-Q2** where the
++`ReproducibilityBundle` is stored; **X3R-Q3** how a `PolicyVerdict` maps to a `RiskVerdict`;
++**X3R-Q4** whether earnings blackout is in scope; **X3R-Q5** the India price floor.
++
++**What now blocks Stage 2. This replaces §6.1 and the gate table in §9.**
++
++| Phase | Blocked by |
++|---|---|
++| **P2.1** | **`Q-P1.2-7` / X3R-M1.** `EVENT_REGISTRY` makes P2.1 the producer of three audit event types, and the pack's appendix says "P1.4 (audit) before anything that emits events". §6.1's "None of these blocks P2.1" does not hold for P2.1 code that writes an audit event |
++| Any run | X3R-Q1. The run-start config event cannot be built |
++| P2.2 | `Q-P1.1-6` |
++| P2.3, P2.5, P2.6, P2.7 | `Q-P1.2-7`; X3R-Q2 for the three that produce a reproducible event |
++| P2.9 | `Q-P1.1-1`, `Q-P1.1-2`, **`A-14`**, X3R-Q2, X3R-Q3, X3R-Q4. `Q-P1.3-3` is measured inside P2.9 |
++| P2.10 | X3R-G2 |
++
++`A-14` is in no Stage 1 document. STAGE-0-FREEZE §10: "A-14 must be ratified before P2.9". §6.1
++and §9 omit it.
++
++### 12.7 Step 6 — coverage
++
++§7 marks a research-summary section covered if any spec cites it. That measures citation. The
++re-run mapped 70 requirements individually; the matrix is in the re-run report.
++
++| State | Count |
++|---|---|
++| Covered by a Stage 1 spec | 37 |
++| Decided in Stage 0 | 6 |
++| Split between Stage 0 or 1 and a later phase | 7 |
++| Owned by a later phase | 7 |
++| Contradiction or difference with the research summary | 4 |
++| **Gap — in no Stage 0 or Stage 1 spec, policy rule or code** | **9 rows, 8 gaps** |
++
++Gaps, listed:
++
++| Id | Gap | Belongs to |
++|---|---|---|
++| **X3R-G1** | **Earnings blackout** (research summary §4, §6 Phase 8). No rule id, no decision removing it | **Stage 1 — SPEC-P1.3** |
++| X3R-G2 | Four automatic kill triggers: volatility > 3σ, API failure > 5 retries, agent loop > 10, data quality | P2.10 |
++| X3R-G3 | Trailing stop. `OrderType` and `InvalidationKind` have no member for it | P3.4, with a P1.1 type |
++| X3R-G4 | Origin tagging and rate limits on agent messages | P4.1 |
++| X3R-G5 | Price, portfolio state, decision reason and confidence on every decision record (research summary §14). `DECISION_MADE` requires none | P1.4 or P2.7 |
++| X3R-G6 | Best execution. Named in Block A item 9 | P6.3 |
++| X3R-G7 | Exit-hierarchy vocabulary: emergency, high, medium, low | P3.4, with a P1.1 type |
++| X3R-G8 | Monte Carlo simulation | P5.1 |
++
++§7's two gaps — §9 AI/ML models and §14 monitoring — stand, and both are deliberate.
++
++### 12.8 Step 7 — version and status
++
++Nothing is changed here. This is what each should carry, for the Owner to decide.
++
++| Artifact | Carries | Should carry | Why |
++|---|---|---|---|
++| SPEC-P1.1-DOMAIN v0.3 | `FROZEN` | `FROZEN` | Unchanged since the freeze. X3R-M4 is documentary |
++| SPEC-P1.2-STORAGE v0.5 | `FROZEN`, and "NOT re-frozen" | **`DRAFT` until re-freeze**, then `FROZEN` at v0.5 | Block B has two statuses, and the pack's rule 3 keys on the word. On the merge evidence v0.5 is fit to re-freeze, with `Q-P1.2-7` carried as a named blocker |
++| SPEC-P1.3-CONFIG v0.1 | `FROZEN` | `FROZEN`, with X3R-M2 against it | It or P1.4 must be re-opened under T5 before any run writes its config event |
++| SPEC-P1.4-AUDIT v0.1 | `FROZEN` | `FROZEN`, with X3R-M1 and X3R-M2 against it | Same |
++| This record | `version: 1.0`, depends on P1.2 v0.1 | `version: 1.1`, depends on P1.2 v0.5 | N-4. Not changed by this section |
++
++Nothing found by this re-run is a defect introduced by the v0.1 → v0.5 change. X3R-M1 and X3R-M2
++are older than it. Re-freezing over them is defensible only if the Stage 2 gate names them, as
++§12.6 does.
++
++### 12.9 Errors in this record found by the re-run
++
++| Id | Where | Stated | Found |
++|---|---|---|---|
++| X3R-E1 | §3 C-3 | No contract name is exported by two specs | `canonical_bytes`, rows 89 and 106 |
++| X3R-E2 | §4 | No producer/consumer signature mismatch | X3R-M1, X3R-M2. `verify_p11_p12_contract` checks column names in one direction only |
++| X3R-E3 | §4 | The Consumers column | Wrong in rows 1, 2, 3, 8, 9, 30 and 42. The generator split on `\|` inside the Signature cell |
++| X3R-E4 | §3 C-2 | Header under-declaration in P1.4 | All four specs |
++| X3R-E5 | MERGE-CHANGES §2 C-4 | "20 orders/min" is in no spec prose | SPEC-P1.3 §10, line 348 |
++| X3R-E6 | §5 | Assumptions consolidated | Not de-duplicated |
++| X3R-E7 | §7 | 15 of 23 sections covered; two gaps | Citation counting. Eight gaps not recorded |
++| X3R-E8 | §6.1, §9 | P2.9's blockers | `A-14` omitted |
++| X3R-E9 | §2 | Hashes of the frozen artifacts | Taken before the merge edited the four spec headers, and over CRLF bytes for three files |
++
++### 12.10 Next
++
++The X5 re-run (§11.6 step 5) follows in its own conversation and is recorded in
++`STAGE-1-GAP-AUDIT.md`. §12.6 and §12.7 are inputs to it.
