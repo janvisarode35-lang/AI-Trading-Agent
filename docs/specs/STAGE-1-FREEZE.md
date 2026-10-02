@@ -618,18 +618,53 @@ no version bump and no §11 change-log row.
 
 The §11.9 coverage is **again author-written**, so step 1 applies to it exactly as it applied to
 v0.3, v0.4 and v0.5 — with particular force here, because the artifact being extended is the very
-test file whose blind spot BLOCKER-A was. That is the state right now — corrected, verified by
-sabotage, and **awaiting a fourth X2 re-review**. Nothing below step 1 has been started.
+test file whose blind spot BLOCKER-A was. That was the state on 2026-09-06 — corrected, verified by
+sabotage, and **awaiting a fourth X2 re-review**.
+
+**Corrected 2026-10-01.** This paragraph previously ended *"That is the state right now … Nothing
+below step 1 has been started"*, and step 1 below read *"the corrected uncommitted drop"*. Both
+were false from 2026-09-10. §11.10 is the full record; the entries below are pointers to it.
+
+**Status 2026-09-10 — PROCESS DEVIATION.** The drop was committed to `main` and pushed as
+`c9f30e3` before the fourth X2 had run. Step 3 happened ahead of steps 1 and 2.
+
+**Status 2026-09-29.** X2 ran a **fourth** time and returned **BLOCKER** — one, **BLOCKER-P1**:
+the deviation above, and this record stating the opposite. It ran no database test, suite or
+sabotage, so it returned **no PASS** on the drop's content.
+
+**Status 2026-09-30.** The Owner ran a dynamic regression and reported it the same day: every
+suite that was run passed. It is Owner-reported evidence, not an X2 verdict, and is kept separate
+from the reviewer's in §11.10.
+
+**Status 2026-10-01 — Owner decision.** BLOCKER-P1 is resolved by keeping `c9f30e3` and recording
+the deviation. That is **not** an X2 PASS and re-freezes nothing.
+
+**Status 2026-10-02.** The fourth X2 was completed. Its reviewer ran the dynamic half that could
+not run on 2026-09-29 — the full regression in both Python modes, the BLOCKER-1 reproduction and
+twelve sabotages — against an isolated copy of `c9f30e3`. **It found no blocker in the technical
+drop.** One sabotage went undetected, which is N-9 demonstrated. The results, and the limits of
+that review's independence, are at §11.12.
+
+**Status 2026-10-02 — Owner decision.** The Owner accepted the fourth X2's verdict as the formal
+X2 PASS for the technical drop, with the independence limits and the N-9 finding as documented
+at §11.12. **That acceptance does not close Stage 1 and does not re-freeze anything.**
+
+**Status 2026-10-02 — Owner decision.** X3 and X5 are to be re-run **each in its own
+conversation**, as the pack requires of its cross-cutting templates: *"Use these repeatedly, in
+their own conversations."* A delta that the X2 reviewer prepared for each in the X2 session is
+**not accepted** as the re-run and is not evidence in this record. Neither re-run has been made.
 
 Required sequence before re-freeze:
 
-1. **X2 RE-REVIEW** of the corrected uncommitted drop, in a separate conversation ← **current step**
+1. **X2 RE-REVIEW** of the corrected drop — now `c9f30e3`, no longer uncommitted. The fourth X2
+   returned its verdict on 2026-10-02: no blocker (§11.12). **Accepted by the Owner as the X2
+   PASS on 2026-10-02**
 2. Resolve any BLOCKER findings
-3. **Commit**
-4. **X3 re-run** — the consolidated contracts, contradictions and coverage in §3–§7 were built at
-   `605ff40` and SPEC-P1.2 has since moved 0.1 → 0.4
-5. **X5 re-run** — `STAGE-1-GAP-AUDIT` was taken at `605ff40`; conditions 1, 2, 5, 6 and 7 have
-   since changed state
+3. **Commit** — happened out of order on 2026-09-10 (§11.10). Anything further arising from
+   steps 1–2 is committed only after X2 passes
+4. **X3 re-run** — **pending**, in its own conversation (§12) ← **next**
+5. **X5 re-run** — **pending**, in its own conversation, after step 4. `STAGE-1-GAP-AUDIT` was
+   taken at `605ff40`; conditions 1, 2, 5, 6 and 7 have since changed state
 6. Create `DECISIONS.md` at the repo root — required by the PROMPT-PACK appendix, currently
    absent. It must **index** the existing records (SPEC-P0.1-DECISIONS's ADRs, STAGE-0-FREEZE §6,
    this §11), not duplicate them
@@ -897,4 +932,280 @@ them.
 
 **Not re-frozen, and not reviewed.** Written by the author of the code it covers, and the artifact
 added is the very test file whose blind spot BLOCKER-A was — so §11.6 step 1 applies with more
-force here, not less. Nothing has been committed, staged or pushed.
+force here, not less.
+
+**Corrected 2026-10-01.** This section previously ended *"Nothing has been committed, staged or
+pushed."* True when written on 2026-09-06; false from 2026-09-10. See §11.10.
+
+### 11.10 Process deviation — the drop landed on `main` before X2 passed (recorded 2026-10-01)
+
+**What happened.** On 2026-09-10 the whole working-tree drop was committed to `main` as one
+commit and pushed to `origin/main` the same day.
+
+| Field | Value |
+|---|---|
+| Commit | `c9f30e3ba9b7d89d3fdfc764e9bb6e8b2cd88d82` |
+| Message | *"Backup latest local work before laptop migration"* |
+| Parent | `c8225ed` (*"Close X5 conditions 1, 2 and 6"*, 2026-09-01) |
+| Commit timestamp | 2026-09-10 19:18:25 +05:30 |
+| Evidence of the push | `origin/main` is this commit; CI ran on it as a `push` event, 2026-09-10 13:47 UTC |
+| Size | 8 files — 7 modified, 1 added — 1,738 insertions, 240 deletions |
+
+**What it contained.** Checked against `git diff c8225ed c9f30e3`. The commit message names none
+of it.
+
+| Content | Recorded at | Files |
+|---|---|---|
+| SPEC-P1.2 v0.1 → v0.2 — Findings A and B | change log, §11.1, §11.2 | `migrations/0001_initial.sql`, `SPEC-P1.2-STORAGE.md` |
+| v0.2 → v0.3 — Finding C, `TimeZone` pin | change log, §11.4 | same two |
+| v0.3 → v0.4 — X2 BLOCKER-1 (`DateStyle` pin), BLOCKER-2 | change log, §11.7 | same two; checks 7.1e and 7.8 of the runtime suite |
+| v0.4 → v0.5 — X2 BLOCKER-1, second review (preimage key set) | change log, §11.8 | same two |
+| X2 BLOCKER-A — coverage for v0.5 | §11.9 | checks 7.1f–7.1h of the runtime suite |
+| `tests/verify_p12_runtime_behaviours.sh` **as a new file** — 570 lines, sections 7.1–7.8 | **No entry records its creation**, nor sections 7.2–7.7. `STAGE-1-GAP-AUDIT` still lists condition 7 as OPEN | the file itself |
+| Four Python harnesses moved off bare `assert` (X5 CONDITION 5) | **No entry.** §11.6 says only *"CONDITION 5 is met"*. `STAGE-1-GAP-AUDIT` still lists it as PARTIAL | `verify_p11_invariants.py`, `verify_p11_x2_regressions.py`, `verify_p13_config.py`, `verify_p14_audit.py` |
+| The M-1 duplicate-`seq` lines entering SPEC §9.5 | **Undeclared** — already open as N-1 (§11.8) | `SPEC-P1.2-STORAGE.md` |
+| This record's §11 | — | `STAGE-1-FREEZE.md` |
+
+So: five changes this record governs, and three it does not record. The harness change removed
+every bare `assert` statement (56, 37, 56 and 61 before; none after) and left the test-function
+counts unchanged at 42, 21, 39 and 36. It was not read line by line for this entry.
+
+**Rules broken.** PROMPT-PACK appendix — *"Every code drop goes through X2 in a separate
+conversation. A BLOCKER finding means the drop does not land"* — and step 3 of §11.6. On
+2026-09-10 the latest verdict was the third X2's BLOCKER, and the fourth had not run.
+
+**Owner decision, 2026-10-01.** The commit is **kept** and the deviation **recorded**. It is not
+reverted and history is not rewritten: a revert would put the v0.1 migration — Findings B and C
+unfixed — back on `main` without removing `c9f30e3` from the published history.
+
+**Evidence on the content of `c9f30e3`, by who produced it.**
+
+| Source | Performed | Reported | What it covers | What it does not |
+|---|---|---|---|---|
+| **Reviewer** — fourth X2, static | 2026-09-29 | 2026-09-29, 11:38 UTC | Writer and verifier preimages extracted from the migration source are identical; they cover exactly the 11 P1.4 §6.1 keys that have an `audit_log` column; `recorded_at` is absent | No database test, no suite, no sabotage run |
+| **CI** — `ci-migration.yml` on `c9f30e3` | 2026-09-10, 13:47 UTC | — | The migration applies on the pinned image | Runs no regression suite (N-3) |
+| **Owner-reported** — dynamic run. **Not re-run or verified by the reviewer** | 2026-09-30 — supported by the traces described below | 2026-09-30, 15:58 UTC | See below | See below |
+| **Reviewer** — fourth X2, dynamic. A separate run from the Owner's, in an isolated copy | 2026-10-01 and 2026-10-02 | 2026-10-02 | Full regression in both modes, BLOCKER-1 reproduction, twelve sabotages — §11.12 | Not the development database; not a second reviewer |
+
+Owner-reported results, as reported:
+
+| Suite | Normal | `python -O` |
+|---|---|---|
+| `verify_p11_x2_regressions.py` | 21/21 | 21/21 |
+| `verify_p11_x5_conditions.py` | 12/12 | passed, no count given |
+| `verify_p13_config.py` | 39/39 | not reported |
+| `verify_p14_audit.py` | 36/36 | 36/36 |
+| `verify_p11_invariants.py` | passed, no count given | not reported |
+| `verify_p11_p12_contract.py` | passed | passed |
+| `verify_p12_runtime_behaviours.sh` | 36/36 | n/a |
+| `verify_p12_migration_rerun.sh` | 6/6 | n/a |
+| `verify_p12_cagg_immutability.sh` | **not run** — skipped by Owner decision | n/a |
+
+*"Not reported"* and *"no count given"* mean the Owner's report carried no figure. No log, saved
+output or shell history of the run exists on the review host, so nothing was filled in.
+
+The date the run was **performed** is supported by two traces the reviewer could observe, both
+dated 2026-09-30. Bytecode caches — `.pyc`, and `.opt-1.pyc` from `-O` — for `src/domain`,
+`src/audit` and `src/config` were written between 17:17 and 21:15 +05:30. The development
+database's log shows deny-trigger rejections at 15:40 UTC, and that database was last recreated
+at 15:51 UTC. Together they show that suites ran that day, in both Python modes and against the
+database. They show no pass count, and cannot say which suite ran under `-O`, because every `-O`
+cache is shared by a suite that was reported.
+
+The same run observed Finding A still open, as check 7.1b pins it (§11.11). The Owner's run
+included no sabotage. The reviewer's later run did; it is recorded separately at §11.12.
+
+**What this entry changes, and what it does not.**
+
+- It edits **this freeze record only**. `STAGE-1-FREEZE.md` is `status: ACTIVE` and is not one of
+  the ten artifacts §2 lists as frozen. **None of those ten is changed by this entry**, so there
+  is no version bump and no change-log row. (`c9f30e3` itself *did* change two of them —
+  `SPEC-P1.2-STORAGE.md` and `migrations/0001_initial.sql` — which is what the change-log rows at
+  the top of §11 record.) This record's own `version:` is left at 1.0; that is N-4.
+- It is **not** an X2 verdict. The fourth X2's verdict is recorded separately at §11.12.
+- It does **not** re-establish the freeze. SPEC-P1.2-STORAGE remains **NOT re-frozen**.
+
+**Still open.** Rechecked against `c9f30e3` on 2026-10-01, in the numbering of the second and
+third X2 (§11.8, §11.9): **N-1, N-2, N-3, N-4, N-5, N-6, N-7, N-8, N-9 and Q-P1.2-7 — all still
+open, none changed.** The first X2's separate series (§11.7, *"N-2 through N-11"*) is not
+itemised in this record and was **not rechecked**; it stands as §11.7 left it.
+
+The fourth X2 returned **BLOCKER**, not PASS. Besides BLOCKER-P1 its report carried four new
+non-blocking labels, N-10 to N-13, and added to existing findings in two places. All six are
+listed so that this record does not understate that review. They are prefixed here because those
+labels collide with the first X2's series. None is addressed by this entry.
+
+- **X2-4/a** (its N-10) — stale text. SPEC-P1.2: the footer still reads *"v0.1"*; §6.11 and the
+  Q-P1.2-6 row still say the DDL is unexecuted and that `ENABLE ALWAYS` fires; the Q-P1.2-1 row is
+  contradicted by Q-P1.2-7. §11.6 of this record still says *"v0.4 still carries
+  `status: FROZEN`"*.
+- **X2-4/b** (its N-11) — `§11.x` references inside SPEC-P1.2 and the migration point at this
+  record, not at SPEC-P1.2's own §11; the change-log rows are out of date order.
+- **X2-4/c** (its N-12) — `STAGE-1-GAP-AUDIT` still lists condition 5 as PARTIAL.
+- **X2-4/d** (its N-13) — a note, not a defect in an artifact: the brief given to that review
+  described the v0.5 state, while the artifact was already at the post-§11.9 state.
+- **X2-4/e** (added under its N-5) — the §2 hashes were taken over CRLF working-tree bytes, not
+  git blobs, so they do not reproduce on another platform.
+- **X2-4/f** (added under its N-4 and N-9) — the verifier's `TimeZone` pin is caught only by
+  check 7.7a's text match, because the test session is already UTC.
+
+One further item was found on 2026-10-01 while this entry was prepared, and is **not** a
+fourth-X2 finding: `STAGE-1-GAP-AUDIT` still lists condition 7 as OPEN although the suite
+exercising those assertions now exists. It belongs to the X5 re-run.
+
+### 11.11 Finding A — a remediation is proposed; it is deferred, not approved, not implemented
+
+**This section is separate from §11.10.** §11.10 corrects the record of a process deviation,
+under the Owner's decision of 2026-10-01. This section records where a different matter stands.
+
+**Finding A is OPEN.** §11.5's Owner decision — accepted as a documented limitation — is the
+decision in force. **Remediation E is not approved and not implemented.** The Owner's acceptance
+of the scratch-validation results below is not approval of the plan and does not close
+Finding A.
+
+**What was measured.** By the reviewer, performed 2026-10-01 between 06:49 and 06:51 UTC and
+documented here the same day, in a throwaway container from the pinned image (TimescaleDB 2.29.2,
+PG16) that was destroyed afterwards. Neither the repository nor the development database was
+touched. The container left no artifact; the times are from the review session's transcript.
+
+- `ALTER TABLE trading.audit_log ENABLE ALWAYS TRIGGER …`, re-issued on the hypertable **after**
+  chunks exist, moved the chunk triggers from `O` to `A`. Under `session_replication_role =
+  'replica'`, `UPDATE`, `DELETE` and `TRUNCATE` were then rejected and a forged insert was
+  re-assigned its `seq` and hashes.
+- Chunks created afterwards start at `O` again. The migration's own `ALTER` runs when no chunk
+  exists, which is why it protects nothing.
+
+So §11.3 row A (*"not fixable in the current architecture"*), §11.5 (*"Prevention: Unavailable …
+No supported mechanism exists"*) and the migration comment (*"CANNOT BE MADE TO"*) overstate the
+position. **They are left as written.** Correcting them belongs to whatever the Owner decides
+below, not to this entry.
+
+**What is proposed — "Remediation E".** Three statement-level `ENABLE ALWAYS` guards on the
+parent table and a scheduled job that re-issues the `ALTER`. The hypertable, compression,
+continuous aggregate, primary key and preimage are unchanged. A residual window remains: direct
+DML on a new chunk's own table, under replica role, until the job next runs.
+
+| | State on 2026-10-02 |
+|---|---|
+| Plan | Written by the reviewer and given to the Owner |
+| Scratch validations | Two, performed by the reviewer on 2026-10-01 between 07:16 and 07:19 UTC in a second throwaway container: the tamper mechanism the tests would use, and concurrent inserts while the job runs. The Owner **accepted these two results as complete** on 2026-10-01, 07:27 UTC. That is acceptance of test results. It is **not** approval of the plan and **not** closure of Finding A |
+| Owner decision on Remediation E | **Deferred, 2026-10-02.** The Owner directed that it may stay deferred because the Stage 2 entry gate does not require it. It is **neither approved nor rejected**. Left undecided for whenever it is taken up: the job interval; whether the residual window is acceptable; whether losing logical replication of `audit_log` is acceptable |
+| Implementation | **None.** No migration, specification or test has been changed, and no object exists in any database |
+| Review | None. If approved and implemented it is a new drop, and §11.6 step 1 applies to it |
+
+### 11.12 Fourth X2, completed — dynamic results and verdict (2026-10-02)
+
+**What this is.** The second half of the fourth X2. The first half (2026-09-29) was static only,
+because the review host then had no runtime. This half ran everything that review's brief
+required and the first half could not.
+
+**Independence, stated plainly.**
+
+- The reviewer wrote no part of `c9f30e3`: not the migration, not SPEC-P1.2, not a test.
+- It is the same reviewer, in a continuation of the same conversation, as the 2026-09-29 half.
+  It is not a fifth, fresh review.
+- That reviewer **did** write §11.10, §11.11, this section and the notice at §12 of this record,
+  and designed Remediation E. None of those is covered by the verdict below. The Owner read this
+  record's text and approved it on 2026-10-02; nobody independent of its author has reviewed it.
+- Whether this satisfies §11.6 step 1 was the Owner's decision, not the reviewer's. The Owner
+  accepted it on 2026-10-02, with these limits stated.
+
+**Where it ran.** A copy exported from `c9f30e3`, outside the repository: 38 of 40 tracked files
+byte-identical, `docker-compose.yml` differing only in container and volume name, and one
+research note differing only in line endings. Its own database container from the pinned image
+(TimescaleDB 2.29.2, PG16), rebuilt from the migration before every sabotage. Python 3.11.9,
+pydantic 2.13.5. The repository and the development database were not touched. The logs are in
+the reviewer's session scratch folder and are **not** in this repository.
+
+**Baseline — every suite, both modes.**
+
+| Command | Exit | Result |
+|---|---|---|
+| `bash scripts/apply-migration.sh` | 0 | 37 tables, 8 hypertables, 3 continuous aggregates, 27 triggers |
+| `bash tests/verify_p12_migration_rerun.sh` | 0 | 6 passed, 0 failed |
+| `bash tests/verify_p12_cagg_immutability.sh` | 0 | 6 passed, 0 failed |
+| `bash tests/verify_p12_runtime_behaviours.sh` | 0 | 36 passed, 0 failed |
+| `python tests/verify_p11_invariants.py`, and with `-O` | 0, 0 | 42 passed; 42 passed |
+| `python tests/verify_p11_p12_contract.py`, and with `-O` | 0, 0 | ALIGNED; ALIGNED |
+| `python tests/verify_p11_x2_regressions.py`, and with `-O` | 0, 0 | 21 passed; 21 passed |
+| `python tests/verify_p11_x5_conditions.py`, and with `-O` | 0, 0 | 12 passed; 12 passed |
+| `python tests/verify_p13_config.py`, and with `-O` | 0, 0 | 39 passed; 39 passed |
+| `python tests/verify_p14_audit.py`, and with `-O` | 0, 0 | 36 passed; 36 passed |
+
+**BLOCKER-1, reproduced independently.** A fresh database from the migration; one `ACTION` row
+per probe with `is_paper = true`, `is_backtest = false` and two untampered neighbours; mutated
+under `session_replication_role = 'replica'`; then `verify_audit_chain()` over that range.
+
+| Mutation | Reported |
+|---|---|
+| `is_paper` true → false | that row, `content mutated` |
+| `is_paper` → false and `is_backtest` → true | that row, `content mutated` |
+| `event_id` changed | that row, `content mutated` |
+| all three together | that row, `content mutated` |
+| `actor` (control) | that row, `content mutated` |
+| `recorded_at` + 400 days | nothing — correct, it is outside the preimage |
+
+In every case only the mutated row was reported. `is_backtest` was not mutated on its own.
+
+**Conformance, read from the database.** The preimage expressions taken from
+`pg_get_functiondef()` for both functions, comments stripped, are identical:
+`prev_hash, seq, event_type, event_class, occurred_at, actor, run_id, event_id, is_paper,
+is_backtest, payload`. `pg_proc.proconfig` carries `TimeZone=UTC` and `DateStyle=ISO, MDY` on
+both.
+
+**Sabotage.** Each was applied to the functions in the isolated database, then the 36-check
+runtime suite was run.
+
+| # | Sabotage | Suite | Detected by |
+|---|---|---|---|
+| S1 | CONTENT branch removed from the verifier | exit 1 — 27 passed, 9 failed | 7.1c, 7.1d, 7.1e, 7.1f ×4, 7.1g control, 7.1h |
+| S2 | `actor` removed from the verifier's preimage | exit 1 — 24 passed, 12 failed | 7.1e, 7.1f ×4, 7.1g ×2, 7.1h, 7.7c, 7.8c, 7.8d ×2 |
+| S3 | `is_paper` removed from the verifier only | exit 1 — 24 passed, 12 failed | the same twelve |
+| S3b | `is_paper` removed from **both** functions | exit 1 — 34 passed, 2 failed | 7.1f `is_paper`, 7.1h key set |
+| S4v | verifier's `DateStyle` pin removed | exit 1 — 33 passed, 3 failed | 7.8a, 7.8d ×2 |
+| S4w | writer's `DateStyle` pin removed | exit 1 — 32 passed, 4 failed | 7.8a, 7.8c, 7.8d ×2 |
+| S5v | verifier's `TimeZone` pin removed | exit 1 — 35 passed, 1 failed | **7.7a only** — a match on the function's text |
+| S5w | writer's `TimeZone` pin removed | exit 1 — 34 passed, 2 failed | 7.7a, 7.7c |
+| S6 | both writer pins removed | exit 1 — 30 passed, 6 failed | 7.7a, 7.7c, 7.8a, 7.8c, 7.8d ×2 |
+| S7 | CONTENT comparison made dead code, `digest(` left in the text | exit 1 — 29 passed, 7 failed | 7.1c, 7.1e, 7.1f ×4, 7.1g control. 7.1d passed, as a text match must |
+| **S8** | verifier's `TimeZone` pin removed **and** a comment containing the word `TimeZone` added to its body | **exit 0 — 36 passed, 0 failed** | **Not detected** |
+| S9 | CONTENT comparison disabled in `src/audit/chain.py` | `verify_p14_audit.py` exit 1 in both modes — 34 passed, 2 failed | the two content-mutation tests, under `-O` as well |
+
+After the last sabotage the database was rebuilt from the migration and the runtime suite re-run:
+36 passed, 0 failed.
+
+**Findings.**
+
+- **No BLOCKER** in the technical drop. BLOCKER-1 is fixed, and the fix is covered by tests that
+  fail when it is reverted (S3b).
+- **N-9 is demonstrated, not merely argued (S8).** Checks 7.7a and 7.8a match the function's
+  text. S5v shows the verifier's `TimeZone` pin has no other guard, and S8 shows that guard is
+  satisfied by a comment. It stays non-blocking for the reason every earlier review gave: the
+  result of a missing verifier pin is a false tamper alarm from a non-UTC session — loud, and
+  fail-closed — not a tamper that goes unseen. It should be fixed before those two functions are
+  next changed: read `pg_proc.proconfig`, and add a verifier-side check from a non-UTC session.
+- N-1 to N-8 and Q-P1.2-7 are as §11.10 left them.
+
+**Verdict on the technical content of `c9f30e3`: no blocker — in the pack's wording, SHIP.**
+This is a verdict on the drop. It is not a re-freeze. Under "Independence" above it became the
+X2 PASS of §11.6 step 1 only by the Owner's acceptance, given on 2026-10-02. That acceptance
+does not close Stage 1.
+
+---
+
+## 12. X3 re-run — pending
+
+**Not run.** §11.6 step 4 requires it, and the pack requires X3 to be used in its own
+conversation.
+
+On 2026-10-02 the reviewer who completed the fourth X2 prepared, in that same session, a delta
+against the 2026-08-31 merge. **The Owner did not accept it as the X3 re-run**, because it was
+not made in its own conversation. It has been taken out of this record. It is kept, unchanged,
+outside this repository, and is to be compared with the re-run of record only **after** that
+re-run has produced its own result.
+
+The X3 re-run of record will replace this notice. It is to derive its findings from the specs,
+the code and the git history, not from that delta. §3 to §7 above stand as written until then.
+
+The X5 re-run (§11.6 step 5) follows it, in a different conversation of its own, and is recorded
+in `STAGE-1-GAP-AUDIT.md`.
