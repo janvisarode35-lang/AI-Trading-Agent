@@ -652,7 +652,11 @@ at §11.12. **That acceptance does not close Stage 1 and does not re-freeze anyt
 **Status 2026-10-02 — Owner decision.** X3 and X5 are to be re-run **each in its own
 conversation**, as the pack requires of its cross-cutting templates: *"Use these repeatedly, in
 their own conversations."* A delta that the X2 reviewer prepared for each in the X2 session is
-**not accepted** as the re-run and is not evidence in this record. Neither re-run has been made.
+**not accepted** as the re-run and is not evidence in this record.
+
+**Corrected 2026-10-05.** The paragraph above previously ended *"Neither re-run has been made."*
+True when written; both have since been made, each in its own conversation: X3 on 2026-10-02 at
+`b8b1340` (§12), and X5 on 2026-10-02 at `3cd91a0` (§13).
 
 Required sequence before re-freeze:
 
