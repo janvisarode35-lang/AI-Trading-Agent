@@ -273,3 +273,160 @@ executes, the audit chain provably detects tampering, and P2.1 touches none of t
 ---
 
 # STAGE 1 AUDITED — GO WITH CONDITIONS
+
+---
+
+# X5 RE-RUN — 2026-10-02
+
+**Run at:** 2026-10-02 · **HEAD:** `3cd91a0` · Required by STAGE-1-FREEZE §11.6 step 5, and made
+in its own conversation, after the X3 re-run of record (STAGE-1-FREEZE §12).
+
+**Sections 1 to 5 above describe the audit taken at `605ff40` and are left as written.** Where
+this section differs from them, this section is the later finding.
+
+The re-run was read-only. It edited no file in this repository, it sets no status and it
+re-freezes nothing. Every number below was measured by the re-run. The X3 re-run's findings were
+tested as claims; the ones reproduced are named in §9. The development database was not touched:
+the database results come from a throwaway container from the pinned image, removed afterwards.
+All Python results are on Python 3.11.9.
+
+`src/` and `config/` are byte-identical to `605ff40`, so every coverage and mutation result below
+also describes the code this audit was first taken against.
+
+## 6. Verdict
+
+# GO WITH CONDITIONS
+
+**No Stage 2 phase may start until entry conditions E-1 and E-2 are met.** After them, P2.1 may
+start as a specification phase. P2.1 code may not write an audit event until condition 9 is
+closed, and may not land until condition 11 is closed. This replaces §5's "P2.1 (Data Ingestion)
+may proceed now".
+
+## 7. The eight conditions of §5, re-measured
+
+| # | Condition | §5 says | At `3cd91a0` |
+|---|---|---|---|
+| 1 | Exposure and valuation cluster | CLOSED | **CLOSED — verified.** 7 of 7 mutations detected, in both Python modes |
+| 2 | Kill-switch and regime gates | CLOSED | **CLOSED — verified.** 3 of 3 mutations detected, in both modes |
+| 3 | Q-P1.1-1, and test `settlement_date_for` | OPEN | **OPEN.** The question is external. The test is not blocked by it: the function returns a stored date |
+| 4 | Q-P1.1-6 | OPEN | **OPEN.** Answered by a measurement taken during P2.1, so it is a P2.1 deliverable that gates P2.2 |
+| 5 | Harnesses off bare `assert` | PARTIAL | **CLOSED.** 0 bare `assert` in all six harnesses. 18 of 18 detected mutations fail identically under `-O` |
+| 6 | `loosens`, `assert_no_env_risk_reads` | CLOSED | **CLOSED — verified** |
+| 7 | Q-P1.2-6's five runtime assertions | OPEN | **CLOSED.** `tests/verify_p12_runtime_behaviours.sh`: 36 of 36 on a fresh database; 7 of 8 sabotages detected. Assertion 1 does not hold — that is Finding A, open and accepted |
+| 8 | C-1, C-2, C-5 | OPEN | **OPEN and larger.** C-1 has 4 instances. C-2 is in all four specs. C-5 is withdrawn |
+
+## 8. Corrections to sections 1 to 5
+
+| Id | Where | Stated | Found |
+|---|---|---|---|
+| X5R-E1 | §1.2 | Line coverage 64.0 / 83.1 / 61.5 / 67.0 % | Statement coverage 89.4 / 98.8 / 94.5 / 91.3 %. The old denominator counted docstrings. The function counts reproduce: 6 of 105 never executed |
+| X5R-E2 | §2.2 | Corporate actions, halts, and timezone/DST/half-day: "✓ test", "OK" | No test for any of the three. `CorporateAction` is never constructed. No test uses a `HALTED` instrument, a `HALF_DAY` session or a DST pair |
+| X5R-E3 | §3 | "No behavioural contradiction was found between any spec and its code"; C-3 "NONE" | X3R-M1, X3R-M2, X3R-M3 — all three reproduced, all present at `605ff40` |
+| X5R-E4 | §3 C-5 | Order rates are in no spec prose | SPEC-P1.3 line 348 |
+| X5R-E5 | §5 | P2.1 touches none of the gaps | P2.1 constructs the models no test builds |
+| X5R-E6 | §5 condition 3 | Testing `settlement_date_for` is blocked on an external fact | It is not |
+| X5R-E7 | §1 | "Three-tick matrix" | 13 numbers against a rule and a value; no test column; not the matrix X5 item 1 asks for |
+| X5R-E8 | §1.1 | "RISK rule §515" | `SIZE-001`. Block A's limit-order rule, `EXEC-001`, is not in the table |
+
+## 9. Findings of the re-run
+
+**Three-tick matrix, 45 Stage 1 requirements:** 19 have three ticks, 15 are partial, 8 have two
+ticks or one, 2 are contradictions, 1 has none. The full matrix is in the re-run's report.
+
+**Block A numbers.** All present with the right value; none stated two ways. The value is pinned
+by a test for 12 rule ids. A rule's `action`, `mode`, `comparison` and `scope` are not pinned:
+`EXP-002` to `ALLOW`, `LOSS-001` to `monitor`, `LOSS-004` to 20%, `EXEC-001` allowing `MARKET`,
+and `STOP-001` to `lte` each load and pass every suite.
+
+| Id | Sev | Gap | Belongs to |
+|---|---|---|---|
+| **X5R-G1** | HIGH | Six models are never constructed by a test (`CorporateAction`, `SuccessorLink`, `Trade`, `FundamentalsSnapshot`, `Candidate`, `Score`). 10 of 18 single-line mutations in `src/` pass every suite; 8 of the 10 are in types P2.1 constructs | Stage 1 |
+| **X5R-G2** | HIGH | The two-person rule is defined for a threshold only. A change of `mode`, `action` or `comparison` is not classed as a loosening by SPEC-P1.3 §5.3, and no function derives the change list from two policy versions | Stage 1 — P1.3 |
+| **X5R-G3** | HIGH | No spec and no phase owns the audit writer. Nothing in `src/` opens a database connection | Stage 1 — P1.2 / P1.4 |
+| X5R-G4 | MEDIUM | CI runs no test suite. Block A fixes Python 3.12+; every result on record is from 3.11. `mypy` has not been run | all |
+| X5R-G5 | MEDIUM | Earnings blackout (X3R-G1). The only research-summary requirement with no spec, rule, code, test or owner in the prompt pack | Stage 1 — P1.3 |
+| X5R-G6 | MEDIUM | The research summary §11 and the pack's P2.10 prompt make daily and weekly loss kill triggers; `LOSS-001` and `LOSS-002` are `DENY` | P2.10 |
+| X5R-G7 | LOW | Check 7.4 probes one base table of 37. The real grants are correct: 0 of 37 readable by `backtest_ro` | P1.2 tests |
+| X5R-G8 to G10 | LOW | Sizing and exits emit no audit event; the database preimage has no field separators (not executed); one test asserts wall-clock time | — |
+
+**Against the X3 re-run.** Reproduced: X3R-M1 (5 envelope fields with no column), X3R-M2 (132
+numeric leaves), X3R-M3, X3R-M4, X3R-C1, C2, C5, C6, C7, C13, X3R-E5, X3R-G1, `A-14`, and the
+counts 118 / 32 / 32. Verified by execution where X3 could not: 28 triggers in `pg_trigger`, 27
+in `information_schema.triggers`. One difference: X3R-G2, G3, G4, G6 and G8 are in no spec, but
+the prompt pack schedules each (P2.10, P3.3, P4.1, P6.3, P5.1). They are deferred work with an
+owner. Only X3R-G1 is unowned.
+
+**Contradictions.** §3's table is replaced by: C-1 open, 4 instances; C-2 open, four specs; C-3
+open (`canonical_bytes`); C-4 none; C-5 withdrawn; and X3R-M1, X3R-M2, X3R-C5, C6, C9, C14 and
+X5R-G6 open.
+
+**Assumptions still unverified and carrying risk:** the write-once anchor store (Q-P1.4-1), which
+is also the only answer to Finding A's residual; settlement T+1; the PDT floor of 25,000, which is
+in no ASSUMPTIONS table and no register and is pinned by no test; audit row width and event rate;
+round-trip cost. New: that the suites behave the same on Python 3.12+.
+
+## 10. Conditions
+
+Entry — before any Stage 2 phase starts:
+
+| # | Condition |
+|---|---|
+| **E-1** | Finish STAGE-1-FREEZE §11.6 steps 6 and 7: create `DECISIONS.md`; resolve SPEC-P1.2's status (X3R-C14); re-freeze |
+| **E-2** | Rewrite the Stage 2 entry gate (STAGE-1-FREEZE §9) so that it names its blockers |
+
+By phase. Conditions 1 to 8 keep their numbers.
+
+| # | Condition | Gates | Severity | State |
+|---|---|---|---|---|
+| 3 | Close Q-P1.1-1; test `settlement_date_for` and the settlement-date validator | P2.9 | BLOCKER for P2.9 | OPEN |
+| 4 | Close Q-P1.1-6 by the measurement P2.1 takes | P2.2 | BLOCKER for P2.2 | OPEN |
+| 7 | Residue: update the stale Q-P1.2-6 row; widen check 7.4; N-9 | P6.4 | LOW | OPEN |
+| 8 | Documentary: C-1, C-2 and stale text | — | LOW | OPEN |
+| **9** | Decide `Q-P1.2-7` / X3R-M1, widened to `reproducibility`, and name the owner of the audit writer | P2.1 code that writes an audit event; P2.3, P2.5, P2.6, P2.7, P2.9 | **BLOCKER** | OPEN |
+| **10** | Decide X3R-M2 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | **BLOCKER** for that run | OPEN |
+| **11** | Tests for the types P2.1 constructs (X5R-G1) | P2.1 code drop | HIGH | OPEN |
+| **12** | Pin `action`, `mode`, `comparison` and `scope` of the constitutional rules; define loosening for a non-threshold change (X5R-G2) | P2.9; any policy change | HIGH | OPEN |
+| **13** | Ratify `A-14`; state how a `PolicyVerdict` becomes a `RiskVerdict`; decide earnings blackout | P2.9 | BLOCKER for P2.9 | OPEN |
+| **14** | Decide whether daily and weekly loss trip the kill switch | P2.10 | BLOCKER for P2.10 | OPEN |
+| **15** | Run the suites in CI, on Python 3.12+ | all | MEDIUM | OPEN |
+| **16** | Verify the PDT floor and register it | P3.2, P6.3 | MEDIUM | OPEN |
+
+Finding A is open and accepted (STAGE-1-FREEZE §11.5). Remediation E is deferred. Neither is a
+Stage 2 entry condition.
+
+**Not verified by the re-run:** behaviour on Python 3.12+; `mypy --strict`; whether SPEC-P1.3 and
+SPEC-P1.4 had an X2 review (G-3); the contents of the development database; the PDT floor.
+
+## DECISIONS MADE — re-run
+
+| # | Decision | Rationale | Reversible? | Blast radius if wrong |
+|---|---|---|---|---|
+| 1 | Count a test tick only if a test fails when the code is broken | A test that mentions a type is not a test of it; §2.2's three wrong "OK" rows came from that | Yes | Low |
+| 2 | Measure statement coverage from bytecode lines | The earlier denominator counted docstrings | Yes | Low |
+| 3 | Verdict GO WITH CONDITIONS, with two entry conditions | Nothing found is a wrong constitutional number or a defect of the v0.5 change; the gate and the freeze are not in order | Yes | Medium |
+
+## ASSUMPTIONS — re-run
+
+| # | Assumption | Why I had to assume it | How to verify | Impact if false |
+|---|---|---|---|---|
+| 1 | Results on Python 3.11.9 hold on 3.12+ | No 3.12+ interpreter on the host has the dependencies | Run the six suites on 3.12 | Medium |
+| 2 | A text search finds every mention of a requirement | Used for the gap rows and the pack check | Read the Stage 0 specs for each gap | Medium |
+
+## OPEN QUESTIONS — re-run
+
+| # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
+|---|---|---|---|---|
+| X5R-Q1 | Who owns the audit writer, and in which spec? | Owner | SPEC-P1.4 CONTRACTS, "P1.2 writer"; `Q-P1.2-7` | P2.1 code that writes an event |
+| X5R-Q2 | Is a change of `mode`, `action` or `comparison` a loosening? | Owner | SPEC-P1.3 §5.3 | Any policy change |
+| X5R-Q3 | Do daily and weekly loss trip the kill switch? | Owner | `master-research-summary.md` §11; PROMPT-PACK P2.10; `LOSS-001`, `LOSS-002` | P2.10 |
+
+## CONTRACTS EXPORTED — re-run
+
+| Name | Kind | Signature or schema | Consumers |
+|---|---|---|---|
+| GAP-AUDIT-P1, 2026-10-02 section | document | Sections 6 to 10 above | Owner re-freeze; all Stage 2 phases |
+| STAGE-2-READINESS-VERDICT, 2026-10-02 | verdict | §6 — GO WITH CONDITIONS; entry conditions E-1, E-2; conditions 3, 4, 7 to 16 | Stage 2 entry gate |
+
+---
+
+# STAGE 1 RE-AUDITED 2026-10-02 — GO WITH CONDITIONS

@@ -662,9 +662,9 @@ Required sequence before re-freeze:
 2. Resolve any BLOCKER findings
 3. **Commit** — happened out of order on 2026-09-10 (§11.10). Anything further arising from
    steps 1–2 is committed only after X2 passes
-4. **X3 re-run** — **pending**, in its own conversation (§12) ← **next**
-5. **X5 re-run** — **pending**, in its own conversation, after step 4. `STAGE-1-GAP-AUDIT` was
-   taken at `605ff40`; conditions 1, 2, 5, 6 and 7 have since changed state
+4. **X3 re-run** — **made 2026-10-02**, in its own conversation, at `b8b1340` (§12)
+5. **X5 re-run** — **made 2026-10-02**, in its own conversation, at `3cd91a0` (§13). Verdict:
+   **GO WITH CONDITIONS**. Recorded in `STAGE-1-GAP-AUDIT.md`, sections 6 to 10
 6. Create `DECISIONS.md` at the repo root — required by the PROMPT-PACK appendix, currently
    absent. It must **index** the existing records (SPEC-P0.1-DECISIONS's ADRs, STAGE-0-FREEZE §6,
    this §11), not duplicate them
@@ -1404,3 +1404,38 @@ are older than it. Re-freezing over them is defensible only if the Stage 2 gate 
 
 The X5 re-run (§11.6 step 5) follows in its own conversation and is recorded in
 `STAGE-1-GAP-AUDIT.md`. §12.6 and §12.7 are inputs to it.
+
+---
+
+## 13. X5 re-run — 2026-10-02
+
+**Run at:** 2026-10-02 · **HEAD:** `3cd91a0` · **Template:** X5 — GAP AUDIT, all five items, in
+its own conversation, as §11.6 step 5 requires. Recorded here on 2026-10-05.
+
+**This section re-freezes nothing and changes no status.** The re-run was read-only. Its result
+of record is `STAGE-1-GAP-AUDIT.md`, sections 6 to 10. The full report and its evidence are in
+`docs/specs/reviews/X5-RERUN-2026-10-02/`. This section is a pointer to them and adds no finding.
+
+**Verdict: GO WITH CONDITIONS.** No Stage 2 phase may start until its two entry conditions are
+met:
+
+| # | Entry condition |
+|---|---|
+| E-1 | Finish §11.6 steps 6 and 7: create `DECISIONS.md`; resolve SPEC-P1.2's status (X3R-C14); re-freeze |
+| E-2 | Rewrite the Stage 2 entry gate (§9) so that it names its blockers |
+
+**The eight conditions of the 2026-08-31 audit.** 1, 2, 5, 6 and 7 are closed, each verified by
+breaking the code and observing a suite fail. 3, 4 and 8 are open. Eight further conditions, 9 to
+16, are tied to the phase each gates; 9 and 10 are `Q-P1.2-7` / X3R-M1 and X3R-M2, which §12.6
+names as blockers.
+
+**Finding A is unchanged:** open and accepted (§11.5). Remediation E is deferred (§11.11). The
+re-run designed and implemented nothing for either.
+
+**Independence and limits.** Every number was measured by the re-run. §12's findings were tested
+as claims; the ones reproduced are named in `STAGE-1-GAP-AUDIT.md` §9. The development database
+was not touched: database results come from a throwaway container from the pinned image. All
+Python results are on Python 3.11.9. What the re-run did not verify is listed in
+`STAGE-1-GAP-AUDIT.md` §10.
+
+**Next.** §11.6 steps 6 and 7. Neither has been started.
