@@ -1,0 +1,247 @@
+[apply-migration] waiting for timescaledb to become healthy
+[apply-migration] timescaledb is healthy
+[apply-migration] recreating database 'trading' and its cluster-scoped roles
+NOTICE:  database "trading" does not exist, skipping
+NOTICE:  role "app_rw" does not exist, skipping
+NOTICE:  role "backtest_ro" does not exist, skipping
+NOTICE:  role "metrics_ro" does not exist, skipping
+NOTICE:  role "trading_owner" does not exist, skipping
+[apply-migration] applying migrations/0001_initial.sql
+CREATE SCHEMA
+CREATE EXTENSION
+CREATE EXTENSION
+CREATE EXTENSION
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+CREATE ROLE
+CREATE SCHEMA
+REVOKE
+REVOKE
+GRANT
+SET
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+ALTER TABLE
+INSERT 0 1
+CREATE TABLE
+CREATE TABLE
+    create_hypertable    
+-------------------------
+ (1,trading,bar_daily,t)
+(1 row)
+
+CREATE TABLE
+       create_hypertable       
+-------------------------------
+ (2,trading,bar_intraday_5m,t)
+(1 row)
+
+CREATE TABLE
+            create_hypertable             
+------------------------------------------
+ (3,trading,bar_intraday_5m_validation,t)
+(1 row)
+
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+    create_hypertable    
+-------------------------
+ (4,trading,news_item,t)
+(1 row)
+
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+   create_hypertable    
+------------------------
+ (5,trading,llm_call,t)
+(1 row)
+
+CREATE TABLE
+         create_hypertable          
+------------------------------------
+ (6,trading,provider_quota_usage,t)
+(1 row)
+
+CREATE TABLE
+            create_hypertable            
+-----------------------------------------
+ (7,trading,stage_latency_observation,t)
+(1 row)
+
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+    create_hypertable    
+-------------------------
+ (8,trading,audit_log,t)
+(1 row)
+
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+psql:/migrations/0001_initial.sql:925: WARNING:  column "vendor_id" should be used for segmenting or ordering
+psql:/migrations/0001_initial.sql:925: WARNING:  column "revision_seq" should be used for segmenting or ordering
+ALTER TABLE
+psql:/migrations/0001_initial.sql:928: WARNING:  column "llm_call_id" should be used for segmenting or ordering
+ALTER TABLE
+ add_compression_policy 
+------------------------
+                   1000
+(1 row)
+
+ add_compression_policy 
+------------------------
+                   1001
+(1 row)
+
+ add_compression_policy 
+------------------------
+                   1002
+(1 row)
+
+ add_compression_policy 
+------------------------
+                   1003
+(1 row)
+
+ add_compression_policy 
+------------------------
+                   1004
+(1 row)
+
+ add_compression_policy 
+------------------------
+                   1005
+(1 row)
+
+ add_retention_policy 
+----------------------
+                 1006
+(1 row)
+
+ add_retention_policy 
+----------------------
+                 1007
+(1 row)
+
+ add_retention_policy 
+----------------------
+                 1008
+(1 row)
+
+ add_retention_policy 
+----------------------
+                 1009
+(1 row)
+
+CREATE MATERIALIZED VIEW
+CREATE MATERIALIZED VIEW
+CREATE MATERIALIZED VIEW
+ add_continuous_aggregate_policy 
+---------------------------------
+                            1010
+(1 row)
+
+ add_continuous_aggregate_policy 
+---------------------------------
+                            1011
+(1 row)
+
+ add_continuous_aggregate_policy 
+---------------------------------
+                            1012
+(1 row)
+
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+REVOKE
+REVOKE
+GRANT
+GRANT
+GRANT
+GRANT
+ALTER DEFAULT PRIVILEGES
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+REVOKE
+GRANT
+GRANT
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE TRIGGER
+CREATE TRIGGER
+ALTER TABLE
+ALTER TABLE
+CREATE TRIGGER
+CREATE TRIGGER
+ALTER TABLE
+ALTER TABLE
+DO
+CREATE FUNCTION
+CREATE TRIGGER
+ALTER TABLE
+CREATE FUNCTION
+[apply-migration] migration exit code 0
+[apply-migration] collecting schema evidence
+extensions      : btree_gist@extensions, pgcrypto@extensions, timescaledb@extensions
+tables          : 37
+hypertables     : 8
+continuous aggs : 3
+triggers        : 27
+[apply-migration] OK

@@ -1,0 +1,10 @@
+C1 gross_notional ignores quantity|src/domain/models.py|return self.price.notional(self.quantity)|return self.price.notional(Quantity.zero())
+C2 dedupe_key drops broker scope|src/domain/models.py|return (self.broker_id, self.broker_fill_id)|return ('', self.broker_fill_id)
+C3 Position.quantity sums nothing|src/domain/models.py|total = total + lot.quantity_remaining|total = total
+C4 market_value currency guard removed|src/domain/models.py|if mark.currency is not self.pool_id.currency:|if False:
+C5 fifo_lots includes closed lots|src/domain/models.py|(lot for lot in self.lots if not lot.is_closed()),|(lot for lot in self.lots),
+C6 open_positions includes CLOSED|src/domain/models.py|return tuple(p for p in self.positions if p.state is not PositionState.CLOSED)|return tuple(self.positions)
+C7 is_complete boundary lt to lte|src/domain/models.py|return self.remaining().value < qty_increment|return self.remaining().value <= qty_increment
+C8 has_unreconciled always False|src/domain/models.py|return any(p.blocks_new_entries() for p in self.positions)|return False
+C9 assert_no_env_risk_reads never raises|src/config/loader.py|    if violations:|    if False:
+C10 infra_env allowlist bypassed|src/config/loader.py|if name not in INFRA_ENV_ALLOWLIST:|if False:

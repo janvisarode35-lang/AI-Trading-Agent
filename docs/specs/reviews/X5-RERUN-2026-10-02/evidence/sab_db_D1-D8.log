@@ -1,0 +1,17 @@
+### D1 drop EXCLUDE symbol_mapping_no_overlap [sabotage: ALTER TABLE] exit=1 PASSED 35   FAILED 1
+  FAIL  overlapping (market, symbol) date range rejected — expected an error matching /symbol_mapping_no_overlap|exclusion|conflicting key/, got: IN
+### D2 drop CHECK decision.risk_decision='ALLOW' [sabotage: ALTER TABLE] exit=1 PASSED 35   FAILED 1
+  FAIL  decision rejects risk_decision = 'DENY' — expected an error matching /risk_decision|check constraint|violates/, got: INSERT 0 1
+### D3 grant backtest_ro SELECT on instrument [sabotage: GRANT] exit=1 PASSED 35   FAILED 1
+  FAIL  backtest_ro SELECT on trading.instrument denied — expected an error matching /permission denied/, got: SET 1
+### D4 overfill trigger made IMMEDIATE [sabotage: ERROR:  constraint "fill_no_overfill" of relation "fill" is not a foreign key constraint] exit=0 PASSED 36   FAILED 0
+### D5 overfill trigger dropped [sabotage: DROP TRIGGER] exit=1 PASSED 34   FAILED 2
+  FAIL  no OverfillError at all: BEGIN INSERT 0 1 first-insert-ok INSERT 0 1 second-insert-ok COMMIT
+  FAIL  expected 0 fills after rollback, found sum=120.000000
+### D6 audit_log_no_update disabled [sabotage: ALTER TABLE] exit=0 PASSED 36   FAILED 0
+### D7 bitemporal close-only trigger dropped on symbol_mapping [sabotage: DROP TRIGGER] exit=1 PASSED 35   FAILED 1
+  FAIL  editing a fact column (valid_to) on a bitemporal row rejected — expected an error matching /altered a fact column|restatements are INSERTs|o
+### D8 grant backtest_ro SELECT on bar_daily (another base table) [sabotage: GRANT] exit=0 PASSED 36   FAILED 0
+PASSED 36   FAILED 0
+
+[exited with code 0]

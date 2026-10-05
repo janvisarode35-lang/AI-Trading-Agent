@@ -1,0 +1,19 @@
+== B-3.1  harness run #1 on the persistent cluster ==
+  PASS  first apply exited 0
+== B-3.2  harness run #2 on the SAME cluster, no down -v ==
+  PASS  second apply exited 0 (harness resets cluster-scoped roles)
+== B-3.3  both runs produced an identical schema ==
+  PASS  schema evidence identical across runs
+        extensions      : btree_gist@extensions, pgcrypto@extensions, timescaledb@extensions
+tables          : 37
+hypertables     : 8
+continuous aggs : 3
+triggers        : 27
+== B-3.4  the volume really did persist (same container, no recreate) ==
+  PASS  same container id throughout - this was a persistent-cluster test
+== B-3.5  §6/§11 contract: re-applying 0001 to the SAME database MUST fail ==
+  PASS  re-apply rejected (psql exit 3, role collision) - 'runs once' contract intact
+== B-3.6  cluster left in a good state ==
+  PASS  all four roles present
+
+PASSED 6   FAILED 0

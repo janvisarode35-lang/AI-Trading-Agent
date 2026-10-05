@@ -1,0 +1,52 @@
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+== 7.1  append-only enforcement, and the replica-role bypass (Finding A) ==
+  PASS  normal role: audit_log UPDATE rejected
+  PASS  normal role: audit_log DELETE rejected
+  PASS  Finding A CONFIRMED STILL OPEN: replica role bypasses the deny triggers
+  PASS  Finding B FIXED: CONTENT check detects the in-place edit prevention missed
+  PASS  verify_audit_chain still recomputes a digest
+  PASS  CONTENT check names EXACTLY the tampered row (seq 100) against 6 untampered rows in range
+  PASS  7.1f is_paper mutation detected — reported at seq 107 as 'content mutated' (2 untampered rows in range, none flagged)
+  PASS  7.1f is_backtest mutation detected — reported at seq 110 as 'content mutated' (2 untampered rows in range, none flagged)
+  PASS  7.1f event_id mutation detected — reported at seq 113 as 'content mutated' (2 untampered rows in range, none flagged)
+  PASS  7.1f actor mutation detected (control, covered before v0.5) — reported at seq 116 as 'content mutated' (2 untampered rows in range, none flagged)
+  PASS  7.1g recorded_at mutation NOT reported ([DEFAULT-A2] keeps it out) — correctly NOT reported
+  PASS  7.1g control: the SAME row and range DOES report once a hashed column changes — the negative result above is not vacuous
+  PASS  7.1h writer and verifier hash the IDENTICAL ordered preimage
+  PASS  7.1h preimage covers exactly the 11 P1.4 6.1 keys that have an audit_log column
+== 7.2  EXCLUDE rejects an overlapping symbol mapping ==
+  PASS  overlapping (market, symbol) date range rejected
+  PASS  editing a fact column (valid_to) on a bitemporal row rejected
+  PASS  retiring the belief (setting knowledge_to) is permitted
+  PASS  same symbol re-mappable once the prior belief is retired (control)
+== 7.3  a DENY verdict cannot be inserted into decision ==
+INSERT 0 1
+  PASS  decision rejects risk_decision = 'DENY'
+== 7.4  backtest_ro is denied on a bitemporal base table ==
+  PASS  backtest_ro SELECT on trading.instrument denied
+== 7.5  the overfill trigger is DEFERRED to COMMIT, not fired on INSERT ==
+  PASS  overfilling INSERT succeeded, COMMIT rejected it (deferred as specified)
+  PASS  the rolled-back transaction left no fills behind (0)
+== 7.6  Q-P1.2-3: compression vs the deny-mutation triggers ==
+  PASS  compression job ran, 2 chunk(s) compressed — deny triggers did not block it
+  PASS  UPDATE on a COMPRESSED chunk still rejected
+== 7.7  Finding C: the hash preimage is timezone-INDEPENDENT ==
+  PASS  audit_chain_assign pins TimeZone
+  PASS  verify_audit_chain pins TimeZone
+  PASS  control: WITHOUT the pin the same instant hashes differently across timezones
+  PASS  WITH the pin the same instant hashes identically across timezones
+  PASS  rows written under non-UTC sessions verify clean (no false tamper alarm)
+== 7.8  X2 BLOCKER-1: the hash preimage is DateStyle-INDEPENDENT too ==
+  PASS  audit_chain_assign pins DateStyle
+  PASS  verify_audit_chain pins DateStyle
+  PASS  control: WITHOUT the DateStyle pin the same instant hashes differently (ISO vs German)
+  PASS  WITH the DateStyle pin the same instant hashes identically across DateStyles
+  PASS  rows written under hostile DateStyle sessions verify clean (no false tamper alarm)
+  PASS  untampered chain verifies clean from a 'German, DMY' verifier session
+  PASS  untampered chain verifies clean from a 'SQL, DMY' verifier session
+
+PASSED 36   FAILED 0

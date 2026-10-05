@@ -1,0 +1,13 @@
+== B-4.1  no pg_column_size in executable migration SQL (comments excluded) ==
+  PASS  pg_column_size absent from executable SQL
+== B-4.2  applying the migration emits no non-immutable warning ==
+  PASS  migration applied clean, 0 non-immutable warnings
+== B-4.3  every cagg definition uses only IMMUTABLE functions ==
+  PASS  no non-IMMUTABLE function referenced by any trading cagg
+== B-4.4  the replacement is storage-INDEPENDENT (the property B-4 needed) ==
+  PASS  octet_length identical across lz4/pglz (40012 both)
+  PASS  control: pg_column_size DOES differ (lz4=192 pglz=487) - the hazard is real
+== B-4.5  rematerialisation is byte-identical to direct recomputation ==
+  PASS  cagg matches base-table recomputation exactly (97042/100)
+
+PASSED 6   FAILED 0
