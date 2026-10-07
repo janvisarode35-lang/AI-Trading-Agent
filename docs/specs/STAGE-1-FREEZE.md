@@ -397,15 +397,44 @@ does not close the open questions in §6.
 
 ## 9. Stage 2 entry gate
 
+**Rewritten 2026-10-05** on the re-freeze (§14), as the X5 re-run's entry condition E-2 requires.
+The 2026-08-31 gate said that no open question blocked P2.1 and that X5 had not run. The first was
+wrong for P2.1 code (§12.6) and the second is out of date. The earlier text is in this file's
+history at `988b58c`.
+
+### 9.1 Entry — what must hold before any Stage 2 phase starts
+
 | Gate | State |
 |---|---|
-| Stage 1 specs FROZEN | **YES**, by this record |
-| Blocking open questions for **P2.1** | **NONE** |
-| Blocking open questions for P2.2 | Q-P1.1-6 |
-| Blocking open questions for P2.9 | Q-P1.1-1, Q-P1.1-2, Q-P1.3-3 |
-| X5 GAP AUDIT | **NOT RUN** — required by the pack before Stage 2 |
+| Stage 1 specs FROZEN | **YES.** SPEC-P1.1 v0.3, SPEC-P1.3 v0.1 and SPEC-P1.4 v0.1 by the 2026-08-31 freeze (§8); SPEC-P1.2 **v0.5** by the re-freeze (§14) |
+| X2 on the re-opened drop | **PASS**, by Owner acceptance of the fourth X2 (§11.12) |
+| X3 MERGE | Run 2026-08-31; **re-run 2026-10-02** (§12) |
+| X5 GAP AUDIT | Run 2026-08-31; **re-run 2026-10-02** (§13). Verdict **GO WITH CONDITIONS** |
+| `DECISIONS.md` | **Exists** (`988b58c`) |
+| X5 entry conditions E-1 and E-2 | **Met** by §14 and by this section |
 
-**P2.1 may proceed once X5 has run.** This record satisfies X3 only.
+**The entry gate is met. P2.1 may start as a specification phase.** No open question blocks
+writing SPEC-P2.1.
+
+### 9.2 What blocks each phase
+
+The entry gate being met does not unblock code. Condition numbers are those of
+`STAGE-1-GAP-AUDIT.md` §10. Nothing in this table is decided here.
+
+| Phase | Blocked by |
+|---|---|
+| **P2.1 — specification** | Nothing |
+| **P2.1 — any code** | (1) SPEC-P2.1 is `FROZEN`. By the pack's appendix that requires the open questions that block it to be closed. (2) **Condition 11**: tests for the Stage 1 types P2.1 constructs have landed and passed X2 |
+| **P2.1 — code that writes an audit event** | **Condition 9**: `Q-P1.2-7` / X3R-M1 is decided — whether `audit_log` gains the missing columns or the database preimage becomes the hash of record, where the reproducibility bundle is stored (X3R-Q2), and who owns the audit writer (X5R-Q1). **Undecided.** If SPEC-P2.1 names it as a blocking question, the row above makes it a blocker for all P2.1 code |
+| The first run that writes `EFFECTIVE_CONFIG_RENDERED` | **Condition 10**: X3R-M2 |
+| P2.2 | **Condition 4**: `Q-P1.1-6`, answered by a measurement P2.1 takes |
+| P2.3, P2.5, P2.6, P2.7 | Condition 9; X3R-Q2 for the three that produce a reproducible event |
+| P2.9 | **Condition 3**: `Q-P1.1-1`. **Condition 13**: `A-14` (STAGE-0-FREEZE §10), X3R-Q3, earnings blackout. **Condition 12**. `Q-P1.1-2` once India is funded. `Q-P1.3-3` is measured inside P2.9 |
+| P2.10 | **Condition 14**; X3R-G2 |
+| P3.2, P6.3 | **Condition 16**: the PDT floor |
+| P6.2, P6.4 | Finding A, open and accepted (§11.5); `Q-P1.4-1` |
+
+Gating no phase, and carried: conditions 7 (residue), 8 and 15; the findings listed at §14.4.
 
 ---
 
@@ -473,6 +502,7 @@ whole mechanism."* This section is that record for Stage 1.
 | 2026-09-01 | SPEC-P1.2-STORAGE + `migrations/0001_initial.sql` | v0.2 → **v0.3** | **T5** — a downstream verification proved the hash preimage was not deterministic | Phase author (§8, *"an additive rule that changes no decision"*) | **Finding C, first half**: `audit_chain_assign()` pins `TimeZone='UTC'`. **No existing hash invalidated** — the pin reproduces the UTC rendering byte for byte. **No decision, number, table, constraint or grant changed** |
 | 2026-09-05 | SPEC-P1.2-STORAGE + `migrations/0001_initial.sql` | v0.4 → **v0.5** | **X2 BLOCKER-1 (second review)** — the independent X2 re-review proved the hash preimage did not cover the P1.4 §6.1 key set | Phase author (§8, *"an additive rule that changes no decision"*) | **Preimage conformance**: `event_id`, `is_paper` and `is_backtest` added to the preimage in **both** functions. All three are `audit_log` columns that SPEC-P1.4 §6.1 pins in the key set and none was hashed; an in-place edit of the paper/real-money flag passed verification. **THIS INVALIDATES EVERY HASH COMPUTED UNDER THE OLD PREIMAGE** — permissible only because §11.4's no-history finding still holds. **No decision, number, table, constraint or grant changed** |
 | 2026-09-04 | SPEC-P1.2-STORAGE + `migrations/0001_initial.sql` | v0.3 → **v0.4** | **X2 BLOCKER-1** — the independent X2 review proved v0.3 closed only half of Finding C | Phase author (§8, *"an additive rule that changes no decision"*) | **Finding C, second half**: both functions additionally pin `DateStyle='ISO, MDY'`; `occurred_at::text` depends on DateStyle as well as TimeZone. **X2 BLOCKER-2**: a stale claim that the insert trigger does not pin the setting, contradicted by v0.3 itself, removed from migration and spec. **No existing hash invalidated** — verified byte-for-byte against three reference rows. **No decision, number, table, constraint or grant changed** |
+| 2026-10-05 | SPEC-P1.2-STORAGE | v0.5 → **v0.5 re-frozen** | §11.6 sequence complete — X2 PASS, X3 and X5 re-runs, `DECISIONS.md` | Owner | **Re-freeze** (§14). `frozen_by` only: it no longer reads *"NOT re-frozen"*. **No decision, number, table, constraint or grant changed**; the migration is untouched |
 
 ### 11.1 Why this was re-opened
 
@@ -658,6 +688,9 @@ their own conversations."* A delta that the X2 reviewer prepared for each in the
 True when written; both have since been made, each in its own conversation: X3 on 2026-10-02 at
 `b8b1340` (§12), and X5 on 2026-10-02 at `3cd91a0` (§13).
 
+**Status 2026-10-05 — Owner decision.** SPEC-P1.2-STORAGE is **re-frozen at v0.5**. The record is
+§14. The opening words of this section, *"NOT re-frozen"*, describe the state before that date.
+
 Required sequence before re-freeze:
 
 1. **X2 RE-REVIEW** of the corrected drop — now `c9f30e3`, no longer uncommitted. The fourth X2
@@ -669,12 +702,11 @@ Required sequence before re-freeze:
 4. **X3 re-run** — **made 2026-10-02**, in its own conversation, at `b8b1340` (§12)
 5. **X5 re-run** — **made 2026-10-02**, in its own conversation, at `3cd91a0` (§13). Verdict:
    **GO WITH CONDITIONS**. Recorded in `STAGE-1-GAP-AUDIT.md`, sections 6 to 10
-6. Create `DECISIONS.md` at the repo root — required by the PROMPT-PACK appendix, currently
-   absent. It must **index** the existing records (SPEC-P0.1-DECISIONS's ADRs, STAGE-0-FREEZE §6,
-   this §11), not duplicate them
-7. Update these freeze records, then **re-freeze**
+6. **`DECISIONS.md` created 2026-10-05** at the repo root (`988b58c`), as an index of the
+   existing records. It duplicates none of them
+7. **Re-frozen 2026-10-05** (§14). The Stage 2 entry gate is rewritten at §9
 
-Only after that does P2.1 become available.
+The sequence is complete. What may start, and what may not, is at §9.
 
 ### 11.7 X2 review corrections — Finding C completed, and a vacuous check replaced (2026-09-04)
 
@@ -1442,4 +1474,65 @@ was not touched: database results come from a throwaway container from the pinne
 Python results are on Python 3.11.9. What the re-run did not verify is listed in
 `STAGE-1-GAP-AUDIT.md` §10.
 
-**Next.** §11.6 steps 6 and 7. Neither has been started.
+**Status.** §11.6 step 6 was completed on 2026-10-05 (`988b58c`), and step 7 by the re-freeze
+at §14.
+
+---
+
+## 14. Re-freeze — 2026-10-05
+
+**This section re-freezes SPEC-P1.2-STORAGE at v0.5 and closes the sequence of §11.6.** It changes
+one status and decides nothing else.
+
+### 14.1 Authority
+
+Owner decisions of 2026-10-05:
+
+| # | Decision |
+|---|---|
+| 1 | SPEC-P1.2-STORAGE is re-frozen **directly at v0.5**. No intermediate `DRAFT` status is introduced. §12.8 recommended `DRAFT` until re-freeze; that recommendation is not taken, and the re-freeze makes it moot |
+| 2 | The header, `version` and `depends_on` inconsistencies are **carried as recorded findings**. The re-freeze is not widened into a correction of the four specs |
+| 3 | `Q-P1.2-7` / X3R-M1 is **not decided**. It is carried as a named blocker in the Stage 2 gate (§9.2) |
+
+### 14.2 Basis
+
+| §11.6 step | State |
+|---|---|
+| 1, 2 — X2 re-review; blockers resolved | Fourth X2: no blocker in the technical drop. Accepted by the Owner as the X2 PASS on 2026-10-02 (§11.12) |
+| 3 — commit | `c9f30e3`, out of order; deviation recorded and kept by Owner decision (§11.10) |
+| 4 — X3 re-run | Made 2026-10-02 at `b8b1340` (§12). The changed DDL of SPEC-P1.2 is identical to the migration, and nothing found is a defect introduced by v0.1 → v0.5 (§12.2, §12.8) |
+| 5 — X5 re-run | Made 2026-10-02 at `3cd91a0` (§13). GO WITH CONDITIONS |
+| 6 — `DECISIONS.md` | Created 2026-10-05 (`988b58c`) |
+| 7 — records updated, re-freeze | This section, and §9 |
+
+The pack's appendix: *"Freezing means: merged via X3, gap-audited via X5, and the open questions
+that block it are closed."* The first two are met. On the third: no open question of SPEC-P1.2
+blocks the specification itself. `Q-P1.2-7` by its own text *"blocks the first writer"*; it is
+carried into §9.2 on that footing, by decision 3 above. That reading is the Owner's.
+
+### 14.3 What is frozen
+
+| Artifact | Version | Status | SHA-256 (16), git blob | Lines |
+|---|---|---|---|---|
+| `docs/specs/SPEC-P1.2-STORAGE.md` | 0.5 | **FROZEN — re-frozen 2026-10-05** | `e41c774279628c4b` | 2,397 |
+| `migrations/0001_initial.sql` | P1.2 v0.5 | frozen with it | `42ca24cf63cc847b` | 1,599 |
+
+The spec's hash differs from §12.2's `e3e754eca1df1ef8` because this re-freeze edits one line of
+it: `frozen_by`, which no longer reads *"NOT re-frozen"*. Nothing else in the spec is changed. The
+other eight artifacts of §12.2 are unchanged and remain frozen by the 2026-08-31 record.
+
+### 14.4 What this re-freeze does not do
+
+As §8 says of the first freeze: it does **not** mean the spec is proven correct, and it does not
+close an open question. Carried, each where it is already recorded:
+
+| Carried | Recorded at |
+|---|---|
+| `Q-P1.2-7` / X3R-M1; X3R-M2 to M7 | §12.3; gate at §9.2 |
+| Contradictions X3R-C1, C2, C5 to C13 — including `depends_on` drift and the `produces:` headers | §12.4 |
+| This record's own `version: 1.0` and `depends_on … SPEC-P1.2-STORAGE v0.1` (N-4) | §11.8, §12.8 |
+| N-1 to N-9; X2-4/a to X2-4/f — including the stale *"v0.1"* footer and rows inside SPEC-P1.2 | §11.8 to §11.10, §11.12 |
+| The X5 conditions 3, 4, 7 to 16 | `STAGE-1-GAP-AUDIT.md` §10 |
+| **Finding A — open and accepted.** Remediation E deferred | §11.5, §11.11 |
+
+X3R-C14, the contradiction in SPEC-P1.2's own header, is closed by §14.3.

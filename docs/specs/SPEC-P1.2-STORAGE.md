@@ -5,7 +5,7 @@ status: FROZEN
 phase: P1.2 — Storage Schema
 depends_on: [SPEC-P1.1-DOMAIN v0.1, SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, STAGE-0-FREEZE v1.1]
 produces: [migrations/0001_initial.sql, role.trading_owner, role.app_rw, role.backtest_ro, role.metrics_ro, table.instrument, table.symbol_mapping, table.successor_link, table.exchange_session, table.tick_size_regime, table.corporate_action, table.fundamentals_snapshot, table.universe_membership, table.bar_daily, table.bar_intraday_5m, table.bar_intraday_5m_validation, table.news_item, table.fx_rate, table.candidate, table.score, table.thesis, table.invalidation_condition, table.risk_evaluation, table.decision, table.order_intent, table.fill, table.lot, table.position_state, table.portfolio_snapshot, table.nav_pool, table.nav_consolidated, table.kill_switch_event, table.audit_log, table.model_registry, table.config_version, table.llm_call, table.provider_quota_usage, table.stage_latency_observation, cagg.llm_spend_daily, cagg.audit_events_daily, cagg.bar_weekly, fn.fundamentals_asof, fn.news_asof, fn.universe_asof, fn.instrument_asof, fn.symbol_asof]
-frozen_by: STAGE-1-FREEZE.md (2026-08-31); reopened 2026-09-01 for Findings B and C (§11), corrected 2026-09-04 for X2 BLOCKER-1 and BLOCKER-2 (§11.7), corrected 2026-09-05 for X2 BLOCKER-1 of the second review — preimage key set (§11.8) — NOT re-frozen, awaiting X2 re-review
+frozen_by: STAGE-1-FREEZE.md (2026-08-31); reopened 2026-09-01 for Findings B and C (§11), corrected 2026-09-04 for X2 BLOCKER-1 and BLOCKER-2 (§11.7), corrected 2026-09-05 for X2 BLOCKER-1 of the second review — preimage key set (§11.8); re-frozen at v0.5 by STAGE-1-FREEZE.md §14 (2026-10-05)
 ---
 
 # SPEC-P1.2 — Storage Schema

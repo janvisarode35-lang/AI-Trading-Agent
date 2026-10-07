@@ -7,7 +7,8 @@
 record named beside it. If this file and a record disagree, the record is right and this file is
 out of date. A decision that has no record does not belong here; write the record first.
 
-Section and line references were checked against commit `f3a7b23`.
+Section and line references were checked against commit `f3a7b23`; §4, §5 and §7 were updated on
+the re-freeze of 2026-10-05.
 
 ---
 
@@ -82,14 +83,12 @@ Each spec ends with a `DECISIONS MADE` table. Row counts as of `f3a7b23`.
 | `SPEC-P0.2-PROVIDERS.md` | 0.5 | FROZEN | §7 | 20 |
 | `SPEC-P0.3-BUDGET.md` | 0.5 | FROZEN | end of file | 17 |
 | `SPEC-P1.1-DOMAIN.md` | 0.3 | FROZEN | end of file | 22 |
-| `SPEC-P1.2-STORAGE.md` | 0.5 | FROZEN, and "NOT re-frozen" in the same header | end of file | 18 |
+| `SPEC-P1.2-STORAGE.md` | 0.5 | FROZEN — re-frozen 2026-10-05, STAGE-1-FREEZE §14 | end of file | 18 |
 | `SPEC-P1.3-CONFIG.md` | 0.1 | FROZEN | end of file | 16 |
 | `SPEC-P1.4-AUDIT.md` | 0.1 | FROZEN | end of file | 16 |
 | `STAGE-1-FREEZE.md` | 1.0 | ACTIVE | after §10 | 4 |
 | `STAGE-1-MERGE-CHANGES.md` | 1.0 | ACTIVE | after §5; after §9 (re-run) | 2; 3 |
 | `STAGE-1-GAP-AUDIT.md` | 1.0 | ACTIVE | after §5; after §10 (re-run) | 3; 3 |
-
-The status of SPEC-P1.2 is an open matter (X3R-C14). It is listed in §7 and is not settled here.
 
 ---
 
@@ -102,6 +101,7 @@ The status of SPEC-P1.2 is an open matter (X3R-C14). It is listed in §7 and is 
 | 2026-10-02 | The fourth X2's verdict accepted as the X2 PASS for the technical drop | STAGE-1-FREEZE §11.6, §11.12 |
 | 2026-10-02 | X3 and X5 to be re-run, each in its own conversation | STAGE-1-FREEZE §11.6 |
 | 2026-10-02 | Remediation E deferred; neither approved nor rejected | STAGE-1-FREEZE §11.11 |
+| 2026-10-05 | SPEC-P1.2 re-frozen directly at v0.5; header, version and `depends_on` inconsistencies carried as findings; `Q-P1.2-7` not decided and named in the gate | STAGE-1-FREEZE §14.1 |
 
 Changes made to frozen Stage 1 artifacts under Phase-author authority (SPEC-P1.2 v0.1 to v0.5)
 are the rows of the change log at STAGE-1-FREEZE §11.
@@ -138,8 +138,6 @@ that states it and the phase it gates.
 
 | Id | Subject | Record | Gates |
 |---|---|---|---|
-| X3R-C14 | Status of SPEC-P1.2 v0.5 | STAGE-1-FREEZE §12.4, §12.8 | Stage 1 re-freeze |
-| §11.6 step 7 | Re-freeze of Stage 1; rewrite of the Stage 2 entry gate | STAGE-1-FREEZE §11.6, §13 | Stage 2 entry |
 | Q-P1.2-7 / X3R-M1 | The audit envelope and the audit table; where the reproducibility bundle is stored (X3R-Q2); who owns the audit writer (X5R-Q1) | SPEC-P1.2 OPEN QUESTIONS; STAGE-1-FREEZE §12.3; STAGE-1-GAP-AUDIT §9, §10 | P2.1 code that writes an audit event |
 | X3R-M2 / X3R-Q1 | The effective-config dump against the no-JSON-numbers rule | STAGE-1-FREEZE §12.3 | First run that writes its config event |
 | X5R-Q2 | Whether a change of `mode`, `action` or `comparison` is a loosening | STAGE-1-GAP-AUDIT §9 | Any policy change |
@@ -153,6 +151,8 @@ that states it and the phase it gates.
 | Q-P1.4-1 | Where anchors are published | SPEC-P1.4 OPEN QUESTIONS | P6.2, P6.4 |
 | F-2 / G-3; Q-P1.1-8 | Whether SPEC-P1.3 and SPEC-P1.4 had an X2; an independent X2 of SPEC-P1.1 | STAGE-1-FREEZE OPEN QUESTIONS; STAGE-1-GAP-AUDIT OPEN QUESTIONS; SPEC-P1.1 OPEN QUESTIONS | Not assigned to a phase |
 | M-7 | DeepSeek data-retention terms; AD-5 is conditional on it | STAGE-0-FREEZE §6.2, §7 (T2) | AD-5 |
+
+What blocks each phase is at STAGE-1-FREEZE §9.2.
 
 Open questions that wait on an external fact or a measurement, not on a decision, are in each
 spec's `OPEN QUESTIONS` table and in STAGE-0-FREEZE §6.
