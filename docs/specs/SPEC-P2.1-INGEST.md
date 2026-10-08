@@ -1,10 +1,10 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.1
+version: 0.2
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
-produces: [migrations/0002_ingest.sql, config/ingest.yaml, src/provider/enums.py, src/provider/spec.py, src/data/, enum.IngestDataType, enum.ManifestStatus, enum.FailureKind, enum.GapKind, enum.GapState, enum.ReconKind, class.IngestConfig, protocol.ReferenceProvider, protocol.CalendarProvider, protocol.DailyBarProvider, protocol.IntradayBarProvider, protocol.CorporateActionProvider, protocol.FundamentalsProvider, protocol.FilingsProvider, protocol.MacroProvider, protocol.FxProvider, protocol.NewsProvider, protocol.BarStream, table.ingest_manifest, table.ingest_checkpoint, table.ingest_failure, table.ingest_gap, table.ingest_reconciliation, table.provider_instrument_ref, table.raw_news_snapshot, table.macro_series, table.macro_observation, table.edgar_index_snapshot, table.edgar_filing, table.insider_filing_raw, rule.IR-1..IR-20]
+produces: [migrations/0002_ingest.sql, config/ingest.yaml, src/provider/enums.py, src/provider/spec.py, src/data/, enum.IngestDataType, enum.ManifestStatus, enum.FailureKind, enum.GapKind, enum.GapState, enum.ReconKind, class.IngestConfig, class.IngestSet, class.BackfillJobRequest, class.DailyRunRequest, class.DailyRunResult, protocol.ReferenceProvider, protocol.CalendarProvider, protocol.DailyBarProvider, protocol.IntradayBarProvider, protocol.CorporateActionProvider, protocol.FundamentalsProvider, protocol.FilingsProvider, protocol.MacroProvider, protocol.FxProvider, protocol.NewsProvider, protocol.BarStream, table.ingest_manifest, table.ingest_checkpoint, table.ingest_failure, table.ingest_gap, table.ingest_reconciliation, table.provider_instrument_ref, table.raw_news_snapshot, table.macro_series, table.macro_observation, table.edgar_index_snapshot, table.edgar_filing, table.insider_filing_raw, table.corporate_action_terms, rule.IR-1..IR-20]
 ---
 
 # SPEC-P2.1 — Data Ingestion
@@ -54,8 +54,9 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | P2.1 — any code | Closed | Requires (1) this spec `FROZEN`, which requires its blocking open questions closed; (2) **X5 condition 11** landed and passed X2 |
 | P2.1 — code that writes an audit event | Closed | Requires **X5 condition 9** (`Q-P1.2-7` / X3R-M1; where the reproducibility bundle is stored; who owns the audit writer). **Not decided here, and nothing in this document depends on a particular answer** |
 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | Closed | X5 condition 10 (X3R-M2). Not P2.1's |
+| P2.1 code that relies on `[DEFAULT-13]` | Closed | Requires `ASSUMPTION [A-10]` verified against one documented ticker-rename case (Owner decision O-9) |
 
-### 0.3 Owner decisions this draft is built on (2026-10-07)
+### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08)
 
 | # | Decision |
 |---|---|
@@ -67,6 +68,15 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | O-6 | P2.1 owns the calendar and reference-data loaders. The calendar source stays an open question |
 | O-7 | The ten blocking-question defaults of §1.1 are approved |
 | O-8 | `Q-P1.2-7` / X3R-M1, OQ-12 and OQ-13 are carried with condition 9 and are not resolved in P2.1 |
+| O-9 | `[DEFAULT-11]` to `[DEFAULT-16]` are approved as written in §1.2. `[DEFAULT-13]` is conditional: `[A-10]` must be verified against one documented ticker-rename case before any P2.1 code relies on it |
+| O-10 | `[OQ-21]`: a P2.1-owned 0002 table of exact corporate-action terms keyed by `action_id` (`corporate_action_terms`, §22.12). The 0001 `corporate_action` row keeps its constrained, rounded representation. SPEC-P1.1 and SPEC-P1.2 are not re-opened. `[DEFAULT-14]` is amended to match |
+
+### 0.4 Version history
+
+| Version | Date | Change |
+|---|---|---|
+| 0.1 | 2026-10-07 | First draft (`8efcf3e`) |
+| 0.2 | 2026-10-08 | Block B conformance correction and Owner decisions O-9 and O-10. Adds the request and result models (§12.3) and the field specifications (§28); replaces stub bodies with docstrings; lists `[DEFAULT-1]` to `[DEFAULT-16]` individually; writes out abbreviated lists; adds four validators that §28 relies on. Records the approval of `[DEFAULT-11]` to `[DEFAULT-16]` (O-9). Closes `[OQ-21]` (O-10): adds the table `corporate_action_terms` (§22.12) and changes `[DEFAULT-14]` for dividend amounts and split ratios from "reject" to "store exactly, 0001 row rounded and flagged" (§7.2, §8.2, §8.4). No other decision, default, rule or DDL constraint is changed |
 
 ---
 
@@ -89,17 +99,18 @@ Block C: questions where two reasonable answers produce materially different des
 | **9** | India adapter testing with no India data spend | **Fixtures built from documented response shapes, labelled synthetic** `[DEFAULT-9]`. Recorded fixtures are required before India activation | A synthetic fixture can encode a wrong field. See `[P21-25]`: the shapes are not yet documented in any frozen spec |
 | **10** | Client libraries; who owns non-audit database writes | **`psycopg` 3, `httpx`, `redis`, `websockets`; P2.1 owns a write module for the tables it writes** `[DEFAULT-10]`. The audit writer stays with condition 9 | Later phases inherit the choice |
 
-### 1.2 Raised while drafting — defaults applied, **not yet reviewed by the Owner**
+### 1.2 Raised while drafting — approved by the Owner on 2026-10-08
 
 Each was forced by reconciling the design against the fact sheets and the DDL. Each is marked
-inline and repeated in ASSUMPTIONS.
+inline and repeated in ASSUMPTIONS. All six were approved by Owner decision O-9; default 14 is as
+amended by O-10.
 
 | # | Question | Default applied | What breaks if the default is wrong |
 |---|---|---|---|
-| **11** | Which instruments does a daily run ingest? | **An explicit ingest set supplied to the run: universe members as of the session, plus names flagged `retained_as_held`, plus any instruments the caller adds** `[DEFAULT-11]`. When no universe version exists, the caller must supply the set; there is no implicit "everything" | Reconstitution needs bars for names outside the universe. Who requests them is `[OQ-19]` |
+| **11** | Which instruments does a daily run ingest? | **An explicit ingest set supplied to the run: universe members as of the session, plus names flagged `retained_as_held`, plus any instruments the caller adds** `[DEFAULT-11]`, typed as `IngestSet` (§12.3). When no universe version exists, the caller must supply the set; there is no implicit "everything" | Reconstitution needs bars for names outside the universe. Who requests them is `[OQ-19]` |
 | **12** | Where does `disseminated_at` come from? | **Only from an EDGAR filing record, through the cutoff rule of §19.2. A fundamentals row with no matching filing record is not stored** `[DEFAULT-12]` | Rule N1 look-ahead if a vendor "filing date" is trusted. Cost: fundamentals with no EDGAR match are absent |
-| **13** | How is an instrument recognised across a ticker change? | **By `composite_figi` when present, `ASSUMPTION [A-10]`** `[DEFAULT-13]` | A renamed ticker becomes a delisting plus a new instrument: an identity break |
-| **14** | A vendor value more precise than the column that must hold it | **Rejected and recorded. Never rounded** `[DEFAULT-14]`. `Price` and `Money` round silently (`[P21-16]`), so the check runs before either is constructed | Cash dividends with more than two decimals are rejected until `[P21-17]` is decided. **This blocks freeze** — see `[OQ-21]` |
+| **13** | How is an instrument recognised across a ticker change? | **By `composite_figi` when present, `ASSUMPTION [A-10]`** `[DEFAULT-13]`. Conditional (O-9): no P2.1 code may rely on it until `[A-10]` is verified against one documented ticker-rename case | A renamed ticker becomes a delisting plus a new instrument: an identity break |
+| **14** | A vendor value more precise than the column that must hold it | **Prices, volumes and FX rates: rejected and recorded, never rounded. Dividend amounts and split ratios: the exact vendor terms are stored in `corporate_action_terms`, and the 0001 `corporate_action` row holds the value rounded half-up to its column, flagged as rounded** `[DEFAULT-14]`, as amended by O-10. `Price` and `Money` round silently (`[P21-16]`), so the check runs before either is constructed | A reader that takes a dividend amount or a ratio from the 0001 row while its flag is set uses a rounded value. §8.4 directs readers to the exact terms |
 | **15** | Does `ingest_manifest.run_id` reference `run_context`? | **No foreign key** `[DEFAULT-15]`. A `run_context` row needs a `config_version` row, which needs an audit event (`[P21-20]`); a key would silently widen the condition 9 gate to every P2.1 write | A manifest row whose run has no `run_context` row |
 | **16** | How is a 5-minute bar formed from the `b` minute-bar stream? | **Deterministic aggregation of the minute bars received for the window, as SPEC-P0.3 §6.2 fixes; completion is exactly RULE-B12** `[DEFAULT-16]` | A bar assembled across an unnoticed loss. §13.5 is the check that detects it |
 
@@ -243,7 +254,7 @@ tz-aware UTC; a violation raises and the record becomes an `ingest_failure` row 
 # src/data/wire.py
 from datetime import date, datetime
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from provider.enums import ProviderId
 
@@ -312,6 +323,12 @@ class WireSession(_Wire):
     is_half_day: bool
     is_special: bool
 
+    @model_validator(mode="after")
+    def _one_session_type(self) -> "WireSession":
+        if self.is_half_day and self.is_special:
+            raise ValueError("a session is a half-day or a special session, not both")
+        return self
+
 
 class WireNews(_Wire):
     vendor_id: str = Field(min_length=1, max_length=128)
@@ -359,7 +376,7 @@ class WireFxRate(_Wire):
 ```
 
 `WireBar.volume`, `WireDividend.cash_amount` and every price field are deliberately wider than the
-column they end in: the precision check of §7.2 needs the vendor's value intact to refuse it.
+column they end in: §7.2 needs the vendor's value intact, to refuse it or to store it exactly.
 
 ### 4.3 Protocols
 
@@ -394,20 +411,23 @@ class Page[T](BaseModel):
 @runtime_checkable
 class ReferenceProvider(Protocol):
     provider_id: ProviderId
-    def fetch_instruments(self, *, as_of_date: date, active: bool, cursor: str | None) -> Page[WireInstrument]: ...
+    def fetch_instruments(self, *, as_of_date: date, active: bool, cursor: str | None) -> Page[WireInstrument]:
+        """One page of the provider's instruments as of `as_of_date`."""
 
 
 @runtime_checkable
 class CalendarProvider(Protocol):
     provider_id: ProviderId
-    def fetch_sessions(self, *, exchange_code: str, date_from: date, date_to: date) -> Page[WireSession]: ...
+    def fetch_sessions(self, *, exchange_code: str, date_from: date, date_to: date) -> Page[WireSession]:
+        """Sessions of one exchange for `[date_from, date_to]`, both inclusive. A closed date is absent."""
 
 
 @runtime_checkable
 class DailyBarProvider(Protocol):
     provider_id: ProviderId
     def fetch_daily_bars(self, *, provider_symbol: str, date_from: date, date_to: date,
-                         cursor: str | None) -> Page[WireBar]: ...
+                         cursor: str | None) -> Page[WireBar]:
+        """Unadjusted daily bars for one symbol, `[date_from, date_to]` both inclusive."""
 
 
 @runtime_checkable
@@ -415,62 +435,78 @@ class IntradayBarProvider(Protocol):
     provider_id: ProviderId
     def fetch_intraday_bars(self, *, provider_symbols: Sequence[str], window_seconds: int,
                             start: datetime, end: datetime, symbol_asof: date,
-                            cursor: str | None) -> Page[WireBar]: ...
+                            cursor: str | None) -> Page[WireBar]:
+        """Unadjusted bars of `window_seconds` for windows starting in `[start, end)`."""
 
 
 @runtime_checkable
 class CorporateActionProvider(Protocol):
     provider_id: ProviderId
     def fetch_splits(self, *, provider_symbol: str | None, date_from: date, date_to: date,
-                     cursor: str | None) -> Page[WireSplit]: ...
+                     cursor: str | None) -> Page[WireSplit]:
+        """Splits executed in `[date_from, date_to]`; every symbol when `provider_symbol` is None."""
     def fetch_dividends(self, *, provider_symbol: str | None, ex_date_from: date, ex_date_to: date,
-                        cursor: str | None) -> Page[WireDividend]: ...
+                        cursor: str | None) -> Page[WireDividend]:
+        """Dividends going ex in `[ex_date_from, ex_date_to]`; every symbol when `provider_symbol` is None."""
 
 
 @runtime_checkable
 class FundamentalsProvider(Protocol):
     provider_id: ProviderId
     def fetch_fundamentals(self, *, provider_symbol: str, period_end_from: date,
-                           period_end_to: date) -> Page[WireFundamentals]: ...
+                           period_end_to: date) -> Page[WireFundamentals]:
+        """Reported fundamentals for periods ending in `[period_end_from, period_end_to]`."""
 
 
 @runtime_checkable
 class FilingsProvider(Protocol):
     provider_id: ProviderId
-    def fetch_index(self, *, index_kind: str, index_ref: str) -> bytes: ...
-    def fetch_filings(self, *, cik: str, accepted_from: datetime, accepted_to: datetime) -> Page[WireFiling]: ...
-    def fetch_document(self, *, document_ref: str) -> bytes: ...
-    def fetch_reported_metrics(self, *, cik: str, period_end: date) -> Page[WireFundamentals]: ...
+    def fetch_index(self, *, index_kind: str, index_ref: str) -> bytes:
+        """The bytes of one index, exactly as served."""
+    def fetch_filings(self, *, cik: str, accepted_from: datetime, accepted_to: datetime) -> Page[WireFiling]:
+        """Filings of one CIK accepted in `[accepted_from, accepted_to)`."""
+    def fetch_document(self, *, document_ref: str) -> bytes:
+        """The bytes of one filing document, exactly as served."""
+    def fetch_reported_metrics(self, *, cik: str, period_end: date) -> Page[WireFundamentals]:
+        """Metrics as reported to the SEC for one CIK and period: rule N7's authority."""
 
 
 @runtime_checkable
 class MacroProvider(Protocol):
     provider_id: ProviderId
     def fetch_observations(self, *, series_id: str, observation_from: date, observation_to: date,
-                           vintage_from: date, vintage_to: date) -> Page[WireMacroObservation]: ...
-    def fetch_series_notes(self, *, series_id: str) -> str: ...
+                           vintage_from: date, vintage_to: date) -> Page[WireMacroObservation]:
+        """Observations in the range, one record per (observation date, vintage date)."""
+    def fetch_series_notes(self, *, series_id: str) -> str:
+        """The series' notes text, for the copyright screen of §19.5."""
 
 
 @runtime_checkable
 class FxProvider(Protocol):
     provider_id: ProviderId
-    def fetch_rate(self, *, as_of_date: date, base: str, quote: str) -> WireFxRate | None: ...
+    def fetch_rate(self, *, as_of_date: date, base: str, quote: str) -> WireFxRate | None:
+        """The rate for one date, or None only when the provider affirmatively has none."""
 
 
 @runtime_checkable
 class NewsProvider(Protocol):
     provider_id: ProviderId
-    def fetch_news(self, *, updated_from: datetime, updated_to: datetime, cursor: str | None) -> Page[WireNews]: ...
+    def fetch_news(self, *, updated_from: datetime, updated_to: datetime, cursor: str | None) -> Page[WireNews]:
+        """Items created or updated in `[updated_from, updated_to)`."""
 
 
 @runtime_checkable
 class BarStream(Protocol):
     """Held-names minute-bar stream. One connection per process (SPEC-P0.2: the limit is 1)."""
     provider_id: ProviderId
-    async def connect(self) -> None: ...
-    async def subscribe(self, provider_symbols: Sequence[str]) -> None: ...
-    def messages(self) -> AsyncIterator[WireBar]: ...
-    async def close(self) -> None: ...
+    async def connect(self) -> None:
+        """Open the socket and authenticate. Raises `StreamError` or `CredentialInvalid`."""
+    async def subscribe(self, provider_symbols: Sequence[str]) -> None:
+        """Replace the subscription with exactly these symbols, channel `b` only."""
+    def messages(self) -> AsyncIterator[WireBar]:
+        """Minute bars in arrival order. The iterator ends when the connection closes."""
+    async def close(self) -> None:
+        """Close the socket. Idempotent."""
 ```
 
 **Errors.** Every protocol method raises exactly one of these, and nothing else escapes an adapter:
@@ -480,15 +516,41 @@ class BarStream(Protocol):
 class IngestError(Exception):
     """Base. Every subclass maps to exactly one FailureKind (§15.1)."""
 
-class ProviderUnreachable(IngestError): ...      # connection refused, DNS, TLS
-class ProviderTimeout(IngestError): ...          # no complete response inside the configured timeout
-class ProviderHttpError(IngestError): ...        # a status the adapter does not classify as throttling
-class ProviderThrottled(IngestError): ...        # 429, or the provider's documented equivalent
-class QuotaRefusedLocally(IngestError): ...      # the call was not sent: it would breach a published limit
-class CredentialInvalid(IngestError): ...        # 401/403 or a failed pre-flight
-class SchemaViolation(IngestError): ...          # response does not parse into the wire model
-class IncompleteResponse(IngestError): ...       # truncated body, or a page chain that did not terminate
-class StreamError(IngestError): ...              # a WebSocket error frame or an unexpected close
+
+class ProviderUnreachable(IngestError):
+    """Connection refused, DNS, TLS."""
+
+
+class ProviderTimeout(IngestError):
+    """No complete response inside the configured timeout."""
+
+
+class ProviderHttpError(IngestError):
+    """A status the adapter does not classify as throttling."""
+
+
+class ProviderThrottled(IngestError):
+    """429, or the provider's documented equivalent."""
+
+
+class QuotaRefusedLocally(IngestError):
+    """The call was not sent: it would breach a published limit."""
+
+
+class CredentialInvalid(IngestError):
+    """401/403 or a failed pre-flight."""
+
+
+class SchemaViolation(IngestError):
+    """Response does not parse into the wire model."""
+
+
+class IncompleteResponse(IngestError):
+    """Truncated body, or a page chain that did not terminate."""
+
+
+class StreamError(IngestError):
+    """A WebSocket error frame or an unexpected close."""
 ```
 
 `fetch_rate` returns `None` only when the provider **affirmatively** reports no rate for that date.
@@ -601,7 +663,7 @@ because `instrument` has no column for a CIK, a share-class FIGI or a Zerodha in
 A failure at any step discards **that record only**, writes one `ingest_failure` row, and counts
 in the manifest. It never discards the batch silently and never substitutes a value.
 
-### 7.2 Precision — reject, never round `[DEFAULT-14]`
+### 7.2 Precision — reject or keep exact, never round silently `[DEFAULT-14]`
 
 `Price` quantises to 6 decimal places and `Money` to 2, both with `ROUND_HALF_UP`, inside their
 constructors (`src/domain/models.py`). Constructing either from a more precise vendor value
@@ -612,8 +674,8 @@ first:
 |---|---|---|
 | `Price` (`numeric(18,6)`) | 6 | `PRECISION_EXCEEDED`; record not stored |
 | `bar_*.volume` (`bigint`) | 0 | `PRECISION_EXCEEDED` |
-| `corporate_action.ratio` (`numeric(18,6)`) | computed, see §8.2 | see §8.2 |
-| `corporate_action.cash_amount` (`numeric(18,2)`) | 2 | `PRECISION_EXCEEDED` — **see `[P21-17]` and `[OQ-21]`** |
+| `corporate_action.ratio` (`numeric(18,6)`) | not bounded | Never refused. The exact `split_from` and `split_to` go to `corporate_action_terms`; the 0001 `ratio` is the quotient rounded half-up to 6 places and `ratio_rounded_in_0001` records whether rounding occurred (§8.2) |
+| `corporate_action.cash_amount` (`numeric(18,2)`) | not bounded | Never refused. The exact amount goes to `corporate_action_terms.cash_amount_exact`; the 0001 `cash_amount` is that amount rounded half-up to 2 places — the `Money` constructor's own rounding — and `cash_rounded_in_0001` records whether rounding occurred (§8.2) |
 | `fx_rate.rate` (`numeric(18,6)`) | 6 | `PRECISION_EXCEEDED` |
 | Fundamentals metrics (`jsonb`, decimal strings) | not bounded by the column | stored at vendor precision |
 
@@ -658,7 +720,7 @@ always with `adjusted=false`** `[V-P0.2 §3.3]`
 | `ticker` | `provider_symbol` |
 | `ex_dividend_date`, `pay_date`, `record_date`, `declaration_date` | same names |
 | `cash_amount` | `cash_amount` |
-| `distribution_type`, `frequency` | same names — **read, validated, and not storable in 0001** `[P21-18]` |
+| `distribution_type`, `frequency` | same names — stored in `corporate_action_terms`, with `record_date` and `declaration_date`. 0001 has no column for them `[P21-18]` |
 
 **Massive — tickers `GET /v3/reference/tickers` with `date` and `active`** `[V-P0.2 §3.3]`
 
@@ -712,6 +774,7 @@ table is therefore the mapping of record for what P2.1 writes. Neither side is c
 | `fundamentals_snapshot.valid_from`, `valid_to` | `valid_from` = `period_end`; `valid_to` = `NULL` |
 | `fundamentals_snapshot.knowledge_from`, `knowledge_to` | As `corporate_action` |
 | `fx_rate.*` | `FxRate` fields of the same name |
+| `corporate_action_terms.*` | The `WireSplit` or `WireDividend` the action was built from, unrounded; `action_id` and `knowledge_from` from the `corporate_action` row written in the same transaction |
 | `instrument.*`, `symbol_mapping.*`, `exchange_session.*` | Fields of the same name; bitemporal columns as above |
 
 `FundamentalsSnapshot.as_of` (inherited from `_MarketDatum`) is set to `disseminated_at`. It has
@@ -731,7 +794,7 @@ mapped to the calendar by its end date, and nothing else is inferred.
 | Type | Source | State |
 |---|---|---|
 | `SPLIT`, `REVERSE_SPLIT` | Massive splits | Mapped (§7.3) |
-| `CASH_DIVIDEND` | Massive dividends | Mapped; **precision blocked by `[P21-17]`** |
+| `CASH_DIVIDEND` | Massive dividends | Mapped (§7.3); exact terms in `corporate_action_terms` (§8.2) |
 | `DELISTING` | Massive tickers `delisted_utc` | Written when the reference loader first sees the delisting; `ex_date` = `effective_date` = `delisted_on` |
 | `STOCK_DIVIDEND`, `TICKER_CHANGE`, `EXCHANGE_TRANSFER`, `MERGER`, `ACQUISITION`, `SPINOFF`, `RIGHTS_ISSUE` | none recorded | **`[OQ-29]`**. `TICKER_CHANGE` is observable from the reference loader (IR-11) and is written from there; the other six have no source |
 
@@ -740,7 +803,9 @@ mapped to the calendar by its end date, and nothing else is inferred.
 | # | Rule | Edge case |
 |---|---|---|
 | **IR-18** | The action type is decided by the **endpoint** the record came from, through a mapping table per adapter. A record that fits no type raises `UnknownCorporateActionError` → `UNKNOWN_CORPORATE_ACTION`; it is never skipped | `parse_corporate_action_type` in the domain only upper-cases a string; no vendor emits our enum names, so adapters do not call it with vendor text |
-| — | `ratio` = `split_to / split_from`, computed in `Decimal` | If the quotient does not terminate within 6 decimal places (1-for-3 → 0.333…), the stored `ratio` cannot be exact `[P21-18]`. **The action is stored with the quotient rounded half-up to 6 places and a `ingest_failure` row of kind `PRECISION_EXCEEDED` is written beside it**, so the inexactness is on record. This is the one place a rounded value is stored, because refusing the split would misprice every later bar — the larger error. `[OQ-21]` |
+| — | `ratio` = `split_to / split_from`, computed in `Decimal` and rounded half-up to 6 places for the 0001 column | A quotient that does not terminate within 6 places (1-for-3 is 0.333333 recurring) cannot be exact in 0001 `[P21-18]`. The exact `split_from` and `split_to` are stored in `corporate_action_terms` with `ratio_rounded_in_0001 = true`. A split is never refused for this reason: a missing split misprices every later bar |
+| — | `cash_amount` in 0001 = the vendor's per-share amount rounded half-up to 2 places, which is the `Money` constructor's own rounding | An amount with more than 2 decimals cannot be exact in 0001 `[P21-17]`. The exact amount is stored in `corporate_action_terms.cash_amount_exact` with `cash_rounded_in_0001 = true`. A dividend is never refused for this reason |
+| — | Every `SPLIT`, `REVERSE_SPLIT` and `CASH_DIVIDEND` row in `corporate_action` has exactly one `corporate_action_terms` row with the same `(action_id, knowledge_from)`, written in the same transaction (O-10) | A changed fact closes the 0001 row and inserts a new one; the new row gets its own terms row. If either insert fails the transaction rolls back: the action is absent, never half-recorded. `DELISTING` and `TICKER_CHANGE` have no terms row |
 | — | Natural key: `(instrument_id, action_type, ex_date, source)` among rows with `knowledge_to IS NULL` | A re-fetched action identical on every fact column: no write. A changed fact: close the open row, insert a new one with the **same** `action_id` |
 | — | `as_of` = the `retrieved_at` of the first sighting. No verified source field carries an announcement time | A backfilled split therefore has an `as_of` on the backfill date. A backtest must select actions by `effective_date`, not `as_of` |
 | — | An action whose `effective_date` has no session row inside calendar coverage: `CorporateActionCalendarError` → `DOMAIN_VALIDATION_FAILED`, not stored `[FROZEN P1.1 §5.3]` | Applies to splits. A dividend `pay_date` on a closed date is legitimate and is stored |
@@ -757,9 +822,12 @@ re-fetch of bars.
 
 For a price on trading date *d* read as of decision date *D*: apply, in ascending `effective_date`
 and then `action_id` order, every action with `d < effective_date ≤ D` and `knowledge_to IS NULL`
-as of the reader's knowledge cutoff. Splits scale price by `1 / ratio` and volume by `ratio`.
-Whether and how dividends adjust is P2.4's decision; this phase guarantees only that both dates
-are stored and that `ex_date` is the vendor's ex-dividend date.
+as of the reader's knowledge cutoff. Splits scale price by `split_from / split_to` and volume by
+`split_to / split_from`, both taken from `corporate_action_terms`; the 0001 `ratio` is a rounded
+representation whenever `ratio_rounded_in_0001` is true and is not used for adjustment. A reader
+that needs a dividend's amount takes `cash_amount_exact`, and its `distribution_type` from the same
+row. Whether and how dividends adjust is P2.4's decision; this phase guarantees only that both
+dates and the exact amount are stored and that `ex_date` is the vendor's ex-dividend date.
 
 ---
 
@@ -780,12 +848,13 @@ are stored and that `ex_date` is the vendor's ex-dividend date.
 | Macro observation | `(series_id, observation_date, vintage_date)` | Primary key |
 | EDGAR index | `(index_kind, index_ref, content_sha256)` | Primary key |
 | EDGAR filing | `(filing_key, observed_at)` | Primary key |
+| Corporate-action exact terms | `(action_id, knowledge_from)` | Primary key |
 
 ### 9.2 Write rules
 
 | # | Rule | Edge case |
 |---|---|---|
-| **IR-19** | **Insert-only.** Every write to a uni-temporal table is `INSERT … ON CONFLICT DO NOTHING` on its key, followed by a read of the stored row when the insert affected nothing | — |
+| **IR-19** | **Insert-only.** Every write to a uni-temporal table is an `INSERT` with `ON CONFLICT DO NOTHING` on its key, followed by a read of the stored row when the insert affected nothing | — |
 | — | Stored row identical on every fact column (everything except `retrieved_at`): a duplicate. Counted in `duplicate_count`; nothing written | A replayed backfill partition is entirely duplicates and succeeds |
 | — | Stored row **different**: `DUPLICATE_CONFLICT` failure plus an `ingest_reconciliation` row of kind `REVISION`. The stored row is not changed and cannot be | For `fx_rate` this is ADR-15 §5 working as designed: a past rate is never corrected |
 | **IR-20** | Only the SPEC-P0.2 `PRIMARY` provider for a capability writes a 0001 market-data table `[DEFAULT-3]` | Rule N7's EDGAR row in `fundamentals_snapshot` is the one exception, by SPEC-P0.2 decision 5: `SEC_EDGAR` is `AUTHORITY` |
@@ -867,8 +936,8 @@ For a run on `(market, trading_date D)`, a daily bar is **expected** for instrum
 ### 11.2 Five-minute bars
 
 For a held instrument on session *S*, the expected windows are
-`[S.regular_open_utc + 300k s, S.regular_open_utc + 300(k+1) s)` for
-`k = 0 … (S.regular_close_utc − S.regular_open_utc)/300 s − 1`.
+`[S.regular_open_utc + 300k s, S.regular_open_utc + 300(k+1) s)` for every integer `k` from 0 to
+`N − 1`, where `N = (S.regular_close_utc − S.regular_open_utc) / 300 s`.
 
 | Case | Result |
 |---|---|
@@ -921,6 +990,102 @@ type `FAILED` and exits non-zero. Rows already committed stay; they are correct 
 A non-zero exit means **no order list for the next session** `[FROZEN P0.3 §13.1 row 1]`. That
 consequence is enforced by the pipeline's precondition, not by this phase.
 
+### 12.3 Request and result models
+
+The ingest set of `[DEFAULT-11]`, a backfill job (§10) and a daily run (§12.1) are typed. Field
+specifications are in §28.3.
+
+```python
+# src/data/requests.py
+from datetime import date, datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from data.enums import IngestDataType, ManifestStatus
+from domain.models import Market
+from provider.enums import ProviderId
+
+BACKFILLABLE: frozenset[IngestDataType] = frozenset({
+    IngestDataType.REFERENCE, IngestDataType.CALENDAR, IngestDataType.CORPORATE_ACTION,
+    IngestDataType.BAR_DAILY, IngestDataType.BAR_5M_VALIDATION, IngestDataType.FUNDAMENTALS,
+    IngestDataType.EDGAR_FILING, IngestDataType.MACRO,
+})
+
+
+class _Req(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class IngestSet(_Req):
+    """The instruments one run must ingest. Supplied by the caller; never inferred ([DEFAULT-11])."""
+    market: Market
+    trading_date: date
+    instrument_ids: frozenset[UUID] = Field(min_length=1)
+    universe_version: UUID | None = None
+    includes_held: bool
+
+
+class BackfillJobRequest(_Req):
+    """One backfill job (§10). Re-submitting the same job_id resumes it (§10.2)."""
+    job_id: UUID
+    data_type: IngestDataType
+    provider_id: ProviderId
+    market: Market
+    instrument_ids: frozenset[UUID] = frozenset()
+    series_ids: tuple[str, ...] = ()
+    date_from: date
+    date_to: date
+    code_version: str = Field(min_length=7, max_length=40)
+
+    @model_validator(mode="after")
+    def _coherent(self) -> "BackfillJobRequest":
+        if self.data_type not in BACKFILLABLE:
+            raise ValueError(f"{self.data_type} is never backfilled (§10.1)")
+        if self.date_to < self.date_from:
+            raise ValueError("date_to precedes date_from")
+        if (self.data_type is IngestDataType.MACRO) != bool(self.series_ids):
+            raise ValueError("series_ids is required for MACRO and forbidden otherwise")
+        return self
+
+
+class DailyRunRequest(_Req):
+    """One scheduled run for one market and one session (§12.1)."""
+    run_id: UUID
+    market: Market
+    trading_date: date
+    ingest_set: IngestSet
+    code_version: str = Field(min_length=7, max_length=40)
+
+    @model_validator(mode="after")
+    def _set_matches_run(self) -> "DailyRunRequest":
+        if self.ingest_set.market is not self.market or self.ingest_set.trading_date != self.trading_date:
+            raise ValueError("ingest_set is for a different market or trading_date")
+        return self
+
+
+class DailyRunResult(_Req):
+    """What a daily run returns. The manifest rows are the record; this is their summary."""
+    run_id: UUID
+    market: Market
+    trading_date: date
+    exit_code: int = Field(ge=0, le=2)
+    statuses: dict[IngestDataType, ManifestStatus]
+    manifest_ids: tuple[UUID, ...]
+    started_at: datetime
+    finished_at: datetime
+
+    @model_validator(mode="after")
+    def _exit_code_agrees(self) -> "DailyRunResult":
+        ok = {ManifestStatus.COMPLETE, ManifestStatus.NO_SESSION}
+        expected = 2 if not self.statuses else (0 if set(self.statuses.values()) <= ok else 1)
+        if self.exit_code != expected:
+            raise ValueError(f"exit_code {self.exit_code} disagrees with statuses (§12.2): expected {expected}")
+        if self.finished_at < self.started_at:
+            raise ValueError("finished_at precedes started_at")
+        return self
+```
+
 ---
 
 ## 13. Held-names 5-minute stream adapter
@@ -936,7 +1101,7 @@ adapter is exercised only against recorded or synthetic frames.
 | Aspect | Rule |
 |---|---|
 | Endpoint | `wss://stream.data.alpaca.markets/v2/sip` `[V-P0.2 §3.2]`. Never `v2/iex` (rule N6) |
-| Authentication | In-band `{"action":"auth","key":…,"secret":…}`; success is `[{"T":"success","msg":"authenticated"}]` `[V-P0.2]`. Credentials from Vault references |
+| Authentication | In-band `{"action":"auth","key":"<key id>","secret":"<secret key>"}`; success is `[{"T":"success","msg":"authenticated"}]` `[V-P0.2]`. Credentials from Vault references |
 | Subscription | Channel `b` only `[FROZEN P0.3 §13.3 row 40]` |
 | Connections | One per process. Error `406` (connection limit) means another instance holds the socket: this instance exits; it does not retry and evict `[FROZEN P0.3 §13.2 row 24]` |
 | Other error frames | `401`, `402`, `404`, `409`: `CREDENTIAL_INVALID`, no reconnect. `405` (symbol limit): `STREAM_ERROR`, no reconnect. `407` (slow client), `500`, or any close without an error frame: reconnect |
@@ -1018,11 +1183,16 @@ class StreamGapNotice(BaseModel):
 
 
 class HeldNamesBarFeed:
-    async def start(self, instrument_ids: Sequence[UUID]) -> None: ...
-    async def set_instruments(self, instrument_ids: Sequence[UUID]) -> None: ...
-    def events(self) -> AsyncIterator[Bar | StreamGapNotice]: ...
-    async def reconcile_session_close(self) -> None: ...     # §13.5
-    async def stop(self) -> None: ...
+    async def start(self, instrument_ids: Sequence[UUID]) -> None:
+        """Connect, subscribe and begin delivering events for these instruments."""
+    async def set_instruments(self, instrument_ids: Sequence[UUID]) -> None:
+        """Replace the subscribed set."""
+    def events(self) -> AsyncIterator[Bar | StreamGapNotice]:
+        """Completed 5-minute bars and gap notices, under the guarantees stated below."""
+    async def reconcile_session_close(self) -> None:
+        """Run the session-close check of §13.5."""
+    async def stop(self) -> None:
+        """Unsubscribe and close. Idempotent."""
 ```
 
 Guarantees: bars for one instrument are delivered in ascending `as_of`; a bar is delivered only
@@ -1376,7 +1546,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.1 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.2 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -1648,14 +1818,59 @@ CREATE TABLE trading.insider_filing_raw (
     PRIMARY KEY (filing_key, document_sha256)
 );
 
--- ===== 22.12 append-only, enforced =====
+-- ===== 22.12 corporate_action_terms =====
+-- Owner decision O-10 ([OQ-21]). The exact terms of a corporate action that 0001's
+-- corporate_action cannot hold: its cash_amount is numeric(18,2) and its ratio numeric(18,6).
+-- One row per SPLIT, REVERSE_SPLIT or CASH_DIVIDEND row of corporate_action, with the same
+-- (action_id, knowledge_from), written in the same transaction.
+-- No foreign key: 0002 adds no constraint that reaches into a 0001 table.
+-- Unconstrained numeric is deliberate: it stores the vendor's decimal exactly, at any scale.
+CREATE TABLE trading.corporate_action_terms (
+    action_id             uuid        NOT NULL,              -- corporate_action.action_id
+    knowledge_from        timestamptz NOT NULL,              -- corporate_action.knowledge_from of the row described
+    action_type           text        NOT NULL CHECK (action_type IN ('SPLIT','REVERSE_SPLIT','CASH_DIVIDEND')),
+    cash_amount_exact     numeric     NULL CHECK (cash_amount_exact IS NULL
+                                          OR (cash_amount_exact > 0 AND cash_amount_exact < 'Infinity'::numeric)),
+                                      -- per share, listing currency, vendor precision
+    cash_currency         text        NULL CHECK (cash_currency IN ('USD','INR')),
+    split_from            numeric     NULL CHECK (split_from IS NULL
+                                          OR (split_from > 0 AND split_from < 'Infinity'::numeric)),  -- old shares
+    split_to              numeric     NULL CHECK (split_to IS NULL
+                                          OR (split_to > 0 AND split_to < 'Infinity'::numeric)),      -- new shares
+    distribution_type     text        NULL CHECK (distribution_type IS NULL OR length(distribution_type) <= 32),
+    frequency             integer     NULL CHECK (frequency IS NULL OR frequency BETWEEN 0 AND 365),
+    record_date           date        NULL,
+    declaration_date      date        NULL,
+    cash_rounded_in_0001  boolean     NOT NULL,              -- TRUE: corporate_action.cash_amount <> cash_amount_exact
+    ratio_rounded_in_0001 boolean     NOT NULL,              -- TRUE: corporate_action.ratio <> split_to / split_from
+    provider_id           text        NOT NULL CHECK (length(provider_id) BETWEEN 1 AND 32),
+    response_sha256       text        NOT NULL CHECK (response_sha256 ~ '^[0-9a-f]{64}$'),
+    retrieved_at          timestamptz NOT NULL,
+    run_id                uuid        NOT NULL,
+    PRIMARY KEY (action_id, knowledge_from),
+    CONSTRAINT cat_dividend_has_cash CHECK ((action_type = 'CASH_DIVIDEND') = (cash_amount_exact IS NOT NULL)),
+    CONSTRAINT cat_cash_has_currency CHECK ((cash_amount_exact IS NULL) = (cash_currency IS NULL)),
+    CONSTRAINT cat_split_has_both CHECK (
+        (action_type IN ('SPLIT','REVERSE_SPLIT')) = (split_from IS NOT NULL AND split_to IS NOT NULL)
+        AND (split_from IS NULL) = (split_to IS NULL)),
+    CONSTRAINT cat_split_changes_count CHECK (split_from IS NULL OR split_from <> split_to),
+    CONSTRAINT cat_dividend_fields_only_on_dividend CHECK (
+        action_type = 'CASH_DIVIDEND'
+        OR (distribution_type IS NULL AND frequency IS NULL
+            AND record_date IS NULL AND declaration_date IS NULL)),
+    CONSTRAINT cat_flags_match_type CHECK (
+        (NOT cash_rounded_in_0001 OR action_type = 'CASH_DIVIDEND')
+        AND (NOT ratio_rounded_in_0001 OR action_type IN ('SPLIT','REVERSE_SPLIT')))
+);
+
+-- ===== 22.13 append-only, enforced =====
 DO $$
 DECLARE t text;
 BEGIN
     FOREACH t IN ARRAY ARRAY['ingest_manifest','ingest_checkpoint','ingest_failure','ingest_gap',
                              'ingest_reconciliation','provider_instrument_ref','raw_news_snapshot',
                              'macro_series','macro_observation','edgar_index_snapshot',
-                             'edgar_filing','insider_filing_raw']
+                             'edgar_filing','insider_filing_raw','corporate_action_terms']
     LOOP
         EXECUTE format(
             'CREATE TRIGGER %I_no_update BEFORE UPDATE ON trading.%I '
@@ -1668,22 +1883,25 @@ BEGIN
     END LOOP;
 END $$;
 
--- ===== 22.13 grants =====
+-- ===== 22.14 grants =====
 -- app_rw: SELECT and INSERT, nothing else. backtest_ro and metrics_ro: NOTHING.
 REVOKE ALL ON trading.ingest_manifest, trading.ingest_checkpoint, trading.ingest_failure,
               trading.ingest_gap, trading.ingest_reconciliation, trading.provider_instrument_ref,
               trading.raw_news_snapshot, trading.macro_series, trading.macro_observation,
-              trading.edgar_index_snapshot, trading.edgar_filing, trading.insider_filing_raw
+              trading.edgar_index_snapshot, trading.edgar_filing, trading.insider_filing_raw,
+              trading.corporate_action_terms
     FROM PUBLIC;
 GRANT SELECT, INSERT ON trading.ingest_manifest, trading.ingest_checkpoint, trading.ingest_failure,
               trading.ingest_gap, trading.ingest_reconciliation, trading.provider_instrument_ref,
               trading.raw_news_snapshot, trading.macro_series, trading.macro_observation,
-              trading.edgar_index_snapshot, trading.edgar_filing, trading.insider_filing_raw
+              trading.edgar_index_snapshot, trading.edgar_filing, trading.insider_filing_raw,
+              trading.corporate_action_terms
     TO app_rw;
 ```
 
-The Owner's approved list names eleven objects; the DDL has twelve tables because "macro series
-and observations" is two. `trading.deny_mutation()` is defined in 0001 §9.3. Its body names the table through
+The Owner's list of 2026-10-07 names eleven objects, which are twelve tables because "macro series
+and observations" is two. The thirteenth, `corporate_action_terms`, was added by Owner decision O-10
+of 2026-10-08. `trading.deny_mutation()` is defined in 0001 §9.3. Its body names the table through
 `TG_TABLE_NAME` and raises for any row it is fired for, so by reading it serves any table; that
 has **not been executed** against a 0002 table — `ASSUMPTION [A-14]`, part of `[OQ-32]`.
 
@@ -1721,6 +1939,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from data.enums import IngestDataType
+from domain.models import Exchange, InstrumentType
 from provider.enums import ProviderId
 from provider.spec import ProviderSpec
 
@@ -1790,6 +2009,11 @@ class CalendarConfig(_Cfg):
         if set(self.markets) != {"US", "IN"}:
             raise ValueError("calendar.markets must have exactly the keys US and IN; "
                              "a missing market is a startup failure, never a fallback (ADR-11 req 7)")
+        for market, cfg in self.markets.items():
+            for code, member in cfg.exchange_codes.items():
+                if member not in Exchange.__members__ or Exchange[member].market.value != market:
+                    raise ValueError(f"calendar.markets.{market}.exchange_codes[{code!r}] = {member!r} "
+                                     f"is not an Exchange member of {market}")
         return self
 
 
@@ -1798,6 +2022,16 @@ class ReferenceMapping(_Cfg):
     from the table creates no instrument and is recorded (IR-12)."""
     security_type: dict[str, str]
     primary_exchange: dict[str, str]
+
+    @model_validator(mode="after")
+    def _values_are_members(self) -> "ReferenceMapping":
+        for value in self.security_type.values():
+            if value != "EXCLUDED" and value not in InstrumentType.__members__:
+                raise ValueError(f"security_type maps to {value!r}, which is not an InstrumentType member")
+        for value in self.primary_exchange.values():
+            if value != "EXCLUDED" and value not in Exchange.__members__:
+                raise ValueError(f"primary_exchange maps to {value!r}, which is not an Exchange member")
+        return self
 
 
 class MacroConfig(_Cfg):
@@ -1825,6 +2059,15 @@ class ProviderEntry(_Cfg):
     credential_refs: dict[str, str] = Field(description="Name -> vault:// reference. Empty for SEC_EDGAR.")
     serves: tuple[IngestDataType, ...] = Field(min_length=1)
     reference_mapping: ReferenceMapping | None = None
+
+    @model_validator(mode="after")
+    def _reference_needs_mapping(self) -> "ProviderEntry":
+        if IngestDataType.REFERENCE in self.serves and self.reference_mapping is None:
+            raise ValueError("a provider that serves REFERENCE requires reference_mapping (IR-12)")
+        for name, ref in self.credential_refs.items():
+            if not ref.startswith("vault://"):
+                raise ValueError(f"credential_refs[{name!r}] is not a vault:// reference")
+        return self
 
 
 class IngestConfig(_Cfg):
@@ -1869,14 +2112,14 @@ limit SPEC-P0.2 marks unpublished is written `published: false` with no number.
 | 7 | Page chain does not terminate, or body truncated | `Page.next_cursor`, content length | `INCOMPLETE_RESPONSE`; **the whole partition is discarded**, not kept in part |
 | 8 | Naive or undocumented-timezone timestamp | Adapter | `UNDOCUMENTED_TIMEZONE`; record absent |
 | 9 | Vendor timestamp in the future | §7.1 step 2 | `FUTURE_TIMESTAMP`; record absent |
-| 10 | Value more precise than its column | §7.2 | `PRECISION_EXCEEDED`; record absent (except the split ratio, §8.2) |
+| 10 | Value more precise than its column | §7.2 | Price, volume, FX rate: `PRECISION_EXCEEDED`; record absent. Dividend amount and split ratio: stored; exact terms in `corporate_action_terms`; the 0001 value is flagged as rounded (§8.2) |
 | 11 | Symbol with no mapping | `symbol_asof` | `UNKNOWN_SYMBOL`; record absent; no instrument created |
 | 12 | Symbol with two mappings, or two instruments for one FIGI | Lookup, or 0001 `EXCLUDE` | `AMBIGUOUS_SYMBOL`; record absent; never "pick the newest" |
 | 13 | Unmapped security type or exchange | IR-12 | No instrument; recorded |
 | 14 | Record fits no corporate-action type | IR-18 | `UNKNOWN_CORPORATE_ACTION`; the corporate-action manifest is not `COMPLETE` |
 | 15 | No session row, outside calendar coverage | IR-15 | `MISSING_SESSION`; the market's run fails |
 | 16 | No session row, inside coverage | IR-15 | `NO_SESSION`; exit 0; nothing fetched |
-| 17 | Domain constructor raises (`BarIntegrityError`, `MissingReferenceDataError`, …) | Domain model | `DOMAIN_VALIDATION_FAILED` with the error class; record absent |
+| 17 | Domain constructor raises any `DomainError`. Those reachable from the types P2.1 constructs: `BarIntegrityError`, `MissingReferenceDataError`, `CurrencyMismatchError`, `MissingSessionError`, `UnknownSymbolError`, `UnknownCorporateActionError`, `CorporateActionCalendarError`, `MoneyPrecisionError`, `FloatContaminationError`, `NaiveDatetimeError`, `MissingFxRateError` | Domain model | `DOMAIN_VALIDATION_FAILED` with the error class; record absent |
 | 18 | Stored row differs from a re-fetched one | IR-19 | `DUPLICATE_CONFLICT` plus a `REVISION` row; stored row unchanged; daily run exits 1 |
 | 19 | Expected daily bar absent | §11.1 | Gap `OPEN`; `INCOMPLETE`; exit 1 |
 | 20 | Second source disagrees | §14 | Reconciliation rows; the primary row stays; no verdict here |
@@ -1916,10 +2159,10 @@ Specified for the code phase. Nothing here is written yet.
 | T-10 | Idempotency: run the same daily ingest twice | Second run stores nothing, `duplicate_count` equals the first run's `stored_count`, status `COMPLETE` |
 | T-11 | Stream disconnect mid-window | The interrupted window and every window in the outage are gaps; they are filled from REST before any later bar is delivered; no bar mixes minutes from both sides |
 | T-12 | Silent loss: stream fixture omits a window the REST fixture has | Bar stored from REST; `STREAM_SILENT_LOSS`; the session's `BAR_5M` manifest is not `COMPLETE` |
-| T-13 | Precision: a price with seven decimals; a dividend with four | Neither is stored; neither is rounded; `PRECISION_EXCEEDED` |
+| T-13 | Precision: a price with seven decimals; a dividend with four decimals; a 1-for-3 reverse split | The price is neither stored nor rounded: `PRECISION_EXCEEDED`. The dividend and the split are stored: `corporate_action_terms` holds the exact amount and the exact `split_from` and `split_to`; the 0001 row holds the half-up rounded value; the matching `rounded_in_0001` flag is true |
 | T-14 | No substitution, as a property test | For arbitrary sets of missing responses, every stored market value equals a value present in a fixture response for exactly that key |
 | T-15 | Raw news revision | First sight is revision 1 with `first_seen_at = retrieved_at`; a changed body is revision 2; an unchanged re-poll writes nothing; no `news_item` row is written by any P2.1 path |
-| T-16 | Migration 0002 against the pinned image, after 0001 | Applies with exit 0; `UPDATE` and `DELETE` are rejected on all twelve tables; `backtest_ro` and `metrics_ro` are denied on all twelve; a `pg_dump` of every 0001 object is identical before and after |
+| T-16 | Migration 0002 against the pinned image, after 0001 | Applies with exit 0; `UPDATE` and `DELETE` are rejected on all thirteen tables; `backtest_ro` and `metrics_ro` are denied on all thirteen; a `pg_dump` of every 0001 object is identical before and after |
 | T-17 | Clock, Redis, credential pre-flight failures | Exit 2; no request sent |
 | T-18 | Config | A literal secret, a missing market, an empty time-server list and `macro.enabled` with no allowlist each stop the run |
 
@@ -1990,8 +2233,8 @@ file is edited. Each item names what it needs.
 | P21-14 | India has no named source for fundamentals, corporate actions or news. FMP Premium covers "US, UK, Canada" | SPEC-P0.2 §3.4, §4.3 | `[OQ-8]`; India activation |
 | P21-15 | `DataCapability` has no member for calendars, corporate actions, FX or India reference data; `ProviderId` has no member for the FX source; `INFRA_ENV_ALLOWLIST` has no Redis entry | SPEC-P0.2 §10.1; `loader.py` | Worked around (§4.1, §17). A Stage 0 / P1.3 amendment would be cleaner; not proposed here |
 | P21-16 | `Price` and `Money` round a more precise input silently. SPEC-P1.1 assumption A2 says prices would "truncate silently"; they round half-up | `src/domain/models.py` `Price._coerce`, `Money._coerce_and_quantise` | Pre-check in §7.2. Condition 11 should pin the behaviour (C11-25) |
-| **P21-17** | **`corporate_action.cash_amount` is `numeric(18,2)` and `CorporateAction.cash_amount` is `Money` (2 places). A per-share dividend with more than two decimals cannot be stored exactly.** Under `[DEFAULT-14]` such a dividend is rejected | Migration §6.3; `models.py` | **Owner decision — blocks freeze.** `[OQ-21]`. Options: accept rejection; add a P2.1 table for exact corporate-action terms; re-open SPEC-P1.1/P1.2 |
-| P21-18 | `corporate_action.ratio numeric(18,6)` cannot hold a non-terminating ratio exactly; there is no column for `distribution_type`, `frequency`, `record_date`, `declaration_date`, or a bar's `vw`. SPEC-P0.2 §0.6 requires special dividends not be annualised, which needs `distribution_type` | Migration §6.3, §6.4 | `[OQ-21]`, with P21-17 |
+| P21-17 | `corporate_action.cash_amount` is `numeric(18,2)` and `CorporateAction.cash_amount` is `Money` (2 places). A per-share dividend with more than two decimals cannot be stored exactly in 0001 | Migration §6.3; `models.py` | **Decided by the Owner 2026-10-08 (O-10):** exact terms in the P2.1-owned `corporate_action_terms`; the 0001 row keeps its rounded value. The 0001 column is unchanged and stays inexact |
+| P21-18 | `corporate_action.ratio numeric(18,6)` cannot hold a non-terminating ratio exactly; there is no column for `distribution_type`, `frequency`, `record_date`, `declaration_date`, or a bar's `vw`. SPEC-P0.2 §0.6 requires special dividends not be annualised, which needs `distribution_type` | Migration §6.3, §6.4 | Corporate-action terms: decided with P21-17 (O-10). A bar's `vw` still has no column and is not stored |
 | P21-19 | "No session row" means both "closed" and "calendar not loaded"; nothing in Stage 1 separates them | SPEC-P1.1 §4.2; SPEC-P0.3 §13.1 row 5 | Handled by IR-15 |
 | P21-20 | `run_context.config_hash` references `config_version`, whose `audit_event_id` is `NOT NULL`. No `run_context` row can be written before conditions 9 and 10, though STAGE-1-FREEZE §9.2 gates only "code that writes an audit event" | Migration §6.9 | `[DEFAULT-15]`; stated to the Owner because it widens the practical reach of condition 9 |
 | P21-21 | `Exchange` has four members. A US instrument listed elsewhere cannot be represented, including exchange-traded funds `models.py` marks as read-only regime inputs | `models.py` `Exchange`, `READ_ONLY_INSTRUMENT_TYPES_V1` | `[OQ-22]` first (what values the vendor sends); then P2.6's need |
@@ -1999,6 +2242,292 @@ file is edited. Each item names what it needs.
 | P21-23 | `stage_latency_observation.strategy_version` is `NOT NULL`; an ingest run has no strategy | Migration §6.9 | `[OQ-20]`. P2.1 does not write this table in v0.1 |
 | P21-24 | Verified source fields exist for four of eleven `CorporateActionType` members | SPEC-P0.2 §3.3 | `[OQ-29]` |
 | **P21-25** | **SPEC-P0.2 records no response fields for FMP, SEC EDGAR, FRED, Zerodha historical candles or the Zerodha instruments dump beyond `tick_size` and `lot_size`, nor for Massive trades, ticker types, ticker events or `primary_exchange` values.** Six of eight adapters therefore have no field mapping | SPEC-P0.2 §3.3–3.9 | **Blocks freeze of those adapters.** `[OQ-9]`, `[OQ-22]`–`[OQ-25]` |
+
+---
+
+## 28. Field specifications
+
+Block B: every field carries its name, type, unit, timezone, nullability, valid range and what a
+violation means. The models and DDL above are the definitions; these tables complete them and add
+no constraint that is not already in the code block or the `CHECK` it describes.
+
+**Reading the tables.** *Unit; tz*: the unit, then the timezone. `UTC` = a tz-aware UTC instant;
+`local` = an exchange-local calendar date with no clock; `—` = not applicable. *Null*: whether
+`None` / `NULL` is permitted. *Violation* is one of:
+
+| Code | Applies to | Meaning |
+|---|---|---|
+| **W** | Wire records, `Page`, `StreamGapNotice` | The model raises. The record becomes an `ingest_failure` row of kind `SCHEMA_VIOLATION` (or the more specific kind named in the row) and is not stored |
+| **C** | `IngestConfig` and its parts | Configuration is rejected. The run does not start; exit code 2 (§24 row 31) |
+| **R** | Request and result models | The caller's request is rejected before any provider call; nothing is fetched and nothing is written |
+| **D** | 0002 columns | The database rejects the insert. The writer records `DB_WRITE_FAILED`; the run's status is `FAILED` (§22) |
+
+### 28.1 Wire records, `Page`, `StreamGapNotice`
+
+Every wire record also has the three `_Wire` fields.
+
+| Model.field | Type | Unit; tz | Null | Valid range | Violation |
+|---|---|---|---|---|---|
+| `_Wire.provider_id` | `ProviderId` | —; — | no | An enum member | W |
+| `_Wire.retrieved_at` | `datetime` | instant; UTC | no | tz-aware; not after the process clock | W; naive → `UNDOCUMENTED_TIMEZONE` |
+| `_Wire.response_sha256` | `str` | lowercase hex; — | no | Exactly 64 hex characters | W |
+| `WireBar.provider_symbol` | `str` | —; — | no | 1–32 characters | W |
+| `WireBar.window_start` | `datetime` | instant; UTC | no | tz-aware; ≤ `retrieved_at` + skew limit | W; later → `FUTURE_TIMESTAMP` |
+| `WireBar.window_seconds` | `int` | seconds; — | no | 60, 300 or 86400 | W |
+| `WireBar.open`, `high`, `low`, `close` | `Decimal` | listing currency per share, unadjusted; — | no | > 0; scale ≤ 6 (§7.2) | W; excess scale → `PRECISION_EXCEEDED` |
+| `WireBar.volume` | `Decimal` | shares; — | no | ≥ 0; scale 0 (§7.2) | W; non-integer → `PRECISION_EXCEEDED` |
+| `WireBar.trade_count` | `int` | trades; — | yes | ≥ 0 | W |
+| `WireSplit.provider_symbol` | `str` | —; — | no | 1–32 characters | W |
+| `WireSplit.execution_date` | `date` | date; local | no | Any date | W |
+| `WireSplit.split_from` | `Decimal` | old shares; — | no | > 0 | W |
+| `WireSplit.split_to` | `Decimal` | new shares; — | no | > 0; `split_to ≠ split_from` (§2) | W; equal → `DOMAIN_VALIDATION_FAILED` |
+| `WireDividend.provider_symbol` | `str` | —; — | no | 1–32 characters | W |
+| `WireDividend.ex_dividend_date` | `date` | date; local | no | Any date | W |
+| `WireDividend.pay_date` | `date` | date; local | yes at the wire | Any date | `None` → `DOMAIN_VALIDATION_FAILED` in the normaliser (§2) |
+| `WireDividend.record_date`, `declaration_date` | `date` | date; local | yes | Any date | W |
+| `WireDividend.cash_amount` | `Decimal` | listing currency per share; — | no | > 0; any scale. Stored exactly in `corporate_action_terms` (§8.2) | W |
+| `WireDividend.distribution_type` | `str` | —; — | yes | ≤ 32 characters | W |
+| `WireDividend.frequency` | `int` | payouts per year; — | yes | 0–365 | W |
+| `WireInstrument.provider_symbol` | `str` | —; — | no | 1–32 characters | W |
+| `WireInstrument.primary_exchange` | `str` | vendor code; — | no | 1–32 characters; must be in the mapping table (IR-12) | W; unmapped → `UNKNOWN_INSTRUMENT_TYPE` |
+| `WireInstrument.security_type` | `str` | vendor code; — | no | 1–32 characters; must be in the mapping table (IR-12) | W; unmapped → `UNKNOWN_INSTRUMENT_TYPE` |
+| `WireInstrument.active` | `bool` | —; — | no | `true`, `false` | W |
+| `WireInstrument.currency_name` | `str` | vendor code; — | no | 1–16 characters; must map to the market's currency | W; mismatch → `DOMAIN_VALIDATION_FAILED` |
+| `WireInstrument.cik` | `str` | —; — | yes | ≤ 16 characters | W |
+| `WireInstrument.composite_figi`, `share_class_figi` | `str` | —; — | yes | Exactly 12 characters | W |
+| `WireInstrument.delisted_utc` | `datetime` | instant; UTC | yes | tz-aware | W |
+| `WireInstrument.as_of_date` | `date` | date; local | no | The date the reference query was made for | W |
+| `WireInstrument.lot_size`, `tick_size` | `Decimal` | shares; price units; — | yes (required for India by the domain) | > 0 | W; India without `lot_size` → `DOMAIN_VALIDATION_FAILED` |
+| `WireSession.exchange_code` | `str` | vendor code; — | no | 1–16 characters; must be in `calendar.markets.*.exchange_codes` | W |
+| `WireSession.trading_date` | `date` | date; local | no | Any date | W |
+| `WireSession.regular_open_utc`, `regular_close_utc` | `datetime` | instant; UTC | no | open < close; close − open a multiple of 300 s (§2) | W; `MISSING_SESSION` |
+| `WireSession.pre_market_open_utc` | `datetime` | instant; UTC | yes | < `regular_open_utc` | W |
+| `WireSession.post_market_close_utc` | `datetime` | instant; UTC | yes | > `regular_close_utc` | W |
+| `WireSession.is_half_day`, `is_special` | `bool` | —; — | no | Not both `true` | W |
+| `WireNews.vendor_id` | `str` | —; — | no | 1–128 characters | W |
+| `WireNews.headline` | `str` | characters; — | no | ≤ 4,000. UNTRUSTED | W |
+| `WireNews.author` | `str` | characters; — | yes | ≤ 400. UNTRUSTED | W |
+| `WireNews.created_at` | `datetime` | instant; UTC | no | tz-aware | W |
+| `WireNews.updated_at` | `datetime` | instant; UTC | yes | tz-aware | W |
+| `WireNews.summary` | `str` | characters; — | yes | ≤ 20,000. UNTRUSTED | W |
+| `WireNews.content` | `str` | characters; — | yes | ≤ 1,000,000, `ASSUMPTION [A-5]`. UNTRUSTED | W; not truncated |
+| `WireNews.symbols` | `tuple[str, ...]` | vendor tickers; — | no (may be empty) | ≤ 200 items | W |
+| `WireNews.source` | `str` | characters; — | yes | ≤ 200. UNTRUSTED | W |
+| `WireNews.url` | `str` | characters; — | yes | ≤ 2,000. UNTRUSTED; never fetched | W |
+| `WireFundamentals.provider_symbol` | `str` | —; — | no | 1–32 characters | W |
+| `WireFundamentals.cik` | `str` | —; — | yes | ≤ 16 characters | W |
+| `WireFundamentals.period_end` | `date` | date; issuer's fiscal calendar | no | Any date | W |
+| `WireFundamentals.fiscal_period` | `str` | —; — | no | 1–16 characters | W |
+| `WireFundamentals.metrics` | `dict[str, Decimal]` | per metric, as the vendor reports it; — | no | ≥ 1 entry; finite values | W |
+| `WireFiling.filing_key` | `str` | —; — | no | 1–64 characters `[OQ-9]` | W |
+| `WireFiling.cik` | `str` | —; — | no | 1–16 characters | W |
+| `WireFiling.form_type` | `str` | —; — | no | 1–16 characters | W |
+| `WireFiling.accepted_at` | `datetime` | instant; UTC | no | tz-aware; ≤ `retrieved_at` + skew limit | W; later → `FUTURE_TIMESTAMP` |
+| `WireFiling.period_end` | `date` | date; issuer's fiscal calendar | yes | Any date | W |
+| `WireFiling.document_ref` | `str` | path on the SEC host; — | no | 1–400 characters | W |
+| `WireMacroObservation.series_id` | `str` | —; — | no | 1–64 characters; in `macro.series_allowlist` | W |
+| `WireMacroObservation.observation_date` | `date` | date; the series' own calendar | no | Any date | W |
+| `WireMacroObservation.vintage_date` | `date` | date; the publisher's calendar | no | ≥ `observation_date` | W |
+| `WireMacroObservation.value` | `Decimal` | the series' own unit; — | no | Finite | W; a non-numeric vendor value is skipped (§19.5) |
+| `WireFxRate.as_of_date` | `date` | date; UTC accounting date | no | Any date | W |
+| `WireFxRate.base`, `quote` | `str` | ISO currency code; — | no | Exactly 3 characters; `USD` or `INR`; different from each other | W |
+| `WireFxRate.rate` | `Decimal` | quote per unit of base; — | no | > 0; scale ≤ 6 (§7.2) | W; excess scale → `PRECISION_EXCEEDED` |
+| `Page.items` | `tuple[T, ...]` | records; — | no (may be empty) | Any length | W |
+| `Page.next_cursor` | `str` | opaque vendor token; — | yes | ≤ 2,000 characters. `None` = the provider said there is no more | W; a chain that never reaches `None` → `INCOMPLETE_RESPONSE` |
+| `Page.response_bytes` | `int` | bytes; — | no | ≥ 0 | W |
+| `Page.response_sha256` | `str` | lowercase hex; — | no | Exactly 64 hex characters | W |
+| `StreamGapNotice.instrument_id` | `UUID` | —; — | no | A subscribed instrument | W |
+| `StreamGapNotice.window_start` | `datetime` | instant; UTC | no | An expected window start (§11.2) | W |
+| `StreamGapNotice.gap_id` | `UUID` | —; — | no | An existing `ingest_gap.gap_id` | W |
+| `StreamGapNotice.reconciled` | `bool` | —; — | no | `false` = the instrument has an `OPEN` gap | W |
+
+### 28.2 Configuration (`IngestConfig`)
+
+| Model.field | Type | Unit; tz | Null | Valid range | Violation |
+|---|---|---|---|---|---|
+| `ClientConfig.backoff_base_seconds` | `Decimal` | seconds; — | no | (0, 60] | C |
+| `ClientConfig.backoff_cap_seconds` | `Decimal` | seconds; — | no | (0, 600] | C |
+| `ClientConfig.max_attempts` | `int` | attempts, first included; — | no | 1–10 | C |
+| `ClientConfig.request_timeout_seconds` | `Decimal` | seconds, connect plus read; — | no | (0, 120] | C |
+| `ClockConfig.max_skew_seconds` | `Decimal` | seconds; — | no | (0, 3) | C |
+| `ClockConfig.time_servers` | `tuple[str, ...]` | host names; — | no | ≥ 1 entry | C |
+| `ClockConfig.min_servers_answering` | `int` | servers; — | no | 1 to `len(time_servers)` | C |
+| `ClockConfig.recheck_seconds` | `int` | seconds; — | no | 60–3,600 | C |
+| `RedisConfig.url_ref` | `str` | Vault reference; — | no | Starts `vault://`; never a literal URL | C |
+| `RedisConfig.session_ttl_seconds` | `int` | seconds; — | no | 1–604,800 | C |
+| `RedisConfig.symref_ttl_seconds` | `int` | seconds; — | no | 1–86,400 | C |
+| `RedisConfig.manifest_ttl_seconds` | `int` | seconds; — | no | 1–3,600 | C |
+| `RedisConfig.lock_ms` | `int` | milliseconds; — | no | 100–60,000 | C |
+| `ReconciliationConfig.volume_ratio` | `Decimal` | fraction, not percent; — | no | [0, 1] | C |
+| `ReconciliationConfig.corporate_action_lookback_sessions` | `int` | sequenced sessions; — | no | 0–250 | C |
+| `ReconciliationConfig.corporate_action_lookahead_sessions` | `int` | sequenced sessions; — | no | 0–250 | C |
+| `StreamConfig.ping_interval_seconds` | `int` | seconds; — | no | 1–120 | C |
+| `StreamConfig.ping_timeout_seconds` | `int` | seconds; — | no | 1–120 | C |
+| `StreamConfig.reconnect_base_seconds` | `Decimal` | seconds; — | no | (0, 60] | C |
+| `StreamConfig.reconnect_cap_seconds` | `Decimal` | seconds; — | no | (0, 600] | C |
+| `StreamConfig.silent_window_recheck_seconds` | `int` | seconds; — | no | 1–300 | C |
+| `NewsConfig.poll_interval_seconds` | `int` | seconds; — | no | 30–3,600 | C |
+| `NewsConfig.revision_lookback_seconds` | `int` | seconds; — | no | 0–2,592,000 | C |
+| `CalendarMarketConfig.settlement_cycle_sessions` | `int` | sequenced sessions after the trade date; — | no | 0–5 | C |
+| `CalendarMarketConfig.exchange_codes` | `dict[str, str]` | vendor code → `Exchange` member; — | no | ≥ 1 entry; every value an `Exchange` member of that market | C |
+| `CalendarConfig.min_forward_coverage_sessions` | `int` | sequenced sessions; — | no | 1–500 | C |
+| `CalendarConfig.markets` | `dict[str, CalendarMarketConfig]` | —; — | no | Exactly the keys `US` and `IN` | C |
+| `ReferenceMapping.security_type` | `dict[str, str]` | vendor code → `InstrumentType` member or `EXCLUDED`; — | no | Every value a member or the literal `EXCLUDED` | C |
+| `ReferenceMapping.primary_exchange` | `dict[str, str]` | vendor code → `Exchange` member or `EXCLUDED`; — | no | Every value a member or the literal `EXCLUDED` | C |
+| `MacroConfig.enabled` | `bool` | —; — | no | `true`, `false` | C |
+| `MacroConfig.series_allowlist` | `tuple[str, ...]` | series ids; — | no | Non-empty when `enabled` | C |
+| `EdgarConfig.user_agent` | `str` | characters; — | no | 10–200 | C |
+| `EdgarConfig.forms` | `tuple[str, ...]` | form types; — | no | ≥ 1 entry | C |
+| `FundamentalsConfig.n7_metrics` | `tuple[str, ...]` | metric names; — | no | May be empty until `[OQ-10]` closes; empty = no N7 comparison is run | C |
+| `ProviderEntry.spec` | `ProviderSpec` | —; — | no | Valid under SPEC-P0.2 §10.2 | C |
+| `ProviderEntry.credential_refs` | `dict[str, str]` | name → Vault reference; — | no (may be empty) | Every value starts `vault://` | C |
+| `ProviderEntry.serves` | `tuple[IngestDataType, ...]` | —; — | no | ≥ 1 member | C |
+| `ProviderEntry.reference_mapping` | `ReferenceMapping` | —; — | yes | Required when `serves` contains `REFERENCE` | C |
+| `IngestConfig.schema_version` | `int` | —; — | no | 1 | C |
+| `IngestConfig.client`, `clock`, `redis`, `reconciliation`, `stream`, `news`, `calendar`, `macro`, `edgar`, `fundamentals` | the model of the same name | —; — | no | Valid under its own rows | C |
+| `IngestConfig.providers` | `dict[ProviderId, ProviderEntry]` | —; — | no | ≥ 1 entry; each key equals its entry's `spec.provider_id` | C |
+
+### 28.3 Request and result models
+
+| Model.field | Type | Unit; tz | Null | Valid range | Violation |
+|---|---|---|---|---|---|
+| `IngestSet.market` | `Market` | —; — | no | `US`, `IN` | R |
+| `IngestSet.trading_date` | `date` | date; local | no | The session the set is for | R |
+| `IngestSet.instrument_ids` | `frozenset[UUID]` | —; — | no | ≥ 1 member; every member an existing `instrument_id` of that market | R; an unknown id → `UNKNOWN_SYMBOL` for that id |
+| `IngestSet.universe_version` | `UUID` | —; — | yes | An existing `universe_version`. `None` = no universe exists yet; the caller chose the set | R |
+| `IngestSet.includes_held` | `bool` | —; — | no | `true` when the caller has already added the held names | R |
+| `BackfillJobRequest.job_id` | `UUID` | —; — | no | Any UUID; reusing one resumes that job | R |
+| `BackfillJobRequest.data_type` | `IngestDataType` | —; — | no | A member of `BACKFILLABLE` | R |
+| `BackfillJobRequest.provider_id` | `ProviderId` | —; — | no | A provider whose `serves` contains `data_type` | R |
+| `BackfillJobRequest.market` | `Market` | —; — | no | `US`, `IN` | R |
+| `BackfillJobRequest.instrument_ids` | `frozenset[UUID]` | —; — | no (may be empty) | Empty = every instrument the data type applies to | R |
+| `BackfillJobRequest.series_ids` | `tuple[str, ...]` | series ids; — | no | Non-empty for `MACRO`, empty otherwise | R |
+| `BackfillJobRequest.date_from`, `date_to` | `date` | date; local | no | `date_from ≤ date_to`; both inclusive | R |
+| `BackfillJobRequest.code_version` | `str` | git commit id; — | no | 7–40 characters | R |
+| `DailyRunRequest.run_id` | `UUID` | —; — | no | Any UUID; one per invocation | R |
+| `DailyRunRequest.market` | `Market` | —; — | no | `US`, `IN` | R |
+| `DailyRunRequest.trading_date` | `date` | date; local | no | The session the run is for | R |
+| `DailyRunRequest.ingest_set` | `IngestSet` | —; — | no | Same `market` and `trading_date` as the request | R |
+| `DailyRunRequest.code_version` | `str` | git commit id; — | no | 7–40 characters | R |
+| `DailyRunResult.run_id`, `market`, `trading_date` | as the request | as the request | no | Equal to the request's | R |
+| `DailyRunResult.exit_code` | `int` | —; — | no | 0, 1 or 2, agreeing with `statuses` (§12.2) | R |
+| `DailyRunResult.statuses` | `dict[IngestDataType, ManifestStatus]` | —; — | no (empty when pre-flight failed) | The worst status per data type attempted | R |
+| `DailyRunResult.manifest_ids` | `tuple[UUID, ...]` | —; — | no (may be empty) | The `ingest_manifest` rows this run wrote | R |
+| `DailyRunResult.started_at`, `finished_at` | `datetime` | instant; UTC | no | `started_at ≤ finished_at` | R |
+
+### 28.4 Migration 0002 columns
+
+Columns that mean the same thing in every table they appear in:
+
+| Column | Type | Unit; tz | Null | Valid range | Violation |
+|---|---|---|---|---|---|
+| `run_id` | `uuid` | —; — | no | The id of the ingest invocation that wrote the row. No foreign key `[DEFAULT-15]` | D |
+| `market` | `text` | —; — | no | `US`, `IN` | D |
+| `provider_id` | `text` | —; — | no | 1–32 characters; a registry provider, checked in the application | D |
+| `data_type` | `text` | —; — | no | An `IngestDataType` value; enumerated in the `CHECK` on `ingest_manifest` and `ingest_gap`, 1–32 characters elsewhere and checked in the application | D |
+| `response_sha256`, `content_sha256`, `document_sha256`, `index_sha256`, `notes_sha256`, `input_hash`, `ingest_config_hash` | `text` | lowercase hex; — | no, except `ingest_failure.response_sha256` | Exactly 64 hex characters | D |
+| `retrieved_at`, `recorded_at` | `timestamptz` | instant; UTC | no | The process clock when the response arrived, or when the row was written | D |
+
+Per table, the remaining columns:
+
+| Table.column | Type | Unit; tz | Null | Valid range | Violation |
+|---|---|---|---|---|---|
+| `ingest_manifest.manifest_id` | `uuid` | —; — | no | Generated | D |
+| `ingest_manifest.trading_date` | `date` | date; local | no | The session the run is for | D |
+| `ingest_manifest.status` | `text` | —; — | no | A `ManifestStatus` value | D |
+| `ingest_manifest.expected_count`, `received_count`, `stored_count`, `duplicate_count`, `skipped_count`, `failed_count`, `present_count` | `integer` | records; — | no | ≥ 0; `COMPLETE` requires `present_count = expected_count` and `failed_count = 0`; `NO_SESSION` requires expected, received and stored all 0 | D |
+| `ingest_manifest.compared_count`, `disagreed_count` | `integer` | fields compared; — | no | ≥ 0; `disagreed_count ≤ compared_count` | D |
+| `ingest_manifest.coverage_from`, `coverage_to` | `date` | date; local, both inclusive | yes | Both or neither; `coverage_to ≥ coverage_from`; only when `data_type = CALENDAR` | D |
+| `ingest_manifest.code_version` | `text` | git commit id; — | no | 7–40 characters | D |
+| `ingest_manifest.detail` | `text` | characters; — | yes | ≤ 4,000. Our text, never vendor text | D |
+| `ingest_manifest.started_at`, `finished_at` | `timestamptz` | instant; UTC | no | `finished_at ≥ started_at` | D |
+| `ingest_checkpoint.checkpoint_id` | `uuid` | —; — | no | Generated | D |
+| `ingest_checkpoint.job_id` | `uuid` | —; — | no | `BackfillJobRequest.job_id` | D |
+| `ingest_checkpoint.partition_key` | `text` | —; — | no | 1–400 characters; deterministic from the job's parameters (§10.2) | D |
+| `ingest_checkpoint.state` | `text` | —; — | no | `STARTED`, `COMMITTED`, `FAILED`, `PAUSED` | D |
+| `ingest_checkpoint.range_from`, `range_to` | `date` | date; local, both inclusive | yes | `range_to ≥ range_from` when both are set | D |
+| `ingest_checkpoint.rows_stored` | `integer` | rows; — | no | ≥ 0 | D |
+| `ingest_checkpoint.cursor` | `text` | opaque vendor token; — | yes | ≤ 2,000 characters. Diagnosis only; never used to resume | D |
+| `ingest_failure.failure_id` | `uuid` | —; — | no | Generated | D |
+| `ingest_failure.occurred_at` | `timestamptz` | instant; UTC | no | The process clock at detection | D |
+| `ingest_failure.failure_kind` | `text` | —; — | no | A `FailureKind` value | D |
+| `ingest_failure.instrument_id` | `uuid` | —; — | yes | Set when the failure concerns one resolved instrument | D |
+| `ingest_failure.provider_symbol` | `text` | vendor ticker; — | yes | ≤ 32 characters | D |
+| `ingest_failure.trading_date` | `date` | date; local | yes | Set when the failure concerns one session | D |
+| `ingest_failure.window_start` | `timestamptz` | instant; UTC | yes | Set when the failure concerns one bar | D |
+| `ingest_failure.http_status` | `integer` | HTTP status code; — | yes | 100–599 | D |
+| `ingest_failure.detail` | `text` | characters; — | no | 1–2,000. Our text, never vendor text | D |
+| `ingest_gap.gap_id` | `uuid` | —; — | no | Generated | D |
+| `ingest_gap.resolves_gap_id` | `uuid` | —; — | yes | `NULL` exactly when `state = OPEN`; otherwise the `gap_id` of the row that opened the gap; never its own id | D |
+| `ingest_gap.instrument_id` | `uuid` | —; — | no | The instrument the absent bar belongs to | D |
+| `ingest_gap.trading_date` | `date` | date; local | no | The session of the absent bar | D |
+| `ingest_gap.window_start` | `timestamptz` | instant; UTC | no | The `ts` the absent bar would carry | D |
+| `ingest_gap.window_end` | `timestamptz` | instant; UTC, exclusive | no | ≥ `window_start` | D |
+| `ingest_gap.gap_kind` | `text` | —; — | no | A `GapKind` value | D |
+| `ingest_gap.state` | `text` | —; — | no | A `GapState` value | D |
+| `ingest_gap.detail` | `text` | characters; — | yes | ≤ 2,000. Our text | D |
+| `ingest_reconciliation.recon_id` | `uuid` | —; — | no | Generated | D |
+| `ingest_reconciliation.compared_at` | `timestamptz` | instant; UTC | no | The process clock at comparison | D |
+| `ingest_reconciliation.recon_kind` | `text` | —; — | no | A `ReconKind` value | D |
+| `ingest_reconciliation.instrument_id` | `uuid` | —; — | no | The instrument compared | D |
+| `ingest_reconciliation.key_ts` | `timestamptz` | instant; UTC | yes | The bar's `ts`. Exactly one of `key_ts` and `period_end` is set | D |
+| `ingest_reconciliation.period_end` | `date` | date; issuer's fiscal calendar | yes | The fiscal period end. Exactly one of `key_ts` and `period_end` is set | D |
+| `ingest_reconciliation.field` | `text` | —; — | no | 1–120 characters: `open`, `high`, `low`, `close`, `volume`, `trade_count`, or a metric name | D |
+| `ingest_reconciliation.primary_provider`, `other_provider`, `authority_provider` | `text` | —; — | no | 1–32 characters; registry providers | D |
+| `ingest_reconciliation.primary_value`, `other_value` | `numeric(28,6)` | the unit of `field`; — | yes | `NULL` exactly when `outcome` is `PRIMARY_MISSING` / `OTHER_MISSING` respectively | D |
+| `ingest_reconciliation.tolerance_kind` | `text` | —; — | no | `EXACT`, `TICK`, `RATIO`, `UNDEFINED` | D |
+| `ingest_reconciliation.tolerance_value` | `numeric(28,6)` | price units for `TICK`, a fraction for `RATIO`; — | yes | `NULL` for `EXACT` and `UNDEFINED` | D |
+| `ingest_reconciliation.outcome` | `text` | —; — | no | `DISAGREE`, `PRIMARY_MISSING`, `OTHER_MISSING` | D |
+| `provider_instrument_ref.instrument_id` | `uuid` | —; — | no | An existing `instrument_id` | D |
+| `provider_instrument_ref.key_kind` | `text` | —; — | no | `TICKER`, `CIK`, `COMPOSITE_FIGI`, `SHARE_CLASS_FIGI`, `INSTRUMENT_TOKEN` | D |
+| `provider_instrument_ref.effective_from` | `date` | date; local, inclusive | no | Any date | D |
+| `provider_instrument_ref.provider_symbol` | `text` | the provider's identifier; — | yes | 1–64 characters. `NULL` = from `effective_from` the instrument has no such identifier | D |
+| `raw_news_snapshot.vendor_id` | `text` | —; — | no | 1–128 characters | D |
+| `raw_news_snapshot.revision_seq` | `integer` | —; — | no | ≥ 1; 1 is the first receipt | D |
+| `raw_news_snapshot.first_seen_at` | `timestamptz` | instant; UTC | no | `retrieved_at` of this revision; non-decreasing in `revision_seq` | D |
+| `raw_news_snapshot.vendor_created_at` | `timestamptz` | instant; UTC | no | The vendor's `created_at` | D |
+| `raw_news_snapshot.vendor_updated_at` | `timestamptz` | instant; UTC | yes | The vendor's `updated_at` | D |
+| `raw_news_snapshot.headline_raw` | `text` | characters; — | no | ≤ 4,000. UNTRUSTED | D |
+| `raw_news_snapshot.summary_raw` | `text` | characters; — | yes | ≤ 20,000. UNTRUSTED | D |
+| `raw_news_snapshot.body_raw` | `text` | characters; — | yes | ≤ 1,000,000. UNTRUSTED | D |
+| `raw_news_snapshot.author_raw`, `source_raw`, `url_raw` | `text` | characters; — | yes | ≤ 400, ≤ 200, ≤ 2,000. UNTRUSTED | D |
+| `raw_news_snapshot.symbols_raw` | `text[]` | vendor tickers; — | no (may be empty) | As received; not resolved to instruments | D |
+| `macro_series.series_id` | `text` | —; — | no | 1–64 characters | D |
+| `macro_series.third_party_copyright` | `boolean` | —; — | no | `true` = the notes contain "Copyright"; the series is not ingested | D |
+| `macro_observation.series_id` | `text` | —; — | no | 1–64 characters | D |
+| `macro_observation.observation_date` | `date` | date; the series' own calendar | no | The period the value describes | D |
+| `macro_observation.vintage_date` | `date` | date; the publisher's calendar | no | ≥ `observation_date` | D |
+| `macro_observation.value` | `numeric(28,6)` | the series' own unit; — | no | Any finite value | D |
+| `edgar_index_snapshot.index_kind` | `text` | —; — | no | `DAILY`, `QUARTERLY`, `FULL`, `SUBMISSIONS`, `COMPANY_TICKERS` | D |
+| `edgar_index_snapshot.index_ref` | `text` | path on the SEC host; — | no | 1–400 characters | D |
+| `edgar_index_snapshot.content` | `bytea` | bytes, as received; — | no | Non-empty | D |
+| `edgar_index_snapshot.content_bytes` | `bigint` | bytes; — | no | > 0; the length of `content` | D |
+| `edgar_filing.filing_key` | `text` | —; — | no | 1–64 characters `[OQ-9]` | D |
+| `edgar_filing.observed_at` | `timestamptz` | instant; UTC | no | The process clock at this observation | D |
+| `edgar_filing.observed_state` | `text` | —; — | no | `PRESENT`, `ABSENT_AFTER_REBUILD` | D |
+| `edgar_filing.cik` | `text` | —; — | no | 1–16 characters | D |
+| `edgar_filing.instrument_id` | `uuid` | —; — | yes | `NULL` = the CIK maps to none of our instruments | D |
+| `edgar_filing.form_type` | `text` | —; — | no | 1–16 characters | D |
+| `edgar_filing.accepted_at` | `timestamptz` | instant; UTC | no | The acceptance instant | D |
+| `edgar_filing.disseminated_at` | `timestamptz` | instant; UTC | no | ≥ `accepted_at`; computed by §19.2 | D |
+| `edgar_filing.period_end` | `date` | date; issuer's fiscal calendar | yes | Any date | D |
+| `edgar_filing.document_ref` | `text` | path on the SEC host; — | no | 1–400 characters | D |
+| `insider_filing_raw.filing_key` | `text` | —; — | no | 1–64 characters | D |
+| `insider_filing_raw.form_type` | `text` | —; — | no | 1–16 characters | D |
+| `insider_filing_raw.document` | `bytea` | bytes, as retrieved; — | no | Non-empty. UNTRUSTED | D |
+| `insider_filing_raw.document_bytes` | `bigint` | bytes; — | no | > 0; the length of `document` | D |
+| `corporate_action_terms.action_id` | `uuid` | —; — | no | The `action_id` of the `corporate_action` row described | D |
+| `corporate_action_terms.knowledge_from` | `timestamptz` | instant; UTC | no | The `knowledge_from` of that same row | D |
+| `corporate_action_terms.action_type` | `text` | —; — | no | `SPLIT`, `REVERSE_SPLIT`, `CASH_DIVIDEND` | D |
+| `corporate_action_terms.cash_amount_exact` | `numeric` | listing currency per share, vendor precision; — | yes | > 0 and finite; set exactly when `action_type = CASH_DIVIDEND` | D |
+| `corporate_action_terms.cash_currency` | `text` | ISO currency code; — | yes | `USD`, `INR`; set exactly when `cash_amount_exact` is set | D |
+| `corporate_action_terms.split_from` | `numeric` | old shares; — | yes | > 0 and finite; set exactly for `SPLIT` and `REVERSE_SPLIT`; ≠ `split_to` | D |
+| `corporate_action_terms.split_to` | `numeric` | new shares; — | yes | > 0 and finite; set exactly for `SPLIT` and `REVERSE_SPLIT`; ≠ `split_from` | D |
+| `corporate_action_terms.distribution_type` | `text` | vendor code; — | yes | ≤ 32 characters; dividends only | D |
+| `corporate_action_terms.frequency` | `integer` | payouts per year; — | yes | 0–365; dividends only | D |
+| `corporate_action_terms.record_date`, `declaration_date` | `date` | date; local | yes | Any date; dividends only | D |
+| `corporate_action_terms.cash_rounded_in_0001` | `boolean` | —; — | no | `true` only for a dividend whose 0001 `cash_amount` differs from `cash_amount_exact` | D |
+| `corporate_action_terms.ratio_rounded_in_0001` | `boolean` | —; — | no | `true` only for a split whose 0001 `ratio` differs from `split_to / split_from` | D |
 
 ---
 
@@ -2017,15 +2546,15 @@ file is edited. Each item names what it needs.
 | 9 | The stream adapter serves held names only, assembles 5-minute bars from `b` minute bars, and reconciles every disconnect and every session from REST (§13) | SPEC-P0.3 §6.2, RULE-B12, rule N5 | Yes | **High** — a lost bar hides a stop breach. §13.5 is the control |
 | 10 | Raw news is snapshotted at first receipt into a P2.1 table; P2.1 writes no `news_item` (O-2) | Rule N16 loses history for every uncollected session; the sanitiser is P4.1 | Yes | Medium — isolation is by convention until a second role exists `[DEFAULT-6]` |
 | 11 | `disseminated_at` is computed from an EDGAR acceptance instant only `[DEFAULT-12]` | Rule N1; no vendor date is verified as a dissemination time | Yes | Medium — fundamentals without an EDGAR match are absent |
-| 12 | A value more precise than its column is rejected, not rounded `[DEFAULT-14]`; the split ratio is the single recorded exception (§8.2) | `[CONST-6]`: a rounded dividend is a synthesised value | Yes | **High** until `[P21-17]` is decided — many dividends are rejected |
-| 13 | Twelve append-only tables in migration 0002, no hypertable, no retention, no grant beyond `app_rw` (§22) | O-1; smallest set that holds the provenance the prompt requires | Additive — a later migration can extend | Low |
+| 12 | A price, volume or FX rate more precise than its column is rejected, not rounded. A dividend amount or split ratio is stored exactly in `corporate_action_terms`, with the 0001 row holding the rounded value and a flag `[DEFAULT-14]`, O-10 | `[CONST-6]` forbids a silently rounded market value; refusing a dividend or a split would misprice every later bar | Yes | Medium — a reader that ignores the flag uses a rounded amount or ratio |
+| 13 | Thirteen append-only tables in migration 0002, no hypertable, no retention, no grant beyond `app_rw` (§22) | O-1, O-10; smallest set that holds the provenance the prompt requires and the exact corporate-action terms | Additive — a later migration can extend | Low |
 | 14 | `run_id` in 0002 tables has no foreign key `[DEFAULT-15]` | `[P21-20]` | Yes — a constraint can be added | Low |
 | 15 | A separate `config/ingest.yaml`, hashed, unsigned, read through the existing loader helpers (§23) | O-5 | Yes | Low |
 | 16 | Redis caches three lookups and no market value (§17) | SPEC-P0.3 §13.1 row 17: not a system of record; a miss must never become a default | Yes | Low |
 | 17 | `psycopg` 3, `httpx`, `redis`, `websockets` `[DEFAULT-10]` | Each replaces well over ten lines of standard library; none is an orchestration framework | Yes | Low |
 | 18 | SPEC-P0.2's provider contracts are implemented verbatim at `src/provider/`; P2.1's own enum covers what `DataCapability` lacks (§4.1) | A frozen enum is not extended by a downstream phase | Yes | Low |
 | 19 | An adapter with no verified field list has a contract and no mapping, and is not implementable (§4.4) | Block A: never invent an API field | — | None; the alternative is invented fields |
-| 20 | Instruments are matched across ticker changes by `composite_figi` `[DEFAULT-13]` | The only stable identifier in the verified reference fields | Yes, before live data; costly after | **High** — an identity break corrupts history for that name |
+| 20 | Instruments are matched across ticker changes by `composite_figi` `[DEFAULT-13]`. No code may rely on it until `[A-10]` is verified against one documented ticker-rename case (O-9) | The only stable identifier in the verified reference fields | Yes, before live data; costly after | **High** — an identity break corrupts history for that name |
 
 ## ASSUMPTIONS
 
@@ -2040,12 +2569,26 @@ file is edited. Each item names what it needs.
 | A-7 | Stream ping interval and timeout 20 s; reconnect base 1 s, cap 60 s; silent-window recheck 10 s | SPEC-P0.2 records no application heartbeat or reconnect guidance for the Alpaca stream | Vendor documentation or support; observation at the stage 5 rehearsal | Slow detection of a dead socket, or needless reconnects |
 | A-8 | Calendar must cover 20 sessions ahead | No frozen number | Owner | A late calendar load stops ingest earlier or later than intended |
 | A-9 | Cache TTLs 86,400 s, 3,600 s, 60 s; lock 5,000 ms | No frozen number; none of the three values is authoritative | Load observation | Database load only |
-| A-10 | `composite_figi` is stable across a ticker change | Not stated in any frozen spec | Vendor documentation; a known rename in the reference history | `[DEFAULT-13]` fails: identity breaks on rename |
+| A-10 | `composite_figi` is stable across a ticker change | Not stated in any frozen spec | Vendor documentation and one documented ticker-rename case in the reference history. **Required by the Owner (O-9) before any P2.1 code relies on `[DEFAULT-13]`** | `[DEFAULT-13]` fails: identity breaks on rename |
 | A-11 | Massive's "Eastern Time" is IANA `America/New_York` | SPEC-P0.2 says "presented in ET" | Vendor documentation | Bars assigned to the wrong trading date around midnight |
 | A-12 | Settlement cycle of one session in both markets | Carried from SPEC-P1.1 A11 / `Q-P1.1-1`; this phase must write `settlement_date NOT NULL` | `Q-P1.1-1`, `Q-P1.1-2` | Wrong `settlement_date` on every session row; P2.9's settled-cash sizing inherits it |
 | A-13 | A filing accepted after its cutoff is disseminated at 06:00 Eastern on the next Monday to Friday; one accepted before its cutoff is disseminated at acceptance | SPEC-P0.2 gives the cutoffs and "next business day", not the instant, the holiday list, or the propagation delay (M-8) | `[OQ-30]`; the M-8 measurement of §21 | `disseminated_at` too early: look-ahead by the difference, a full day across a federal holiday |
-| D-1…D-10 | `[DEFAULT-1]` to `[DEFAULT-10]` | Block C; approved by the Owner 2026-10-07 | §1.1 | §1.1 |
-| D-11…D-16 | `[DEFAULT-11]` to `[DEFAULT-16]` | Block C; **not yet reviewed by the Owner** | §1.2 | §1.2 |
+| D-1 | `[DEFAULT-1]` A daily bar's `ts` is the session's `regular_close_utc`; a 5-minute bar's is its window start | No frozen spec fixes the daily `ts`; SPEC-P0.2 §0.6 speaks of window start for minute bars | Owner approved 2026-10-07; check against P5.1's read set at its freeze | Look-ahead through `bars_asof`, or a re-key of `bar_daily` |
+| D-2 | `[DEFAULT-2]` A daily bar is written at the scheduled ingest and compared with a re-fetch at the next session's ingest | SPEC-P0.3 Q-7 is open; storage is insert-only | Owner approved 2026-10-07; the `REVISION` measurement of §21 | A vendor revision is stored wrong for good, or caught one session late |
+| D-3 | `[DEFAULT-3]` A second source's bar goes to `ingest_reconciliation`; only the SPEC-P0.2 primary writes a 0001 market-data table | One row per `(instrument_id, ts)`; rule N7 forbids a silent tiebreak | Owner approved 2026-10-07 | No second-source evidence, or a silent tiebreak |
+| D-4 | `[DEFAULT-4]` Price tolerance is the tick in force; volume tolerance is the ratio of `[A-1]` | No frozen tolerance exists | Owner approved 2026-10-07; `[A-1]` by measurement | False alarms if too tight; missed errors if too loose |
+| D-5 | `[DEFAULT-5]` Rule N7 is stored as reconciliation rows plus an EDGAR-sourced row at the next `restatement_seq` | `[P21-13]`: the unique key leaves no other insert | Owner approved 2026-10-07 | A source correction reads as an issuer restatement |
+| D-6 | `[DEFAULT-6]` Raw news sits in schema `trading` behind explicit grants and a module boundary | Only one application role exists | Owner approved 2026-10-07; a second role is a P4.1 or P6.2 decision | Raw vendor text reachable from LLM-bound code |
+| D-7 | `[DEFAULT-7]` Absence is no row plus manifest, failure and gap records; no sentinel row | `[CONST-6]`; `bar_*` cannot hold a sentinel | Owner approved 2026-10-07 | A consumer that skips the manifest reads absence as "did not trade" |
+| D-8 | `[DEFAULT-8]` Batch freshness is "the most recent completed sequenced session is `COMPLETE`"; the stream keeps the frozen 600 s | `DATA-001`'s 600 s describes the intraday monitor; X3R-C6 is open | Owner approved 2026-10-07 | Every daily decision denied, or stale data accepted |
+| D-9 | `[DEFAULT-9]` The India adapter is tested on fixtures built from documented response shapes, labelled synthetic | ADR-11: no India data spend before activation | Owner approved 2026-10-07; recorded fixtures before India activation; shapes pending `[OQ-25]` | A synthetic fixture encodes a wrong field |
+| D-10 | `[DEFAULT-10]` `psycopg` 3, `httpx`, `redis`, `websockets`; P2.1 owns the write module for the tables it writes | Nothing in `src/` opens a connection; no dependency manifest exists | Owner approved 2026-10-07 | Later phases inherit an unsuitable client |
+| D-11 | `[DEFAULT-11]` A daily run ingests an explicit `IngestSet` supplied by its caller; there is no implicit "everything" | ADR-14 and SPEC-P0.3 §13.1 row 2 speak of "the resolved universe"; nothing says who requests bars for non-members | Owner approved 2026-10-08; `[OQ-19]` | Reconstitution cannot rank names that were never ingested |
+| D-12 | `[DEFAULT-12]` `disseminated_at` comes only from an EDGAR filing record through §19.2; fundamentals with no such record are not stored | Rule N1; no vendor date is verified as a dissemination time | Owner approved 2026-10-08; `[OQ-9]`, `[OQ-23]` | Look-ahead if relaxed; missing fundamentals as applied |
+| D-13 | `[DEFAULT-13]` An instrument is recognised across a ticker change by `composite_figi` | It is the only stable identifier among the verified reference fields | Owner approved 2026-10-08, conditional on `[A-10]` being verified before any code relies on it | An identity break on rename |
+| D-14 | `[DEFAULT-14]` A price, volume or FX rate more precise than its column is rejected and recorded; a dividend amount or split ratio is stored exactly in `corporate_action_terms`, with the 0001 row rounded and flagged | `[CONST-6]`; `Price` and `Money` round silently `[P21-16]`; 0001 cannot hold the exact terms `[P21-17]`, `[P21-18]` | Owner approved 2026-10-08, as amended by O-10 | A reader that ignores the flag uses a rounded amount or ratio |
+| D-15 | `[DEFAULT-15]` `run_id` in the 0002 tables has no foreign key to `run_context` | `[P21-20]`: a key would gate every P2.1 write behind conditions 9 and 10 | Owner approved 2026-10-08 | A manifest row whose run has no `run_context` row |
+| D-16 | `[DEFAULT-16]` A 5-minute bar is the deterministic aggregate of the minute bars received for its window; completion is exactly RULE-B12 | SPEC-P0.3 §6.2 fixes assembly from the `b` stream and does not state the aggregation | Owner approved 2026-10-08; the session-close check of §13.5 | A bar assembled across an unnoticed loss |
 | A-14 | `trading.deny_mutation()` works unchanged on a table 0001 did not attach it to | Read from the migration text, not executed | T-16 | The 0002 triggers need their own function |
 | A-15 | SPEC-P0.2's facts are still true | Retrieved 2026-08-23 to 2026-08-26; this phase re-verified none | Re-read each cited page before the code phase | A field or limit changed under the adapter |
 
@@ -2064,7 +2607,7 @@ open. Nothing here is answered by this document.
 | OQ-6 | EDGAR propagation latency (SPEC-P0.2 M-8) | Measurement, §21 | Acceptance-to-availability deltas over one week of Form 4 filings | The margin in §19.2 |
 | OQ-7 | The RBI USD/INR reference-rate endpoint, its fields and a fallback (SPEC-P0.1 Q12) | RBI publications | The published location and format of the daily reference rate; publication time; holiday behaviour | FX adapter; India activation |
 | OQ-8 | India sources for fundamentals, corporate actions and news | Owner | Does Zerodha Kite Connect publish corporate actions? Which vendor covers NSE/BSE fundamentals? | India activation |
-| OQ-9 | SEC EDGAR response fields: the filing identifier, acceptance timestamp, form type, document path on `data.sec.gov` submissions; the XBRL company-facts shape; the Forms 3/4/5 document format and the fields to extract | SEC documentation | `sec.gov/search-filings/edgar-application-programming-interfaces`; the ownership-document technical specification | **Blocks freeze** of §19 mappings and the EDGAR adapter; P2.5's insider feature |
+| OQ-9 | SEC EDGAR response fields: the filing identifier, acceptance timestamp, form type, document path on `data.sec.gov` submissions; the XBRL company-facts shape; the Forms 3/4/5 document format and the fields to extract | SEC documentation | The SEC's EDGAR API documentation for `data.sec.gov`, and its technical specification for ownership documents (exact pages not retrieved by this phase) | **Blocks freeze** of §19 mappings and the EDGAR adapter; P2.5's insider feature |
 | OQ-10 | What is a "material" disagreement under rule N7, and which metrics are compared under which names in each source? | Owner | SPEC-P0.2 rule N7 gives no threshold or list | **Blocks freeze** of §19.3 step 4 |
 | OQ-11 | Replace `[A-1]` and `[A-2]` with measured or decided values | Measurement; Owner | §21 | Not blocking |
 | OQ-12 | Who emits `RUN_STARTED` and `RUN_FINISHED` for an ingest run before P6.4 exists? | Owner, **with condition 9** | `EVENT_REGISTRY`: producer `P6.4_ORCHESTRATOR` | P2.1 code that writes an audit event |
@@ -2076,11 +2619,11 @@ open. Nothing here is answered by this document.
 | OQ-18 | Do the Stage 1 suites pass on Python 3.12+? (X5 condition 15) | Execution | Run the six suites on 3.12 | Carried |
 | OQ-19 | Which instruments outside the current universe need daily bars so that reconstitution can rank them, and which phase requests them? | P2.3 | ADR-14: 1,300/1,700 hysteresis needs ranks beyond membership | P2.3; P2.1's ingest-set default `[DEFAULT-11]` |
 | OQ-20 | Does an ingest run write `stage_latency_observation`, and with what `strategy_version`? | Owner / P6.1 | Migration §6.9: `strategy_version NOT NULL` | Not blocking |
-| **OQ-21** | **How are corporate-action terms that 0001 cannot hold exactly to be stored: per-share cash with more than two decimals, non-terminating split ratios, `distribution_type`, `frequency`, record and declaration dates?** | **Owner** | `[P21-17]`, `[P21-18]`. Options: accept `[DEFAULT-14]`'s rejections; a further P2.1-owned table of exact terms keyed by `action_id`; re-open SPEC-P1.1/P1.2 | **Blocks freeze** of §8 |
-| OQ-22 | Massive: the Ticker Types value list; `primary_exchange` values; the Ticker Events endpoint and fields; the trades endpoint and fields; whether `v` is ever non-integer | Massive documentation | `massive.com/docs/rest/stocks/tickers/*`; `…/trades-quotes/trades` | **Blocks freeze** of the reference mapping tables and `Q-P1.1-6` method (b) |
-| OQ-23 | FMP: statement endpoints, field names, period and date fields, how restatements appear | FMP documentation | `site.financialmodelingprep.com/developer/docs` — income statement, balance sheet, cash flow | **Blocks freeze** of the FMP adapter |
-| OQ-24 | FRED / ALFRED: parameters and fields of `series/observations` and `series/vintagedates`; how a missing observation is marked; where series notes are returned | FRED documentation | `fred.stlouisfed.org/docs/api/fred/series_observations.html`, `…/series_vintagedates.html`, `…/series.html` | **Blocks freeze** of the FRED adapter |
-| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone | Kite Connect documentation | `kite.trade/docs/connect/v3/historical/`, `…/market-quotes/#instruments` | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures |
+| OQ-21 | ~~How are corporate-action terms that 0001 cannot hold exactly to be stored?~~ | **CLOSED 2026-10-08 by Owner decision O-10** | Option 2 was chosen: the P2.1-owned table `corporate_action_terms` (§22.12), keyed by `action_id`. SPEC-P1.1 and SPEC-P1.2 are not re-opened | **Closed** |
+| OQ-22 | Massive: the Ticker Types value list; `primary_exchange` values; the Ticker Events endpoint and fields; the trades endpoint and fields; whether `v` is ever non-integer | Massive documentation | Massive's REST documentation for tickers, ticker types, ticker events and trades, under `massive.com/docs/rest/stocks/` (exact pages not retrieved by this phase) | **Blocks freeze** of the reference mapping tables and `Q-P1.1-6` method (b) |
+| OQ-23 | FMP: statement endpoints, field names, period and date fields, how restatements appear | FMP documentation | FMP's developer documentation under `site.financialmodelingprep.com/developer/docs` for income statement, balance sheet and cash flow (exact pages not retrieved by this phase) | **Blocks freeze** of the FMP adapter |
+| OQ-24 | FRED / ALFRED: parameters and fields of `series/observations` and `series/vintagedates`; how a missing observation is marked; where series notes are returned | FRED documentation | The `fred/series/observations`, `fred/series/vintagedates` and `fred/series` pages under `fred.stlouisfed.org/docs/api/fred/` (exact pages not retrieved by this phase) | **Blocks freeze** of the FRED adapter |
+| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone | Kite Connect documentation | The historical-candle and instruments pages under `kite.trade/docs/connect/v3/` (exact pages not retrieved by this phase) | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures |
 | OQ-26 | What is the source of `HALTED` and `SUSPENDED` status? | Owner; vendor documentation | Alpaca's `s` trading-status channel is excluded by SPEC-P0.3 §13.3 row 40; RULE-B12c refers to "the calendar" reporting a halt | P3.3; P2.1 writes neither status |
 | OQ-27 | How is an `exchange_session` row corrected after an unscheduled early close? | Owner / SPEC-P1.2 | The table has no bitemporal axis and `app_rw` cannot update it | Operational runbook, P6.4 |
 | OQ-28 | Which FIGI does `instrument.figi` hold? | SPEC-P1.1 / SPEC-P1.2 author | Both columns are documented only by name | Not blocking; the column stays `NULL` |
@@ -2095,8 +2638,8 @@ open. Nothing here is answered by this document.
 | Name | Kind (type/table/event/endpoint/config key) | Signature or schema | Consumers |
 |---|---|---|---|
 | `IngestDataType`, `ManifestStatus`, `FailureKind`, `GapKind`, `GapState`, `ReconKind` | type (enum) | §4.1, §15.1 | P2.2, P2.3, P6.1 |
-| `ProviderId` … `ProviderSpec` at `src/provider/` | type | SPEC-P0.2 §10.1–10.2, verbatim | P3.1, P6.1 |
-| Provider protocols (`ReferenceProvider` … `BarStream`) and wire records | type (protocol, model) | §4.2, §4.3 | P2.1 adapters only; P3.1 as a pattern |
+| `ProviderId`, `DataCapability`, `ProviderRole`, `TokenLifetime`, `RateLimit`, `CredentialSpec`, `IdempotencySpec`, `ProviderSpec` at `src/provider/` | type | SPEC-P0.2 §10.1–10.2, verbatim | P3.1, P6.1 |
+| Provider protocols (`ReferenceProvider`, `CalendarProvider`, `DailyBarProvider`, `IntradayBarProvider`, `CorporateActionProvider`, `FundamentalsProvider`, `FilingsProvider`, `MacroProvider`, `FxProvider`, `NewsProvider`, `BarStream`), `Page`, the `IngestError` hierarchy and the wire records (`WireBar`, `WireSplit`, `WireDividend`, `WireInstrument`, `WireSession`, `WireNews`, `WireFundamentals`, `WireFiling`, `WireMacroObservation`, `WireFxRate`) | type (protocol, model, exception) | §4.2, §4.3, §28.1 | P2.1 adapters only; P3.1 as a pattern |
 | `trading.ingest_manifest` | table | §22.1. Status of record = latest row by `finished_at` | **P2.2, P2.3**, P6.1 |
 | `trading.ingest_failure`, `trading.ingest_gap` | table | §22.3, §22.4 | **P2.2**, P6.1 |
 | `trading.ingest_reconciliation` | table | §22.5 | **P2.2** (layer 5) |
@@ -2105,15 +2648,17 @@ open. Nothing here is answered by this document.
 | `trading.raw_news_snapshot` and its hand-off guarantees | table + rule | §22.7, §18 | **P4.1 only** |
 | `trading.macro_series`, `trading.macro_observation` and the vintage read rule | table + rule | §22.8, §19.5 | **P2.6**, P5.1 |
 | `trading.edgar_index_snapshot`, `trading.edgar_filing`, `trading.insider_filing_raw` | table | §22.9–22.11 | P2.5, P4.1, P5.1 |
+| `trading.corporate_action_terms` | table | §22.12, §8.2. Exact dividend amount, `split_from`, `split_to`, `distribution_type`, `frequency`, record and declaration dates; one row per `corporate_action` row of those three types | **P2.4**, P2.5, P5.1 |
 | Absence contract | rule | §15.3 | **Every consumer of market data** |
 | Bar write rules; daily `ts` = session close; `is_final` is always true in storage | rule | IR-19, IR-20, `[DEFAULT-1]`, §9.2 | P2.4, P5.1 |
-| Corporate-action read-time order | rule | §8.4 | P2.4, P5.1 |
+| Corporate-action read-time order, using the exact terms | rule | §8.4 | P2.4, P5.1 |
 | Gap definition | rule | §11 | P2.2 |
 | Freshness facts per data type | rule | §16.1 | P2.2, P2.9 |
 | `HeldNamesBarFeed`, `StreamGapNotice` | type (interface) | §13.6 | **P3.3** |
 | Calendar loader; reference-data loader | function | §6; writes `exchange_session`, `instrument`, `symbol_mapping` | P2.3, P2.9, P3.2 |
-| `config/ingest.yaml`, `IngestConfig` | config | §23 | P6.2, P6.4 |
-| Redis key scheme `ingest:v1:…` | convention | §17 | Other phases must not write under this prefix |
+| `config/ingest.yaml`, `IngestConfig` | config | §23, §28.2 | P6.2, P6.4 |
+| `IngestSet`, `BackfillJobRequest`, `DailyRunRequest`, `DailyRunResult` | type (model) | §12.3, §28.3 | P2.3 (builds the ingest set), P6.4 (invokes runs and jobs) |
+| Redis keys under the prefix `ingest:v1:` | convention | §17 | Other phases must not write under this prefix |
 | Rules IR-1 to IR-20 | rule | §5, §6, §8, §9 | P2.2, X2 |
 | Measurement of maximum vendor price scale | measurement | §21 | P2.2 (X5 condition 4) |
 | `DATA_RECEIVED`, `FX_RATE_RECORDED`, `CORPORATE_ACTION_APPLIED` — P2.1's proposed emission points | event (proposal, gated) | §20. **Defined by SPEC-P1.4; nothing is added or changed** | Condition 9 decision; P1.4 |
@@ -2125,9 +2670,10 @@ open. Nothing here is answered by this document.
 | Requirement | State |
 |---|---|
 | Block B header, four tables | Present |
-| Every entity has a Pydantic model or DDL | Wire records, enums, config, stream interface: §4, §13.6, §15.1, §23. Tables: §22 |
+| Every entity has a Pydantic model or DDL | Wire records, protocols, errors: §4. Request and result models: §12.3. Stream interface: §13.6. Enums: §4.1, §15.1. Config: §23. Tables: §22 |
+| Every field: name, type, unit, timezone, nullability, valid range, violation | §28 |
 | Every error path enumerated with fail-closed behaviour | §24, 35 rows |
-| No pseudocode; no placeholder | Six adapters have no field mapping. That is stated as open questions with exact queries (§4.4, `[P21-25]`), which is what Block A prescribes for an unknown API field |
+| No pseudocode; no ellipsis; no placeholder | No stub body is an ellipsis. The four remaining ellipsis characters are elisions inside quotations of the P2.1 prompt and of X5 condition 11. Six adapters have no field mapping. That is stated as open questions with exact queries (§4.4, `[P21-25]`), which is what Block A prescribes for an unknown API field |
 | P2.1 prompt items | Protocol and adapters §4; backfill §10; streaming §13; normalisation §7, §8; idempotency and reconciliation §9, §14; failure policy §15; freshness §16; Redis §17; tests §25 |
 | Frozen specs modified | None |
 | `Q-P1.2-7` / X3R-M1, OQ-12, OQ-13 | Carried, unresolved |
@@ -2135,10 +2681,10 @@ open. Nothing here is answered by this document.
 
 **Known deviations, declared.** (1) This is the specification half of the P2.1 deliverable; the
 implementation and tests are blocked by STAGE-1-FREEZE §9.2. (2) The spec cannot be frozen whole
-while OQ-1, OQ-9, OQ-10, OQ-21 to OQ-25 are open; it could be frozen for the Massive and Alpaca
-paths alone if the Owner chose to split it. (3) Six defaults, `[DEFAULT-11]` to `[DEFAULT-16]`,
-were applied while drafting and have not been reviewed.
+while OQ-1, OQ-9, OQ-10 and OQ-22 to OQ-25 are open; it could be frozen for the Massive and Alpaca
+paths alone if the Owner chose to split it. (3) `[DEFAULT-13]` is approved conditionally: no code
+may rely on it until `[A-10]` is verified against one documented ticker-rename case.
 
 ---
 
-# SPEC-P2.1-INGEST v0.1 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.2 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
