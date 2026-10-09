@@ -1,6 +1,6 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.3
+version: 0.4
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
@@ -56,7 +56,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | Closed | X5 condition 10 (X3R-M2). Not P2.1's |
 | P2.1 code that relies on `[DEFAULT-13]` | Closed | Requires `ASSUMPTION [A-10]` verified against one documented ticker-rename case (Owner decision O-9) |
 
-### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11: 2026-10-09)
+### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11, O-12: 2026-10-09)
 
 | # | Decision |
 |---|---|
@@ -70,7 +70,8 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | O-8 | `Q-P1.2-7` / X3R-M1, OQ-12 and OQ-13 are carried with condition 9 and are not resolved in P2.1 |
 | O-9 | `[DEFAULT-11]` to `[DEFAULT-16]` are approved. `[DEFAULT-13]` is conditional: `[A-10]` must be verified against one documented ticker-rename case before any P2.1 code relies on it |
 | O-10 | `[OQ-21]`: a P2.1-owned 0002 table of exact corporate-action terms keyed by `action_id` (`corporate_action_terms`, §22.12). The 0001 `corporate_action` row keeps its constrained, rounded representation. SPEC-P1.1 and SPEC-P1.2 are not re-opened. `[DEFAULT-14]` is amended to match |
-| O-11 | Block C correction: the blocking questions are presented as ten grouped questions with their options (§1). P2.1's reference loader writes India tick-size rows to `tick_size_regime` from the instruments dump (`[DEFAULT-17]`, rule IR-21). The wording approved was "a new row only when the value changes"; `[P21-28]` makes that unwritable, so IR-21 uses one-day rows, and that form is **not yet confirmed by the Owner** `[OQ-34]` |
+| O-11 | Block C correction: the blocking questions are presented as ten grouped questions with their options (§1). P2.1's reference loader writes India tick-size rows to `tick_size_regime` from the instruments dump (`[DEFAULT-17]`, rule IR-21). The wording approved was "a new row only when the value changes"; `[P21-28]` makes that unwritable, so IR-21 uses one-day rows; see O-12 |
+| O-12 | IR-21's one-day row form is adopted **provisionally**. `[OQ-25]` stays open: whether the India instruments dump is available before the order window it must serve has not been verified, and no pre-open readiness is claimed. The form must be revisited if the dump is not available in time `[OQ-34]` |
 
 ### 0.4 Version history
 
@@ -79,6 +80,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | 0.1 | 2026-10-07 | First draft (`8efcf3e`) |
 | 0.2 | 2026-10-08 | Block B conformance correction and Owner decisions O-9 and O-10. Adds the request and result models (§12.3) and the field specifications (§28); replaces stub bodies with docstrings; lists `[DEFAULT-1]` to `[DEFAULT-16]` individually; writes out abbreviated lists; adds four validators that §28 relies on. Records the approval of `[DEFAULT-11]` to `[DEFAULT-16]` (O-9). Closes `[OQ-21]` (O-10): adds the table `corporate_action_terms` (§22.12) and changes `[DEFAULT-14]` for dividend amounts and split ratios from "reject" to "store exactly, 0001 row rounded and flagged" (§7.2, §8.2, §8.4). No other decision, default, rule or DDL constraint is changed |
 | 0.3 | 2026-10-09 | Block C conformance correction and Owner decision O-11. Section 1 is restructured into ten grouped blocking questions with an Options column; no approved default is changed or renumbered. Section 2 gains seven non-blocking categories. Every rule gains its edge case: IR-14, IR-19, and a new edge-case column in §13.1, §16.1, §16.2, §17, §18, §19.2, §19.5 and §23.1. Adds `[DEFAULT-17]` and rule IR-21 (India tick-size loading) and findings `[P21-26]` to `[P21-28]`. No DDL is changed |
+| 0.4 | 2026-10-09 | Owner decision O-12: rule IR-21's one-day row form is adopted provisionally, conditional on `[OQ-25]`. Wording only; no other rule, default or DDL is changed |
 
 ---
 
@@ -102,7 +104,7 @@ approved by the Owner**; the last column gives the date and the default numbers 
 | **7** | Which instruments does a daily run ingest? | An explicit set supplied by the caller; every active instrument of an allowed type; universe members resolved inside the run | **An explicit ingest set supplied to the run: universe members as of the session, plus names flagged `retained_as_held`, plus any instruments the caller adds** `[DEFAULT-11]`, typed as `IngestSet` (§12.3). When no universe version exists, the caller must supply the set; there is no implicit "everything" | Reconstitution needs bars for names outside the universe. Who requests them is `[OQ-19]` | 2026-10-08 |
 | **8** | Where does `disseminated_at` come from? | An EDGAR filing record only; a vendor filing or acceptance date; our own first-retrieval time | **Only from an EDGAR filing record, through the cutoff rule of §19.2. A fundamentals row with no matching filing record is not stored** `[DEFAULT-12]` | Rule N1 look-ahead if a vendor "filing date" is trusted. Cost: fundamentals with no EDGAR match are absent | 2026-10-08 |
 | **9** | How is an instrument recognised across a ticker change? | `composite_figi`; exchange and ticker only; block the reference loader until the vendor's ticker-events data is documented | **By `composite_figi` when present, `ASSUMPTION [A-10]`** `[DEFAULT-13]`. Conditional (O-9): no P2.1 code may rely on it until `[A-10]` is verified against one documented ticker-rename case | A renamed ticker becomes a delisting plus a new instrument: an identity break | 2026-10-08, conditional |
-| **10** | Who loads India tick sizes `[P21-27]`? | P2.1's reference loader writes `tick_size_regime` rows from the instruments dump; leave it to P3.1 or P3.2 | **P2.1's reference loader, by rule IR-21** `[DEFAULT-17]` | With no loader, rule N10 denies every India order for want of a regime row. India is unfunded, so nothing breaks before activation | 2026-10-09: that P2.1 loads them. The one-day row form of IR-21 awaits Owner confirmation `[OQ-34]` |
+| **10** | Who loads India tick sizes `[P21-27]`? | P2.1's reference loader writes `tick_size_regime` rows from the instruments dump; leave it to P3.1 or P3.2 | **P2.1's reference loader, by rule IR-21** `[DEFAULT-17]` | With no loader, rule N10 denies every India order for want of a regime row. India is unfunded, so nothing breaks before activation | 2026-10-09: that P2.1 loads them (O-11); the one-day row form provisionally (O-12), to be revisited on `[OQ-25]` |
 
 ---
 
@@ -622,7 +624,7 @@ split or a news item naming a symbol with no mapping is `UNKNOWN_SYMBOL`; it nev
 | **IR-11** | A change to an instrument fact closes the open row (`knowledge_to`) and inserts a new one. A changed ticker closes the open `symbol_mapping` (`valid_to` = the first date the new ticker is seen, exclusive bound) and opens another for the **same** `instrument_id` | Both statements run in one transaction. The `EXCLUDE` constraints of 0001 reject an overlap; that rejection is `AMBIGUOUS_SYMBOL` and the whole reference run fails |
 | **IR-12** | A vendor `security_type` or `primary_exchange` with no entry in the configured mapping table creates **no** instrument and is recorded (`UNKNOWN_INSTRUMENT_TYPE`) | Deny-by-default `[FROZEN P1.1 §5.3, ADR-05]`. Venues outside `Exchange` cannot be represented at all `[P21-21]`; they are counted in the manifest's `skipped_count`, not as failures, when the mapping table lists them as `EXCLUDED` |
 | **IR-13** | `delisted_utc` present → `status = DELISTED`, `delisted_on` = its UTC date. The row is never deleted (invariant I7) | `final_price` is left `NULL`. This phase does not derive it from the last bar |
-| **IR-21** | For an India instrument, the instruments dump's `tick_size` is written to `tick_size_regime` as one row per symbol per dump date: `market = IN`, the instrument's symbol, `effective_from = as_of_date`, `effective_to = as_of_date + 1 day`, the dump's `tick_size`, `min_price = 0`, and a `source` naming the dump and its date `[DEFAULT-17]` | The row is bounded to one day because a regime row cannot be superseded: `app_rw` has no `UPDATE` on the table and its `EXCLUDE` constraint rejects an overlapping open-ended row `[P21-28]`. A date with no loaded dump has no row, so rule N10 denies orders in that symbol on that date: fail-closed. Whether the dump is published before the India order window is `[OQ-25]`. Re-loading a date with the same value is a duplicate; with a different value it is `DUPLICATE_CONFLICT`. P2.1 writes no US row: the seeded `*` row stands |
+| **IR-21** | For an India instrument, the instruments dump's `tick_size` is written to `tick_size_regime` as one row per symbol per dump date: `market = IN`, the instrument's symbol, `effective_from = as_of_date`, `effective_to = as_of_date + 1 day`, the dump's `tick_size`, `min_price = 0`, and a `source` naming the dump and its date `[DEFAULT-17]` | The row is bounded to one day because a regime row cannot be superseded: `app_rw` has no `UPDATE` on the table and its `EXCLUDE` constraint rejects an overlapping open-ended row `[P21-28]`. A date with no loaded dump has no row, so rule N10 denies orders in that symbol on that date: fail-closed. **This form is provisional (O-12).** Whether the dump for a session is available before that session's order window is `[OQ-25]` and has not been verified; this spec claims no pre-open readiness. If the dump is not available in time, this form denies every India order and must be revisited `[OQ-34]`. Re-loading a date with the same value is a duplicate; with a different value it is `DUPLICATE_CONFLICT`. P2.1 writes no US row: the seeded `*` row stands |
 
 Fields with **no verified source** are written `NULL` and never guessed: `issuer_id`, `isin`,
 `cusip`, `figi` (US), `final_price`. `HALTED` and `SUSPENDED` have no source in any frozen fact
@@ -1545,7 +1547,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.3 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.4 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -2557,7 +2559,7 @@ Per table, the remaining columns:
 | 18 | SPEC-P0.2's provider contracts are implemented verbatim at `src/provider/`; P2.1's own enum covers what `DataCapability` lacks (§4.1) | A frozen enum is not extended by a downstream phase | Yes | Low |
 | 19 | An adapter with no verified field list has a contract and no mapping, and is not implementable (§4.4) | Block A: never invent an API field | — | None; the alternative is invented fields |
 | 20 | Instruments are matched across ticker changes by `composite_figi` `[DEFAULT-13]`. No code may rely on it until `[A-10]` is verified against one documented ticker-rename case (O-9) | The only stable identifier in the verified reference fields | Yes, before live data; costly after | **High** — an identity break corrupts history for that name |
-| 21 | P2.1's reference loader writes India tick-size rows to `tick_size_regime`, one bounded row per symbol per dump date (IR-21) `[DEFAULT-17]`, O-11 | P2.1 owns the reference loader (O-6); SPEC-P0.2 names the dump as India's reference source; one-day rows are the only form `app_rw` can write without superseding a row `[P21-28]` | Yes | Low today (India unfunded). After activation: a session with no loaded dump denies every India order |
+| 21 | P2.1's reference loader writes India tick-size rows to `tick_size_regime`, one bounded row per symbol per dump date (IR-21) `[DEFAULT-17]`, O-11. The one-day form is provisional (O-12) | P2.1 owns the reference loader (O-6); SPEC-P0.2 names the dump as India's reference source; one-day rows are the only form `app_rw` can write without superseding a row `[P21-28]` | Yes | Low today (India unfunded). After activation: a session with no dump loaded before its order window denies every India order; whether that is every session depends on `[OQ-25]` |
 
 ## ASSUMPTIONS
 
@@ -2592,7 +2594,7 @@ Per table, the remaining columns:
 | D-14 | `[DEFAULT-14]` A price, volume or FX rate more precise than its column is rejected and recorded; a dividend amount or split ratio is stored exactly in `corporate_action_terms`, with the 0001 row rounded and flagged | `[CONST-6]`; `Price` and `Money` round silently `[P21-16]`; 0001 cannot hold the exact terms `[P21-17]`, `[P21-18]` | Owner approved 2026-10-08, as amended by O-10 | A reader that ignores the flag uses a rounded amount or ratio |
 | D-15 | `[DEFAULT-15]` `run_id` in the 0002 tables has no foreign key to `run_context` | `[P21-20]`: a key would gate every P2.1 write behind conditions 9 and 10 | Owner approved 2026-10-08 | A manifest row whose run has no `run_context` row |
 | D-16 | `[DEFAULT-16]` A 5-minute bar is the deterministic aggregate of the minute bars received for its window; completion is exactly RULE-B12 | SPEC-P0.3 §6.2 fixes assembly from the `b` stream and does not state the aggregation | Owner approved 2026-10-08; the session-close check of §13.5 | A bar assembled across an unnoticed loss |
-| D-17 | `[DEFAULT-17]` P2.1's reference loader writes India tick sizes to `tick_size_regime` from the instruments dump, by rule IR-21 | `[P21-27]`: nothing else loads them, and SPEC-P0.2 names the dump as India's reference source | Owner approved 2026-10-09 that P2.1 loads them; the one-day row form awaits confirmation `[OQ-34]`; the dump's columns and publication time are `[OQ-25]` | Rule N10 denies every India order for want of a regime row |
+| D-17 | `[DEFAULT-17]` P2.1's reference loader writes India tick sizes to `tick_size_regime` from the instruments dump, by rule IR-21 | `[P21-27]`: nothing else loads them, and SPEC-P0.2 names the dump as India's reference source | Owner approved 2026-10-09 that P2.1 loads them (O-11) and, provisionally, the one-day row form (O-12); the dump's columns and publication time are `[OQ-25]`, unverified | Rule N10 denies every India order for want of a regime row |
 | A-14 | `trading.deny_mutation()` works unchanged on a table 0001 did not attach it to | Read from the migration text, not executed | T-16 | The 0002 triggers need their own function |
 | A-15 | SPEC-P0.2's facts are still true | Retrieved 2026-08-23 to 2026-08-26; this phase re-verified none | Re-read each cited page before the code phase | A field or limit changed under the adapter |
 
@@ -2627,7 +2629,7 @@ open. Nothing here is answered by this document.
 | OQ-22 | Massive: the Ticker Types value list; `primary_exchange` values; the Ticker Events endpoint and fields; the trades endpoint and fields; whether `v` is ever non-integer | Massive documentation | Massive's REST documentation for tickers, ticker types, ticker events and trades, under `massive.com/docs/rest/stocks/` (exact pages not retrieved by this phase) | **Blocks freeze** of the reference mapping tables and `Q-P1.1-6` method (b) |
 | OQ-23 | FMP: statement endpoints, field names, period and date fields, how restatements appear | FMP documentation | FMP's developer documentation under `site.financialmodelingprep.com/developer/docs` for income statement, balance sheet and cash flow (exact pages not retrieved by this phase) | **Blocks freeze** of the FMP adapter |
 | OQ-24 | FRED / ALFRED: parameters and fields of `series/observations` and `series/vintagedates`; how a missing observation is marked; where series notes are returned | FRED documentation | The `fred/series/observations`, `fred/series/vintagedates` and `fred/series` pages under `fred.stlouisfed.org/docs/api/fred/` (exact pages not retrieved by this phase) | **Blocks freeze** of the FRED adapter |
-| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone; whether the dump for a session is published before that session's order window (IR-21) | Kite Connect documentation | The historical-candle and instruments pages under `kite.trade/docs/connect/v3/` (exact pages not retrieved by this phase) | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures |
+| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone; whether the dump for a session is published before that session's order window (IR-21) | Kite Connect documentation | The historical-candle and instruments pages under `kite.trade/docs/connect/v3/` (exact pages not retrieved by this phase) | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures; IR-21's provisional form (O-12) |
 | OQ-26 | What is the source of `HALTED` and `SUSPENDED` status? | Owner; vendor documentation | Alpaca's `s` trading-status channel is excluded by SPEC-P0.3 §13.3 row 40; RULE-B12c refers to "the calendar" reporting a halt | P3.3; P2.1 writes neither status |
 | OQ-27 | How is an `exchange_session` row corrected after an unscheduled early close? | Owner / SPEC-P1.2 | The table has no bitemporal axis and `app_rw` cannot update it | Operational runbook, P6.4 |
 | OQ-28 | Which FIGI does `instrument.figi` hold? | SPEC-P1.1 / SPEC-P1.2 author | Both columns are documented only by name | Not blocking; the column stays `NULL` |
@@ -2636,7 +2638,7 @@ open. Nothing here is answered by this document.
 | OQ-31 | Which macro series does regime detection need? | P2.6 | ADR-04: "rates, yields, VIX, macro series" | P2.6; macro ingest is disabled until then |
 | OQ-32 | How is migration 0002 applied, and does `trading.deny_mutation()` serve tables beyond 0001's? | Owner / SPEC-P1.2 §11 | `scripts/apply-migration.sh`; X3R-C12 | P2.1 code |
 | OQ-33 | Should `ingest.yaml` be signed like `policy.yaml`? | Owner / P6.2 | SPEC-P1.3 §5 | Not blocking |
-| OQ-34 | Is IR-21's one-day row form accepted? The Owner approved "one row per symbol, a new row only when the value changes"; `[P21-28]` shows that form cannot be written by `app_rw` | Owner | Options: (a) one row per symbol per dump date, valid one day, as IR-21 states; (b) drop IR-21 and leave India tick loading to P3.1 or P3.2; (c) amend SPEC-P1.2 so a regime row can be closed | **Blocks freeze** of IR-21 only. India is unfunded |
+| OQ-34 | Does IR-21's one-day row form survive the answer to `[OQ-25]`? **Decided provisionally 2026-10-09 (O-12): one row per symbol per dump date, valid one day.** The Owner first approved "a new row only when the value changes"; `[P21-28]` shows that form cannot be written by `app_rw` | Owner, once `[OQ-25]` is answered | If the dump for a session is available before that session's order window: confirm the form. If it is not: choose between writing the next session's row from the previous dump, a pre-open reference run, removing IR-21 in favour of P3.1 or P3.2, or amending SPEC-P1.2 so a regime row can be closed | **Blocks freeze** of IR-21 only. India is unfunded |
 
 ## CONTRACTS EXPORTED
 
@@ -2696,4 +2698,4 @@ may rely on it until `[A-10]` is verified against one documented ticker-rename c
 
 ---
 
-# SPEC-P2.1-INGEST v0.3 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.4 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
