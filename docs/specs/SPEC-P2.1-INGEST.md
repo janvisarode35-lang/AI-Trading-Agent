@@ -1,10 +1,10 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.2
+version: 0.3
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
-produces: [migrations/0002_ingest.sql, config/ingest.yaml, src/provider/enums.py, src/provider/spec.py, src/data/, enum.IngestDataType, enum.ManifestStatus, enum.FailureKind, enum.GapKind, enum.GapState, enum.ReconKind, class.IngestConfig, class.IngestSet, class.BackfillJobRequest, class.DailyRunRequest, class.DailyRunResult, protocol.ReferenceProvider, protocol.CalendarProvider, protocol.DailyBarProvider, protocol.IntradayBarProvider, protocol.CorporateActionProvider, protocol.FundamentalsProvider, protocol.FilingsProvider, protocol.MacroProvider, protocol.FxProvider, protocol.NewsProvider, protocol.BarStream, table.ingest_manifest, table.ingest_checkpoint, table.ingest_failure, table.ingest_gap, table.ingest_reconciliation, table.provider_instrument_ref, table.raw_news_snapshot, table.macro_series, table.macro_observation, table.edgar_index_snapshot, table.edgar_filing, table.insider_filing_raw, table.corporate_action_terms, rule.IR-1..IR-20]
+produces: [migrations/0002_ingest.sql, config/ingest.yaml, src/provider/enums.py, src/provider/spec.py, src/data/, enum.IngestDataType, enum.ManifestStatus, enum.FailureKind, enum.GapKind, enum.GapState, enum.ReconKind, class.IngestConfig, class.IngestSet, class.BackfillJobRequest, class.DailyRunRequest, class.DailyRunResult, protocol.ReferenceProvider, protocol.CalendarProvider, protocol.DailyBarProvider, protocol.IntradayBarProvider, protocol.CorporateActionProvider, protocol.FundamentalsProvider, protocol.FilingsProvider, protocol.MacroProvider, protocol.FxProvider, protocol.NewsProvider, protocol.BarStream, table.ingest_manifest, table.ingest_checkpoint, table.ingest_failure, table.ingest_gap, table.ingest_reconciliation, table.provider_instrument_ref, table.raw_news_snapshot, table.macro_series, table.macro_observation, table.edgar_index_snapshot, table.edgar_filing, table.insider_filing_raw, table.corporate_action_terms, rule.IR-1..IR-21]
 ---
 
 # SPEC-P2.1 — Data Ingestion
@@ -56,7 +56,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | Closed | X5 condition 10 (X3R-M2). Not P2.1's |
 | P2.1 code that relies on `[DEFAULT-13]` | Closed | Requires `ASSUMPTION [A-10]` verified against one documented ticker-rename case (Owner decision O-9) |
 
-### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08)
+### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11: 2026-10-09)
 
 | # | Decision |
 |---|---|
@@ -66,10 +66,11 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | O-4 | Macro series and EDGAR (including Forms 3/4/5) are in scope. Quotes are out. Trades are limited to a one-month precision measurement and are not persisted |
 | O-5 | A P2.1-owned provider configuration file, loaded through the existing loader mechanisms. SPEC-P1.3 and `config/policy.yaml` are not touched |
 | O-6 | P2.1 owns the calendar and reference-data loaders. The calendar source stays an open question |
-| O-7 | The ten blocking-question defaults of §1.1 are approved |
+| O-7 | `[DEFAULT-1]` to `[DEFAULT-10]` are approved |
 | O-8 | `Q-P1.2-7` / X3R-M1, OQ-12 and OQ-13 are carried with condition 9 and are not resolved in P2.1 |
-| O-9 | `[DEFAULT-11]` to `[DEFAULT-16]` are approved as written in §1.2. `[DEFAULT-13]` is conditional: `[A-10]` must be verified against one documented ticker-rename case before any P2.1 code relies on it |
+| O-9 | `[DEFAULT-11]` to `[DEFAULT-16]` are approved. `[DEFAULT-13]` is conditional: `[A-10]` must be verified against one documented ticker-rename case before any P2.1 code relies on it |
 | O-10 | `[OQ-21]`: a P2.1-owned 0002 table of exact corporate-action terms keyed by `action_id` (`corporate_action_terms`, §22.12). The 0001 `corporate_action` row keeps its constrained, rounded representation. SPEC-P1.1 and SPEC-P1.2 are not re-opened. `[DEFAULT-14]` is amended to match |
+| O-11 | Block C correction: the blocking questions are presented as ten grouped questions with their options (§1). P2.1's reference loader writes India tick-size rows to `tick_size_regime` from the instruments dump (`[DEFAULT-17]`, rule IR-21). The wording approved was "a new row only when the value changes"; `[P21-28]` makes that unwritable, so IR-21 uses one-day rows, and that form is **not yet confirmed by the Owner** `[OQ-34]` |
 
 ### 0.4 Version history
 
@@ -77,42 +78,31 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 |---|---|---|
 | 0.1 | 2026-10-07 | First draft (`8efcf3e`) |
 | 0.2 | 2026-10-08 | Block B conformance correction and Owner decisions O-9 and O-10. Adds the request and result models (§12.3) and the field specifications (§28); replaces stub bodies with docstrings; lists `[DEFAULT-1]` to `[DEFAULT-16]` individually; writes out abbreviated lists; adds four validators that §28 relies on. Records the approval of `[DEFAULT-11]` to `[DEFAULT-16]` (O-9). Closes `[OQ-21]` (O-10): adds the table `corporate_action_terms` (§22.12) and changes `[DEFAULT-14]` for dividend amounts and split ratios from "reject" to "store exactly, 0001 row rounded and flagged" (§7.2, §8.2, §8.4). No other decision, default, rule or DDL constraint is changed |
+| 0.3 | 2026-10-09 | Block C conformance correction and Owner decision O-11. Section 1 is restructured into ten grouped blocking questions with an Options column; no approved default is changed or renumbered. Section 2 gains seven non-blocking categories. Every rule gains its edge case: IR-14, IR-19, and a new edge-case column in §13.1, §16.1, §16.2, §17, §18, §19.2, §19.5 and §23.1. Adds `[DEFAULT-17]` and rule IR-21 (India tick-size loading) and findings `[P21-26]` to `[P21-28]`. No DDL is changed |
 
 ---
 
 ## 1. BLOCKING QUESTIONS — and the defaults applied
 
-Block C: questions where two reasonable answers produce materially different designs.
+Block C: up to ten questions where two reasonable answers produce materially different designs,
+each with its options, the default applied, and what breaks if the default is wrong. Related
+questions are grouped as parts (a), (b), (c) of one question; every part keeps its own
+`[DEFAULT-n]` marker, and no marker was renumbered when the questions were grouped. In the
+Options column the options of each part are separated by semicolons. **Every default below has been
+approved by the Owner**; the last column gives the date and the default numbers it covers.
 
-### 1.1 Approved by the Owner on 2026-10-07
-
-| # | Question | Default applied | What breaks if the default is wrong |
-|---|---|---|---|
-| **1** | What is `ts` for a daily bar? `[P21-12]` | **`regular_close_utc` of the session** `[DEFAULT-1]`. 5-minute bars keep window start, per SPEC-P0.2 §0.6 | Window-start `ts` lets `bars_asof` return the day's close to a backtest asking as of that morning |
-| **2** | When is a daily bar written as final, given insert-only storage and P0.3 Q-7 open? | **Write at the scheduled ingest; re-fetch at the next session's ingest and compare** `[DEFAULT-2]`. A difference is recorded and fails the run, as SPEC-P0.3 §13.1 row 3 already requires | A bar revised by the vendor after we stored it stays wrong permanently |
-| **3** | Where does a second source's bar go, and who wins? | **The P2.1 reconciliation table. Only the SPEC-P0.2 primary writes a 0001 market-data table** `[DEFAULT-3]`. P2.2 owns the accept/quarantine verdict | A silent tiebreak, which rule N7 forbids |
-| **4** | Bar tolerance | **Price: the tick in force from `tick_size_regime`. Volume: a ratio, `ASSUMPTION [A-1]`** `[DEFAULT-4]` | Too tight: constant false alarms. Too loose: real errors pass |
-| **5** | How is rule N7 stored, given `[P21-3]` and `[P21-13]`? | **Evidence in the reconciliation table; the EDGAR-sourced row at the next `restatement_seq`; the FMP row's knowledge interval closed** `[DEFAULT-5]`. The conflation is carried as `[P21-13]` | A source correction is indistinguishable from an issuer restatement |
-| **6** | How is raw news kept away from LLM-bound code? | **Schema `trading`, explicit grants, module boundary** `[DEFAULT-6]`. Limitation, stated: one application role exists, so the isolation is not enforced by the database | Raw vendor text reachable by a prompt builder (`[CONST-4]`) |
-| **7** | What does downstream see when data is absent? | **No row, plus a manifest and failure records. No sentinel rows** `[DEFAULT-7]` | A missing bar read as "did not trade" |
-| **8** | Freshness for batch data | **Presence of the datum for the most recent completed sequenced session** `[DEFAULT-8]`. 600 s for the held-names stream stays as frozen | A 600 s rule applied to daily bars denies every decision the next morning |
-| **9** | India adapter testing with no India data spend | **Fixtures built from documented response shapes, labelled synthetic** `[DEFAULT-9]`. Recorded fixtures are required before India activation | A synthetic fixture can encode a wrong field. See `[P21-25]`: the shapes are not yet documented in any frozen spec |
-| **10** | Client libraries; who owns non-audit database writes | **`psycopg` 3, `httpx`, `redis`, `websockets`; P2.1 owns a write module for the tables it writes** `[DEFAULT-10]`. The audit writer stays with condition 9 | Later phases inherit the choice |
-
-### 1.2 Raised while drafting — approved by the Owner on 2026-10-08
-
-Each was forced by reconciling the design against the fact sheets and the DDL. Each is marked
-inline and repeated in ASSUMPTIONS. All six were approved by Owner decision O-9; default 14 is as
-amended by O-10.
-
-| # | Question | Default applied | What breaks if the default is wrong |
-|---|---|---|---|
-| **11** | Which instruments does a daily run ingest? | **An explicit ingest set supplied to the run: universe members as of the session, plus names flagged `retained_as_held`, plus any instruments the caller adds** `[DEFAULT-11]`, typed as `IngestSet` (§12.3). When no universe version exists, the caller must supply the set; there is no implicit "everything" | Reconstitution needs bars for names outside the universe. Who requests them is `[OQ-19]` |
-| **12** | Where does `disseminated_at` come from? | **Only from an EDGAR filing record, through the cutoff rule of §19.2. A fundamentals row with no matching filing record is not stored** `[DEFAULT-12]` | Rule N1 look-ahead if a vendor "filing date" is trusted. Cost: fundamentals with no EDGAR match are absent |
-| **13** | How is an instrument recognised across a ticker change? | **By `composite_figi` when present, `ASSUMPTION [A-10]`** `[DEFAULT-13]`. Conditional (O-9): no P2.1 code may rely on it until `[A-10]` is verified against one documented ticker-rename case | A renamed ticker becomes a delisting plus a new instrument: an identity break |
-| **14** | A vendor value more precise than the column that must hold it | **Prices, volumes and FX rates: rejected and recorded, never rounded. Dividend amounts and split ratios: the exact vendor terms are stored in `corporate_action_terms`, and the 0001 `corporate_action` row holds the value rounded half-up to its column, flagged as rounded** `[DEFAULT-14]`, as amended by O-10. `Price` and `Money` round silently (`[P21-16]`), so the check runs before either is constructed | A reader that takes a dividend amount or a ratio from the 0001 row while its flag is set uses a rounded value. §8.4 directs readers to the exact terms |
-| **15** | Does `ingest_manifest.run_id` reference `run_context`? | **No foreign key** `[DEFAULT-15]`. A `run_context` row needs a `config_version` row, which needs an audit event (`[P21-20]`); a key would silently widen the condition 9 gate to every P2.1 write | A manifest row whose run has no `run_context` row |
-| **16** | How is a 5-minute bar formed from the `b` minute-bar stream? | **Deterministic aggregation of the minute bars received for the window, as SPEC-P0.3 §6.2 fixes; completion is exactly RULE-B12** `[DEFAULT-16]` | A bar assembled across an unnoticed loss. §13.5 is the check that detects it |
+| # | Question | Options | Default applied | What breaks if the default is wrong | Approved |
+|---|---|---|---|---|---|
+| **1** | How is a bar timed, declared final and formed? (a) What is `ts` for a daily bar `[P21-12]`? (b) When is a daily bar written as final, given insert-only storage and P0.3 Q-7 open? (c) How is a 5-minute bar formed from the `b` minute-bar stream? | (a) Session open; session close; midnight UTC. (b) Trust the scheduled fetch; re-fetch at the next session's ingest and compare. (c) Aggregate the minute bars received; fetch each 5-minute bar from REST at the window end | (a) **`regular_close_utc` of the session** `[DEFAULT-1]`; 5-minute bars keep window start, per SPEC-P0.2 §0.6. (b) **Write at the scheduled ingest; re-fetch at the next session's ingest and compare** `[DEFAULT-2]`; a difference is recorded and fails the run, as SPEC-P0.3 §13.1 row 3 already requires. (c) **Deterministic aggregation of the minute bars received for the window, as SPEC-P0.3 §6.2 fixes; completion is exactly RULE-B12** `[DEFAULT-16]` | (a) Window-start `ts` lets `bars_asof` return the day's close to a backtest asking as of that morning. (b) A bar revised by the vendor after we stored it stays wrong permanently. (c) A bar assembled across an unnoticed loss; §13.5 is the check that detects it | 2026-10-07 (1, 2); 2026-10-08 (16) |
+| **2** | What happens to a vendor value that disagrees with another source, or does not fit its column? (a) Where does a second source's bar go, and who wins? (b) What is the bar tolerance? (c) How is rule N7 stored, given `[P21-3]` and `[P21-13]`? (d) A value more precise than the column that must hold it? | (a) A second row in `bar_daily`, which the one-row-per-key table cannot hold; the P2.1 reconciliation table. (b) Exact match; the tick for prices plus a ratio for volume. (c) Reuse the `restatement_seq`, which `[P21-13]` forbids; reconciliation rows plus an EDGAR row at the next sequence number. (d) Reject; round and record; keep the exact value in a P2.1 table | (a) **The P2.1 reconciliation table. Only the SPEC-P0.2 primary writes a 0001 market-data table** `[DEFAULT-3]`; P2.2 owns the accept/quarantine verdict. (b) **Price: the tick in force from `tick_size_regime`. Volume: a ratio, `ASSUMPTION [A-1]`** `[DEFAULT-4]`. (c) **Evidence in the reconciliation table; the EDGAR-sourced row at the next `restatement_seq`; the FMP row's knowledge interval closed** `[DEFAULT-5]`; the conflation is carried as `[P21-13]`. (d) **Prices, volumes and FX rates: rejected and recorded, never rounded. Dividend amounts and split ratios: the exact vendor terms are stored in `corporate_action_terms`, and the 0001 `corporate_action` row holds the value rounded half-up to its column, flagged as rounded** `[DEFAULT-14]`, as amended by O-10. `Price` and `Money` round silently (`[P21-16]`), so the check runs before either is constructed | (a) A silent tiebreak, which rule N7 forbids. (b) Too tight: constant false alarms. Too loose: real errors pass. (c) A source correction is indistinguishable from an issuer restatement. (d) A reader that takes a dividend amount or a ratio from the 0001 row while its flag is set uses a rounded value; §8.4 directs readers to the exact terms | 2026-10-07 (3, 4, 5); 2026-10-08 (14) |
+| **3** | How is raw news kept away from LLM-bound code? | Schema `trading` with explicit grants and a module boundary; a separate schema or a second database role | **Schema `trading`, explicit grants, module boundary** `[DEFAULT-6]`. Limitation, stated: one application role exists, so the isolation is not enforced by the database | Raw vendor text reachable by a prompt builder (`[CONST-4]`) | 2026-10-07 |
+| **4** | What does downstream see about data that is absent or old? (a) When data is absent? (b) Freshness for batch data? | (a) No row plus manifest and failure records; sentinel rows. (b) Seconds since `as_of`; presence of the datum for the most recent completed sequenced session | (a) **No row, plus a manifest and failure records. No sentinel rows** `[DEFAULT-7]`. (b) **Presence of the datum for the most recent completed sequenced session** `[DEFAULT-8]`; 600 s for the held-names stream stays as frozen | (a) A missing bar read as "did not trade". (b) A 600 s rule applied to daily bars denies every decision the next morning | 2026-10-07 (7, 8) |
+| **5** | How is the India adapter tested with no India data spend? | Fixtures built from documented response shapes, labelled synthetic; buy one month of data to record; defer the adapter | **Fixtures built from documented response shapes, labelled synthetic** `[DEFAULT-9]`. Recorded fixtures are required before India activation | A synthetic fixture can encode a wrong field. See `[P21-25]`: the shapes are not yet documented in any frozen spec | 2026-10-07 |
+| **6** | How does P2.1 reach its stores? (a) Which client libraries, and who owns non-audit database writes? (b) Does `ingest_manifest.run_id` reference `run_context`? | (a) Named libraries; the standard library only. (b) A foreign key; no foreign key | (a) **`psycopg` 3, `httpx`, `redis`, `websockets`; P2.1 owns a write module for the tables it writes** `[DEFAULT-10]`; the audit writer stays with condition 9. (b) **No foreign key** `[DEFAULT-15]`: a `run_context` row needs a `config_version` row, which needs an audit event (`[P21-20]`); a key would silently widen the condition 9 gate to every P2.1 write | (a) Later phases inherit the choice. (b) A manifest row whose run has no `run_context` row | 2026-10-07 (10); 2026-10-08 (15) |
+| **7** | Which instruments does a daily run ingest? | An explicit set supplied by the caller; every active instrument of an allowed type; universe members resolved inside the run | **An explicit ingest set supplied to the run: universe members as of the session, plus names flagged `retained_as_held`, plus any instruments the caller adds** `[DEFAULT-11]`, typed as `IngestSet` (§12.3). When no universe version exists, the caller must supply the set; there is no implicit "everything" | Reconstitution needs bars for names outside the universe. Who requests them is `[OQ-19]` | 2026-10-08 |
+| **8** | Where does `disseminated_at` come from? | An EDGAR filing record only; a vendor filing or acceptance date; our own first-retrieval time | **Only from an EDGAR filing record, through the cutoff rule of §19.2. A fundamentals row with no matching filing record is not stored** `[DEFAULT-12]` | Rule N1 look-ahead if a vendor "filing date" is trusted. Cost: fundamentals with no EDGAR match are absent | 2026-10-08 |
+| **9** | How is an instrument recognised across a ticker change? | `composite_figi`; exchange and ticker only; block the reference loader until the vendor's ticker-events data is documented | **By `composite_figi` when present, `ASSUMPTION [A-10]`** `[DEFAULT-13]`. Conditional (O-9): no P2.1 code may rely on it until `[A-10]` is verified against one documented ticker-rename case | A renamed ticker becomes a delisting plus a new instrument: an identity break | 2026-10-08, conditional |
+| **10** | Who loads India tick sizes `[P21-27]`? | P2.1's reference loader writes `tick_size_regime` rows from the instruments dump; leave it to P3.1 or P3.2 | **P2.1's reference loader, by rule IR-21** `[DEFAULT-17]` | With no loader, rule N10 denies every India order for want of a regime row. India is unfunded, so nothing breaks before activation | 2026-10-09: that P2.1 loads them. The one-day row form of IR-21 awaits Owner confirmation `[OQ-34]` |
 
 ---
 
@@ -148,6 +138,13 @@ amended by O-10.
 | News identity | `(provider_id, vendor_id, revision_seq)`. Alpaca's `id` is stored as text |
 | Unknown JSON field in a vendor response | Ignored for storage, counted, and reported in the manifest's `detail`. A **missing** mapped field is a `SCHEMA_VIOLATION` |
 | 0002 mutability | Every 0002 table is append-only. Corrections are new rows. No `UPDATE` grant is requested |
+| Rounding mode | The only rounding P2.1 performs is half-up, and only into the two 0001 corporate-action columns (§8.2), with the exact value stored beside it. Every other value is rejected or kept exact |
+| Tick size | Read from `tick_size_regime` for the bar's `trading_date`. P2.1 uses it only as the price tolerance (§14.2) and never rounds a price to a tick. India rows are loaded by IR-21 |
+| Lot size | India only: the instruments dump's `lot_size` goes to `instrument.lot_size` and `instrument.qty_increment`. US `qty_increment` is 1 and `lot_size` is `NULL` `[FROZEN P1.1 DEFAULT-3]` |
+| Unit of a percentage | Every ratio in `ingest.yaml` is a fraction: `volume_ratio = 0.05` means 5%. This is the convention SPEC-P0.3 §15.1 fixed for `_pct` keys; no P2.1 key holds a percent |
+| DST | Never computed. Every session boundary is a UTC instant read from an `exchange_session` row; the first session after a change simply carries different instants (§11.2, test T-5) |
+| Half-days | One daily bar is expected, as on a full day. Five-minute windows stop at the early close: 42, not 78. Nothing after the close is expected and nothing is a gap (§11) |
+| Integer or decimal | Money and prices are `Decimal`. Volume, trade count and every manifest count are integers. Exact corporate-action terms are unconstrained `numeric`. No float is accepted anywhere |
 
 ---
 
@@ -625,6 +622,7 @@ split or a news item naming a symbol with no mapping is `UNKNOWN_SYMBOL`; it nev
 | **IR-11** | A change to an instrument fact closes the open row (`knowledge_to`) and inserts a new one. A changed ticker closes the open `symbol_mapping` (`valid_to` = the first date the new ticker is seen, exclusive bound) and opens another for the **same** `instrument_id` | Both statements run in one transaction. The `EXCLUDE` constraints of 0001 reject an overlap; that rejection is `AMBIGUOUS_SYMBOL` and the whole reference run fails |
 | **IR-12** | A vendor `security_type` or `primary_exchange` with no entry in the configured mapping table creates **no** instrument and is recorded (`UNKNOWN_INSTRUMENT_TYPE`) | Deny-by-default `[FROZEN P1.1 §5.3, ADR-05]`. Venues outside `Exchange` cannot be represented at all `[P21-21]`; they are counted in the manifest's `skipped_count`, not as failures, when the mapping table lists them as `EXCLUDED` |
 | **IR-13** | `delisted_utc` present → `status = DELISTED`, `delisted_on` = its UTC date. The row is never deleted (invariant I7) | `final_price` is left `NULL`. This phase does not derive it from the last bar |
+| **IR-21** | For an India instrument, the instruments dump's `tick_size` is written to `tick_size_regime` as one row per symbol per dump date: `market = IN`, the instrument's symbol, `effective_from = as_of_date`, `effective_to = as_of_date + 1 day`, the dump's `tick_size`, `min_price = 0`, and a `source` naming the dump and its date `[DEFAULT-17]` | The row is bounded to one day because a regime row cannot be superseded: `app_rw` has no `UPDATE` on the table and its `EXCLUDE` constraint rejects an overlapping open-ended row `[P21-28]`. A date with no loaded dump has no row, so rule N10 denies orders in that symbol on that date: fail-closed. Whether the dump is published before the India order window is `[OQ-25]`. Re-loading a date with the same value is a duplicate; with a different value it is `DUPLICATE_CONFLICT`. P2.1 writes no US row: the seeded `*` row stands |
 
 Fields with **no verified source** are written `NULL` and never guessed: `issuer_id`, `isin`,
 `cusip`, `figi` (US), `final_price`. `HALTED` and `SUSPENDED` have no source in any frozen fact
@@ -638,7 +636,7 @@ because `instrument` has no column for a CIK, a share-class FIGI or a Zerodha in
 
 | # | Rule | Edge case |
 |---|---|---|
-| **IR-14** | One `exchange_session` row per `(exchange, trading_date)` on which the exchange is open, holding explicit UTC instants `[FROZEN P1.1 §4.2]`. A closed date has no row | — |
+| **IR-14** | One `exchange_session` row per `(exchange, trading_date)` on which the exchange is open, holding explicit UTC instants `[FROZEN P1.1 §4.2]`. A closed date has no row | A date that becomes a holiday after its row was loaded: the row stays (IR-17), ingest expects bars that never come, and the gaps stay `OPEN` until an operator resolves the row `[OQ-27]`. Code never removes a session row |
 | **IR-15** | Every calendar load writes an `ingest_manifest` row with `data_type = CALENDAR` and `coverage_from` / `coverage_to`. **A date with no session row means "closed" only inside a recorded coverage range.** Outside it, the date is `MISSING_SESSION` | This is what separates a holiday from a calendar that was never loaded `[P21-19]`. A scheduled run on a covered date with no row exits zero with manifest status `NO_SESSION` |
 | **IR-16** | `settlement_date` is computed by the loader from `calendar.{market}.settlement_cycle_sessions` and the loaded sessions | The cycle value is `1` for both markets, **carried** from SPEC-P1.1 assumption A11 / `Q-P1.1-1`, unverified. A settlement date that would fall outside the coverage range fails the load; it is not approximated |
 | **IR-17** | A session row is immutable once a bar has been stored against it | A vendor that later changes a session's close (an unscheduled early close) produces a `DUPLICATE_CONFLICT` failure for the calendar and stops the market's ingest. `exchange_session` has no bitemporal axis and `app_rw` cannot update it; resolving the row is a manual `trading_owner` action `[OQ-27]` |
@@ -776,6 +774,7 @@ table is therefore the mapping of record for what P2.1 writes. Neither side is c
 | `fx_rate.*` | `FxRate` fields of the same name |
 | `corporate_action_terms.*` | The `WireSplit` or `WireDividend` the action was built from, unrounded; `action_id` and `knowledge_from` from the `corporate_action` row written in the same transaction |
 | `instrument.*`, `symbol_mapping.*`, `exchange_session.*` | Fields of the same name; bitemporal columns as above |
+| `tick_size_regime.*` (India rows only) | `WireInstrument.tick_size` and `as_of_date`, by rule IR-21. `min_price` is 0; `source` names the dump and its date |
 
 `FundamentalsSnapshot.as_of` (inherited from `_MarketDatum`) is set to `disseminated_at`. It has
 no column.
@@ -854,7 +853,7 @@ dates and the exact amount are stored and that `ex_date` is the vendor's ex-divi
 
 | # | Rule | Edge case |
 |---|---|---|
-| **IR-19** | **Insert-only.** Every write to a uni-temporal table is an `INSERT` with `ON CONFLICT DO NOTHING` on its key, followed by a read of the stored row when the insert affected nothing | — |
+| **IR-19** | **Insert-only.** Every write to a uni-temporal table is an `INSERT` with `ON CONFLICT DO NOTHING` on its key, followed by a read of the stored row when the insert affected nothing | Two runs inserting the same key at once: one inserts; the other's insert affects nothing, so it reads the stored row and classifies it as duplicate or conflict like any other. No lock is taken and no row is overwritten |
 | — | Stored row identical on every fact column (everything except `retrieved_at`): a duplicate. Counted in `duplicate_count`; nothing written | A replayed backfill partition is entirely duplicates and succeeds |
 | — | Stored row **different**: `DUPLICATE_CONFLICT` failure plus an `ingest_reconciliation` row of kind `REVISION`. The stored row is not changed and cannot be | For `fx_rate` this is ADR-15 §5 working as designed: a past rate is never corrected |
 | **IR-20** | Only the SPEC-P0.2 `PRIMARY` provider for a capability writes a 0001 market-data table `[DEFAULT-3]` | Rule N7's EDGAR row in `fundamentals_snapshot` is the one exception, by SPEC-P0.2 decision 5: `SEC_EDGAR` is `AUTHORITY` |
@@ -973,7 +972,7 @@ Scheduled at `schedule.{market}.ingest_utc` `[FROZEN policy.yaml]`. One run per 
 | 7 | Fetch and store daily bars for *D* | Per record: §7.1. Vendor unreachable: `FAILED`, exit non-zero `[FROZEN P0.3 §13.1 row 1]` |
 | 8 | Completeness: expected (§11.1) against present | Any absent expected bar: gap rows, status `INCOMPLETE`, exit non-zero `[FROZEN P0.3 §13.1 row 2]` — see `[P21-22]` |
 | 9 | Fundamentals for the instruments scheduled this session; EDGAR; macro; FX | Each has its own manifest row and status. A failure in one does not undo another; the exit code is non-zero if any is not `COMPLETE` |
-| 10 | Write manifest rows; emit audit events (§20, gated) | — |
+| 10 | Write manifest rows; emit audit events (§20, gated) | A manifest insert that fails is `DB_WRITE_FAILED`: exit 1. The absence of a `COMPLETE` row for the run is then the durable signal (§15.2) |
 
 The whole run is bounded by the `INGEST` stage budget, 1800 s, `on_breach: ABORT` `[FROZEN]`. On
 breach the run stops issuing requests, writes `STAGE_BUDGET_EXCEEDED`, marks every unfinished data
@@ -1098,15 +1097,15 @@ adapter is exercised only against recorded or synthetic frames.
 
 ### 13.1 Connection
 
-| Aspect | Rule |
-|---|---|
-| Endpoint | `wss://stream.data.alpaca.markets/v2/sip` `[V-P0.2 §3.2]`. Never `v2/iex` (rule N6) |
-| Authentication | In-band `{"action":"auth","key":"<key id>","secret":"<secret key>"}`; success is `[{"T":"success","msg":"authenticated"}]` `[V-P0.2]`. Credentials from Vault references |
-| Subscription | Channel `b` only `[FROZEN P0.3 §13.3 row 40]` |
-| Connections | One per process. Error `406` (connection limit) means another instance holds the socket: this instance exits; it does not retry and evict `[FROZEN P0.3 §13.2 row 24]` |
-| Other error frames | `401`, `402`, `404`, `409`: `CREDENTIAL_INVALID`, no reconnect. `405` (symbol limit): `STREAM_ERROR`, no reconnect. `407` (slow client), `500`, or any close without an error frame: reconnect |
-| Liveness | WebSocket protocol ping every `stream.ping_interval_seconds`; no pong within `stream.ping_timeout_seconds` is a disconnect. Both `ASSUMPTION [A-7]`. SPEC-P0.2 records no application-level heartbeat for this stream |
-| Reconnect | Exponential backoff with full jitter, base `stream.reconnect_base_seconds`, cap `stream.reconnect_cap_seconds`, `ASSUMPTION [A-7]`. Unbounded attempts inside session hours; none outside |
+| Aspect | Rule | Edge case |
+|---|---|---|
+| Endpoint | `wss://stream.data.alpaca.markets/v2/sip` `[V-P0.2 §3.2]`. Never `v2/iex` (rule N6) | `409` (insufficient subscription) on `v2/sip`: the adapter stops with `CREDENTIAL_INVALID`. It never falls back to `v2/iex` or `v2/delayed_sip` |
+| Authentication | In-band `{"action":"auth","key":"<key id>","secret":"<secret key>"}`; success is `[{"T":"success","msg":"authenticated"}]` `[V-P0.2]`. Credentials from Vault references | No success frame within `stream.ping_timeout_seconds` of sending the auth frame is a failed connect and is retried under the Reconnect rule. `402` is not retried |
+| Subscription | Channel `b` only `[FROZEN P0.3 §13.3 row 40]` | An empty held set opens no connection. A bar for a symbol that was not subscribed is discarded and counted, never stored |
+| Connections | One per process. Error `406` (connection limit) means another instance holds the socket: this instance exits; it does not retry and evict `[FROZEN P0.3 §13.2 row 24]` | `406` at any point, including after a successful subscribe, exits this instance |
+| Other error frames | `401`, `402`, `404`, `409`: `CREDENTIAL_INVALID`, no reconnect. `405` (symbol limit): `STREAM_ERROR`, no reconnect. `407` (slow client), `500`, or any close without an error frame: reconnect | An error code not in this list is `STREAM_ERROR` with no reconnect: an unknown code is not assumed transient |
+| Liveness | WebSocket protocol ping every `stream.ping_interval_seconds`; no pong within `stream.ping_timeout_seconds` is a disconnect. Both `ASSUMPTION [A-7]`. SPEC-P0.2 records no application-level heartbeat for this stream | A connection that still delivers bars but returns no pong is treated as disconnected: liveness is judged by the pong alone, so it does not depend on how actively the held names trade |
+| Reconnect | Exponential backoff with full jitter, base `stream.reconnect_base_seconds`, cap `stream.reconnect_cap_seconds`, `ASSUMPTION [A-7]`. Unbounded attempts inside session hours; none outside | A wait that would end after `regular_close_utc` is abandoned; the remaining windows become gaps and the session-close check (§13.5) handles them. Before `regular_open_utc` no connection is attempted |
 
 ### 13.2 Disconnect and rule N5
 
@@ -1217,9 +1216,9 @@ instrument until that instrument's gap rows have a resolution or a `StreamGapNot
 
 | Field | Tolerance | Source |
 |---|---|---|
-| `open`, `high`, `low`, `close` | `abs(primary − other) ≤ tick`, where `tick` is the `tick_size_regime` row in force for `(market, symbol or '*', trading_date)` | `[FROZEN P0.2 §10.3]` table. No row: the comparison is `DISAGREE` and `MISSING_TICK_REGIME` is recorded. Never a default of 0.01 |
+| `open`, `high`, `low`, `close` | `abs(primary − other) ≤ tick`, where `tick` is the `tick_size_regime` row in force for `(market, symbol or '*', trading_date)` | `[FROZEN P0.2 §10.3]` table. No row: the comparison is `DISAGREE` and `MISSING_TICK_REGIME` is recorded. Never a default of 0.01. A symbol-specific row and a `*` row that both cover the date: also `DISAGREE` with `MISSING_TICK_REGIME`, because no frozen spec says which applies `[P21-26]` |
 | `volume` | `abs(primary − other) ≤ reconciliation.volume_ratio × max(primary, other)` | `volume_ratio = 0.05`, **`ASSUMPTION [A-1]`**, to be replaced by a measurement |
-| `REVISION` of any field | Exact. The same provider re-asked must return the same bar | — |
+| `REVISION` of any field | Exact. The same provider re-asked must return the same bar | By definition of a revision: one provider, one key, two answers |
 | Fundamentals metric | `[OQ-10]` — "materially" is not defined by SPEC-P0.2 | Until it closes, every numeric difference is `DISAGREE` |
 
 ### 14.3 Outcome and authority
@@ -1329,28 +1328,28 @@ This phase **states the fact**; `DATA-001`, P2.2 and P2.9 decide what a stale fa
 be the most recent session of the instrument's exchange with `counts_for_sequencing = true` and
 `regular_close_utc ≤ now`.
 
-| Data type | Fresh when | Source of the threshold |
-|---|---|---|
-| `BAR_DAILY`, `REFERENCE`, `CORPORATE_ACTION` | The manifest for *S* is `COMPLETE` | `[DEFAULT-8]` |
-| `FUNDAMENTALS`, `EDGAR_FILING`, `INSIDER_FILING`, `MACRO` | The manifest for *S* is `COMPLETE` | `[DEFAULT-8]`. A manifest says the scheduled fetch succeeded; it does not say a new filing or observation existed |
-| `FX_RATE` | An `fx_rate` row exists for the accounting date | `[FROZEN FX-001, I10]` |
-| `CALENDAR` | Coverage extends at least `calendar.min_forward_coverage_sessions` sequenced sessions past *S* | `ASSUMPTION [A-8]` |
-| `BAR_5M` | 600 s since the last received message for the symbol | `[FROZEN P0.3 §15.1; policy.yaml stale_bar_critical_seconds]`. Evaluated by P3.3, not here |
-| `RAW_NEWS` | The last successful poll ended within `2 × news.poll_interval_seconds` | `ASSUMPTION [A-4]` |
+| Data type | Fresh when | Source of the threshold | Edge case |
+|---|---|---|---|
+| `BAR_DAILY`, `REFERENCE`, `CORPORATE_ACTION` | The manifest for *S* is `COMPLETE` | `[DEFAULT-8]` | A later rerun that writes `FAILED` or `INCOMPLETE` after a `COMPLETE` makes the type not fresh: the latest row wins. A `SPECIAL` session is never *S*. No manifest row for *S* is not fresh, whatever older rows say |
+| `FUNDAMENTALS`, `EDGAR_FILING`, `INSIDER_FILING`, `MACRO` | The manifest for *S* is `COMPLETE` | `[DEFAULT-8]`. A manifest says the scheduled fetch succeeded; it does not say a new filing or observation existed | A session on which nothing was scheduled still writes a manifest with `expected_count = 0`; that is `COMPLETE` and fresh. Macro ingest disabled in config writes no manifest and is never fresh |
+| `FX_RATE` | An `fx_rate` row exists for the accounting date | `[FROZEN FX-001, I10]` | The accounting date is the UTC date on which the session closes (ADR-15 §7). A date on which the source publishes no rate has no row and is not fresh; the previous date's rate is never used |
+| `CALENDAR` | Coverage extends at least `calendar.min_forward_coverage_sessions` sequenced sessions past *S* | `ASSUMPTION [A-8]` | Coverage is counted in sequenced sessions actually loaded, so a range that ends in a holiday run covers fewer sessions than its calendar days suggest |
+| `BAR_5M` | 600 s since the last received message for the symbol | `[FROZEN P0.3 §15.1; policy.yaml stale_bar_critical_seconds]`. Evaluated by P3.3, not here | Suspended while the symbol is halted (RULE-B12c). P2.1 supplies only the receive time of the last message; P3.3 runs the timer |
+| `RAW_NEWS` | The last successful poll ended within `2 × news.poll_interval_seconds` | `ASSUMPTION [A-4]` | A poll that returned no items is a successful poll. A poll that failed part-way through its pages is not, and the poll end time does not advance |
 
 The research summary's "reject data older than 5 s" and `DATA-001`'s 600 s are different numbers
 for what the summary treats as one rule (X3R-C6, open). Neither is applied to batch data here.
 
 ### 16.2 Clock
 
-| Rule | Detail |
-|---|---|
-| The host must run a time-synchronisation daemon | A P6.4 deployment requirement, stated here because every `retrieved_at` depends on it |
-| Pre-flight offset check | At the start of every run and every stream session, query the configured time servers by SNTP and compute the offset. `abs(offset) > clock.max_skew_seconds` on the median of the answers, or fewer than `clock.min_servers_answering` answers: `CLOCK_SKEW`, exit code 2 `[FROZEN P0.3 §13.1 row 20]` |
-| `clock.max_skew_seconds` | `1`, **`ASSUMPTION [A-2]`**. It must be below the 3 s delivery budget of SPEC-P0.3 §6.2 stage 1 or that budget cannot be measured |
-| Time servers | Listed in `ingest.yaml`. No default is supplied: an empty list fails config validation |
-| Skew in comparisons | A vendor timestamp is "in the future" only when it exceeds `retrieved_at + clock.max_skew_seconds` (§7.1 step 2). Staleness against a session close uses the calendar instant, not a vendor clock |
-| The stream | The offset check repeats every `clock.recheck_seconds` while the stream is up; a breach closes the stream with `CLOCK_SKEW` |
+| Rule | Detail | Edge case |
+|---|---|---|
+| The host must run a time-synchronisation daemon | A P6.4 deployment requirement, stated here because every `retrieved_at` depends on it | A daemon that is running but not synchronised is caught only by the offset check below; the daemon's own status is not trusted |
+| Pre-flight offset check | At the start of every run and every stream session, query the configured time servers by SNTP and compute the offset. `abs(offset) > clock.max_skew_seconds` on the median of the answers, or fewer than `clock.min_servers_answering` answers: `CLOCK_SKEW`, exit code 2 `[FROZEN P0.3 §13.1 row 20]` | An offset exactly equal to the limit passes: the comparison is `>`. Answers on both sides of zero are judged by their median, not their spread. Exactly `clock.min_servers_answering` answers is enough |
+| `clock.max_skew_seconds` | `1`, **`ASSUMPTION [A-2]`**. It must be below the 3 s delivery budget of SPEC-P0.3 §6.2 stage 1 or that budget cannot be measured | Config validation rejects a value of 3 or more; it does not clamp it |
+| Time servers | Listed in `ingest.yaml`. No default is supplied: an empty list fails config validation | A server that does not answer within `client.request_timeout_seconds` counts as not answering |
+| Skew in comparisons | A vendor timestamp is "in the future" only when it exceeds `retrieved_at + clock.max_skew_seconds` (§7.1 step 2). Staleness against a session close uses the calendar instant, not a vendor clock | A vendor timestamp exactly at `retrieved_at + clock.max_skew_seconds` is accepted |
+| The stream | The offset check repeats every `clock.recheck_seconds` while the stream is up; a breach closes the stream with `CLOCK_SKEW` | A breach found by a recheck closes the stream. Bars already committed stay; every window from the breach to the close becomes a `STREAM_DISCONNECT` gap |
 
 ---
 
@@ -1368,14 +1367,14 @@ prices, rates and fundamentals are never cached by this phase. Three read-throug
 `{cfg}` is the first 12 hex characters of the ingest config hash, so a config change orphans every
 old key. All three TTLs are `ASSUMPTION [A-9]`.
 
-| Rule | Detail |
-|---|---|
-| A miss | Reads the database and repopulates. **A miss never yields a default, an empty set or "open"** |
-| A negative result | Not cached, except `CLOSED`, which is a positive statement backed by coverage (IR-15) |
-| Invalidation | The writer deletes the affected keys **after** its transaction commits. A crash between the two leaves a stale key for at most its TTL; the three cached values are tolerant of that by construction — the session row is immutable (IR-17), a symbol reference changes only with a reference load, and a manifest status is re-read by any consumer that acts on it |
-| Stampede guard | Before repopulating, `SET {key}:lock <token> NX PX 5000`. The holder reads the database and sets the key. A non-holder waits up to 5 s, polling the key; if it is still absent it reads the database itself. The database is the truth, so the guard bounds load; correctness does not depend on it |
-| Redis unreachable | The run aborts: `CACHE_UNREACHABLE`, exit code 2 `[FROZEN P0.3 §13.1 row 17]` |
-| Address | A Vault reference in `ingest.yaml`. `INFRA_ENV_ALLOWLIST` has no Redis entry and is frozen `[P21-15]` |
+| Rule | Detail | Edge case |
+|---|---|---|
+| A miss | Reads the database and repopulates. **A miss never yields a default, an empty set or "open"** | A TTL that expires between a read and its use changes nothing: no cached value is a market value |
+| A negative result | Not cached, except `CLOSED`, which is a positive statement backed by coverage (IR-15) | `CLOSED` is written only for a date inside recorded coverage. For a date outside it nothing is cached and the lookup raises `MISSING_SESSION` every time |
+| Invalidation | The writer deletes the affected keys **after** its transaction commits. A crash between the two leaves a stale key for at most its TTL; the three cached values are tolerant of that by construction — the session row is immutable (IR-17), a symbol reference changes only with a reference load, and a manifest status is re-read by any consumer that acts on it | A Redis restart that drops every key is a run of misses, not an error |
+| Stampede guard | Before repopulating, `SET {key}:lock <token> NX PX 5000`. The holder reads the database and sets the key. A non-holder waits up to 5 s, polling the key; if it is still absent it reads the database itself. The database is the truth, so the guard bounds load; correctness does not depend on it | A lock holder that dies leaves the lock to expire; waiters then read the database themselves. Two holders after an expiry write the same value |
+| Redis unreachable | The run aborts: `CACHE_UNREACHABLE`, exit code 2 `[FROZEN P0.3 §13.1 row 17]` | Unreachable at pre-flight: exit 2, nothing fetched. Becoming unreachable mid-run: the run stops at the next cache call, rows already committed stay, and unfinished data types are `FAILED` |
+| Address | A Vault reference in `ingest.yaml`. `INFRA_ENV_ALLOWLIST` has no Redis entry and is frozen `[P21-15]` | A reference that resolves to an empty value fails pre-flight as `CACHE_UNREACHABLE` |
 
 ---
 
@@ -1385,16 +1384,16 @@ old key. All three TTLs are `ASSUMPTION [A-9]`.
 not sanitise, does not write `news_item` or `news_instrument`, does not resolve news symbols to
 instruments, and has no opinion on what a `NewsItem` means.
 
-| Rule | Detail |
-|---|---|
-| Poll | `NewsProvider.fetch_news` over `[last successful poll end − news.revision_lookback_seconds, now]`, every `news.poll_interval_seconds`. Both `ASSUMPTION [A-4]` |
-| First sighting | `revision_seq = 1`, `first_seen_at = retrieved_at`. Headline, summary and body are stored exactly as received (rule N16) |
-| A later change | Detected when `vendor_updated_at` differs from the latest stored revision's, **or** `content_sha256` differs. A new row, `revision_seq` + 1. Never an overwrite |
-| `content_sha256` | SHA-256 over the UTF-8 bytes of `headline`, `summary` and `content`, each followed by one `0x00` byte, in that order; an absent field contributes only its `0x00` |
-| Unchanged | No write |
-| Oversize body | A `content` longer than 1,000,000 characters is `SCHEMA_VIOLATION` and is **not** truncated and not stored, `ASSUMPTION [A-5]` |
-| No backfill | §10.1 |
-| Untrusted | Every text column is untrusted DATA (rule N14). No code in `src/data/` interprets it, renders it, or passes it to anything but the insert |
+| Rule | Detail | Edge case |
+|---|---|---|
+| Poll | `NewsProvider.fetch_news` over `[last successful poll end − news.revision_lookback_seconds, now]`, every `news.poll_interval_seconds`. Both `ASSUMPTION [A-4]` | The first poll ever has no previous end and starts at `now − news.revision_lookback_seconds`. Two polls that return the same unchanged item write one row |
+| First sighting | `revision_seq = 1`, `first_seen_at = retrieved_at`. Headline, summary and body are stored exactly as received (rule N16) | An item first seen days after its `created_at` still gets `first_seen_at = retrieved_at`. The vendor's `created_at` is stored and is never used as the first-seen time |
+| A later change | Detected when `vendor_updated_at` differs from the latest stored revision's, **or** `content_sha256` differs. A new row, `revision_seq` + 1. Never an overwrite | Any difference in `vendor_updated_at`, forwards or backwards, is a revision even when the text is identical: the vendor said it changed. A change to `symbols`, `author`, `source` or `url` alone, with `vendor_updated_at` unchanged, is not detected |
+| `content_sha256` | SHA-256 over the UTF-8 bytes of `headline`, `summary` and `content`, each followed by one `0x00` byte, in that order; an absent field contributes only its `0x00` | An absent field and an empty string hash identically. The stored column keeps the distinction: `NULL` against an empty string |
+| Unchanged | No write | Unchanged means both `vendor_updated_at` and `content_sha256` equal the latest stored revision's |
+| Oversize body | A `content` longer than 1,000,000 characters is `SCHEMA_VIOLATION` and is **not** truncated and not stored, `ASSUMPTION [A-5]` | Exactly 1,000,000 characters is accepted. A rejected item is returned again by later polls inside the look-back and is rejected each time, with one failure row per poll |
+| No backfill | §10.1 | An item published before collection began and first returned by a live poll is stored, with a truthful `first_seen_at` |
+| Untrusted | Every text column is untrusted DATA (rule N14). No code in `src/data/` interprets it, renders it, or passes it to anything but the insert | Vendor text is never copied into `ingest_failure.detail` or a log line; a failure about a news item names its `vendor_id` and hashes only |
 
 **Hand-off contract to P4.1** — what P2.1 guarantees and nothing more: the row for
 `(provider_id, vendor_id, revision_seq = 1)` carries the text as first received and a truthful
@@ -1422,12 +1421,12 @@ stored snapshot writes nothing.
 
 `disseminated_at` is computed, never taken from a vendor `[DEFAULT-12]`:
 
-| Form | `accepted_at` in Eastern Time | `disseminated_at` |
-|---|---|---|
-| Any form except 3, 4, 5 | At or before 17:30 on an EDGAR business day | `accepted_at` |
-| Any form except 3, 4, 5 | After 17:30 | 06:00 Eastern on the next EDGAR business day, `ASSUMPTION [A-13]` |
-| Forms 3, 4, 5 | At or before 22:00 | `accepted_at` |
-| Forms 3, 4, 5 | After 22:00 | 06:00 Eastern on the next EDGAR business day, `ASSUMPTION [A-13]` |
+| Form | `accepted_at` in Eastern Time | `disseminated_at` | Edge case |
+|---|---|---|---|
+| Any form except 3, 4, 5 | At or before 17:30 on an EDGAR business day | `accepted_at` | Exactly 17:30:00 is at or before. Eastern Time is resolved per date from the IANA zone, so the cutoff is 21:30 or 22:30 UTC by season. A form type the adapter cannot classify as 3, 4 or 5 uses this, the earlier cutoff |
+| Any form except 3, 4, 5 | After 17:30 | 06:00 Eastern on the next EDGAR business day, `ASSUMPTION [A-13]` | Across a weekend, Friday evening goes to Monday |
+| Forms 3, 4, 5 | At or before 22:00 | `accepted_at` | Exactly 22:00:00 is at or before |
+| Forms 3, 4, 5 | After 22:00 | 06:00 Eastern on the next EDGAR business day, `ASSUMPTION [A-13]` | An `accepted_at` outside EDGAR's stated acceptance hours is stored and treated as after the cutoff; it is not rejected |
 
 17:30 and 22:00 are `[V-P0.2 §3.8]`, as is "disseminated the next business day". **The instant on
 that day is not recorded.** 06:00 Eastern is the hour EDGAR opens ("Accepts filings Mon–Fri
@@ -1458,14 +1457,14 @@ document is untrusted DATA under the same boundary as raw news.
 
 ### 19.5 Macro — rule N3
 
-| Rule | Detail |
-|---|---|
-| Series | Only those in `macro.series_allowlist`. **The list is P2.6's requirement and is empty in this spec** `[OQ-31]`. `macro.enabled: true` with an empty list fails config validation |
-| Copyright screen | Before a series is first ingested, `fetch_series_notes` is read; a series whose notes contain the word "Copyright" is recorded in `macro_series` with `third_party_copyright = true` and **is not ingested** `[V-P0.2 §3.9]` |
-| Vintage | Every observation is stored with its `vintage_date`. A revised value is a new row. A reader takes, per `observation_date`, the row with the greatest `vintage_date` at or before its decision date and `retrieved_at` at or before its knowledge cutoff |
-| A non-numeric vendor value | Not stored; counted in `skipped_count`. How FRED marks a missing observation is `[OQ-24]` |
-| Throttling | Adaptive backoff on `429` and `423`; no request budget (rule N8) |
-| Attribution | The mandatory FRED notice `[V-P0.2 §3.9]` belongs on whatever displays macro data — P6.1. Recorded so it is not lost |
+| Rule | Detail | Edge case |
+|---|---|---|
+| Series | Only those in `macro.series_allowlist`. **The list is P2.6's requirement and is empty in this spec** `[OQ-31]`. `macro.enabled: true` with an empty list fails config validation | A series removed from the allowlist stops being ingested; its stored observations stay |
+| Copyright screen | Before a series is first ingested, `fetch_series_notes` is read; a series whose notes contain the word "Copyright" is recorded in `macro_series` with `third_party_copyright = true` and **is not ingested** `[V-P0.2 §3.9]` | A series whose notes cannot be fetched is not ingested: an unread note is not a clean note |
+| Vintage | Every observation is stored with its `vintage_date`. A revised value is a new row. A reader takes, per `observation_date`, the row with the greatest `vintage_date` at or before its decision date and `retrieved_at` at or before its knowledge cutoff | A vintage date earlier than one already stored for the same observation is a new row. The same `(series_id, observation_date, vintage_date)` with a different value is `DUPLICATE_CONFLICT` |
+| A non-numeric vendor value | Not stored; counted in `skipped_count`. How FRED marks a missing observation is `[OQ-24]` | A value that parses as a number but is not finite is treated as non-numeric |
+| Throttling | Adaptive backoff on `429` and `423`; no request budget (rule N8) | `423` and `429` are both backoff signals. Any other 4xx is not retried |
+| Attribution | The mandatory FRED notice `[V-P0.2 §3.9]` belongs on whatever displays macro data — P6.1. Recorded so it is not lost | Applies to the internal Grafana panel SPEC-P0.2 names, not only to an external display |
 
 ### 19.6 FX
 
@@ -1546,7 +1545,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.2 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.3 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -1918,15 +1917,15 @@ and never writes.**
 
 ### 23.1 Loading
 
-| Aspect | Rule |
-|---|---|
-| Location | The file `ingest.yaml` in the directory of the policy file named by `TRADING_POLICY_PATH`. No new environment variable: `INFRA_ENV_ALLOWLIST` is frozen |
-| Environment reads | Only through `config.loader.infra_env()`. `src/data/` contains no `os.environ` access, so `lint_no_env_risk_reads` passes unchanged |
-| Secrets | Every credential is a `vault://` reference parsed by `config.loader.VaultRef`; `assert_not_a_literal_secret` is applied to every string leaf |
-| Hash | `config.loader.content_hash()` over the parsed document with secrets as references. Written to every manifest row as `ingest_config_hash` |
-| Signature | Not signed in v0.1. `policy.yaml` is Ed25519-signed; whether this file should be is `[OQ-33]` |
-| Validation | `IngestConfig` below, `extra="forbid"`. Any violation: the run does not start (exit code 2) |
-| Values read from `policy.yaml` | `schedule.{market}.ingest_utc`, the `INGEST` stage budget, `fx.source_primary`, `latency.exit.stale_bar_critical_seconds`. Read through `PolicyLoader`; never duplicated in `ingest.yaml` |
+| Aspect | Rule | Edge case |
+|---|---|---|
+| Location | The file `ingest.yaml` in the directory of the policy file named by `TRADING_POLICY_PATH`. No new environment variable: `INFRA_ENV_ALLOWLIST` is frozen | `ingest.yaml` absent from that directory: the run does not start (exit code 2). No built-in defaults exist |
+| Environment reads | Only through `config.loader.infra_env()`. `src/data/` contains no `os.environ` access, so `lint_no_env_risk_reads` passes unchanged | An infrastructure address P2.1 needs and the allowlist lacks (Redis) is a Vault reference in the file, never a new environment variable |
+| Secrets | Every credential is a `vault://` reference parsed by `config.loader.VaultRef`; `assert_not_a_literal_secret` is applied to every string leaf | A string that merely looks like a secret in a non-credential field is still rejected; the fix is to move it to Vault, not to exempt the field |
+| Hash | `config.loader.content_hash()` over the parsed document with secrets as references. Written to every manifest row as `ingest_config_hash` | Two runs of one session under different hashes each record their own; manifests are never merged across hashes |
+| Signature | Not signed in v0.1. `policy.yaml` is Ed25519-signed; whether this file should be is `[OQ-33]` | An unsigned file can change a tolerance without two approvals; that exposure is what `[OQ-33]` asks about |
+| Validation | `IngestConfig` below, `extra="forbid"`. Any violation: the run does not start (exit code 2) | An unknown key is a violation, not a warning |
+| Values read from `policy.yaml` | `schedule.{market}.ingest_utc`, the `INGEST` stage budget, `fx.source_primary`, `latency.exit.stale_bar_critical_seconds`. Read through `PolicyLoader`; never duplicated in `ingest.yaml` | A key missing for one market stops that market's run; the other market's value is never used in its place (ADR-11 requirement 7) |
 
 How `ingest_config_hash` relates to `run_context.config_hash`, which references
 `config_version`, is `[OQ-17]`.
@@ -2242,6 +2241,9 @@ file is edited. Each item names what it needs.
 | P21-23 | `stage_latency_observation.strategy_version` is `NOT NULL`; an ingest run has no strategy | Migration §6.9 | `[OQ-20]`. P2.1 does not write this table in v0.1 |
 | P21-24 | Verified source fields exist for four of eleven `CorporateActionType` members | SPEC-P0.2 §3.3 | `[OQ-29]` |
 | **P21-25** | **SPEC-P0.2 records no response fields for FMP, SEC EDGAR, FRED, Zerodha historical candles or the Zerodha instruments dump beyond `tick_size` and `lot_size`, nor for Massive trades, ticker types, ticker events or `primary_exchange` values.** Six of eight adapters therefore have no field mapping | SPEC-P0.2 §3.3–3.9 | **Blocks freeze of those adapters.** `[OQ-9]`, `[OQ-22]`–`[OQ-25]` |
+| P21-26 | No precedence is defined between a symbol-specific `tick_size_regime` row and a `*` row. The 0001 `EXCLUDE` constraint covers `(market, symbol)`, so both can cover one date | Migration §6.2; SPEC-P0.2 §10.3 | P3.2 and rule N10 most of all. P2.1 treats the overlap as fail-closed for its own tolerance (§14.2) and decides nothing else |
+| P21-27 | The India `tick_size` in the Zerodha instruments dump was read and mapped to no table, so India's reference source for tick size never reached `tick_size_regime` | SPEC-P0.2 §0.6; this spec's v0.2 §7.4 | **Decided by the Owner 2026-10-09 (O-11):** rule IR-21, `[DEFAULT-17]` |
+| P21-28 | A `tick_size_regime` row cannot be superseded by the application: `app_rw` has no `UPDATE` on the table, and the `EXCLUDE` constraint rejects a new row that overlaps an open-ended one. A changed tick cannot be recorded by closing the old row | Migration §6.2, §6.10 grants | Worked around by IR-21's one-day rows. The US changeover of November 2027 (SPEC-P0.2 F-10) meets the same limit and will need `trading_owner` or a SPEC-P1.2 amendment |
 
 ---
 
@@ -2297,7 +2299,7 @@ Every wire record also has the three `_Wire` fields.
 | `WireInstrument.composite_figi`, `share_class_figi` | `str` | —; — | yes | Exactly 12 characters | W |
 | `WireInstrument.delisted_utc` | `datetime` | instant; UTC | yes | tz-aware | W |
 | `WireInstrument.as_of_date` | `date` | date; local | no | The date the reference query was made for | W |
-| `WireInstrument.lot_size`, `tick_size` | `Decimal` | shares; price units; — | yes (required for India by the domain) | > 0 | W; India without `lot_size` → `DOMAIN_VALIDATION_FAILED` |
+| `WireInstrument.lot_size`, `tick_size` | `Decimal` | shares; price units; — | yes (required for India by the domain) | > 0. India `tick_size` is stored in `tick_size_regime` by rule IR-21 | W; India without `lot_size` → `DOMAIN_VALIDATION_FAILED` |
 | `WireSession.exchange_code` | `str` | vendor code; — | no | 1–16 characters; must be in `calendar.markets.*.exchange_codes` | W |
 | `WireSession.trading_date` | `date` | date; local | no | Any date | W |
 | `WireSession.regular_open_utc`, `regular_close_utc` | `datetime` | instant; UTC | no | open < close; close − open a multiple of 300 s (§2) | W; `MISSING_SESSION` |
@@ -2555,6 +2557,7 @@ Per table, the remaining columns:
 | 18 | SPEC-P0.2's provider contracts are implemented verbatim at `src/provider/`; P2.1's own enum covers what `DataCapability` lacks (§4.1) | A frozen enum is not extended by a downstream phase | Yes | Low |
 | 19 | An adapter with no verified field list has a contract and no mapping, and is not implementable (§4.4) | Block A: never invent an API field | — | None; the alternative is invented fields |
 | 20 | Instruments are matched across ticker changes by `composite_figi` `[DEFAULT-13]`. No code may rely on it until `[A-10]` is verified against one documented ticker-rename case (O-9) | The only stable identifier in the verified reference fields | Yes, before live data; costly after | **High** — an identity break corrupts history for that name |
+| 21 | P2.1's reference loader writes India tick-size rows to `tick_size_regime`, one bounded row per symbol per dump date (IR-21) `[DEFAULT-17]`, O-11 | P2.1 owns the reference loader (O-6); SPEC-P0.2 names the dump as India's reference source; one-day rows are the only form `app_rw` can write without superseding a row `[P21-28]` | Yes | Low today (India unfunded). After activation: a session with no loaded dump denies every India order |
 
 ## ASSUMPTIONS
 
@@ -2589,6 +2592,7 @@ Per table, the remaining columns:
 | D-14 | `[DEFAULT-14]` A price, volume or FX rate more precise than its column is rejected and recorded; a dividend amount or split ratio is stored exactly in `corporate_action_terms`, with the 0001 row rounded and flagged | `[CONST-6]`; `Price` and `Money` round silently `[P21-16]`; 0001 cannot hold the exact terms `[P21-17]`, `[P21-18]` | Owner approved 2026-10-08, as amended by O-10 | A reader that ignores the flag uses a rounded amount or ratio |
 | D-15 | `[DEFAULT-15]` `run_id` in the 0002 tables has no foreign key to `run_context` | `[P21-20]`: a key would gate every P2.1 write behind conditions 9 and 10 | Owner approved 2026-10-08 | A manifest row whose run has no `run_context` row |
 | D-16 | `[DEFAULT-16]` A 5-minute bar is the deterministic aggregate of the minute bars received for its window; completion is exactly RULE-B12 | SPEC-P0.3 §6.2 fixes assembly from the `b` stream and does not state the aggregation | Owner approved 2026-10-08; the session-close check of §13.5 | A bar assembled across an unnoticed loss |
+| D-17 | `[DEFAULT-17]` P2.1's reference loader writes India tick sizes to `tick_size_regime` from the instruments dump, by rule IR-21 | `[P21-27]`: nothing else loads them, and SPEC-P0.2 names the dump as India's reference source | Owner approved 2026-10-09 that P2.1 loads them; the one-day row form awaits confirmation `[OQ-34]`; the dump's columns and publication time are `[OQ-25]` | Rule N10 denies every India order for want of a regime row |
 | A-14 | `trading.deny_mutation()` works unchanged on a table 0001 did not attach it to | Read from the migration text, not executed | T-16 | The 0002 triggers need their own function |
 | A-15 | SPEC-P0.2's facts are still true | Retrieved 2026-08-23 to 2026-08-26; this phase re-verified none | Re-read each cited page before the code phase | A field or limit changed under the adapter |
 
@@ -2623,7 +2627,7 @@ open. Nothing here is answered by this document.
 | OQ-22 | Massive: the Ticker Types value list; `primary_exchange` values; the Ticker Events endpoint and fields; the trades endpoint and fields; whether `v` is ever non-integer | Massive documentation | Massive's REST documentation for tickers, ticker types, ticker events and trades, under `massive.com/docs/rest/stocks/` (exact pages not retrieved by this phase) | **Blocks freeze** of the reference mapping tables and `Q-P1.1-6` method (b) |
 | OQ-23 | FMP: statement endpoints, field names, period and date fields, how restatements appear | FMP documentation | FMP's developer documentation under `site.financialmodelingprep.com/developer/docs` for income statement, balance sheet and cash flow (exact pages not retrieved by this phase) | **Blocks freeze** of the FMP adapter |
 | OQ-24 | FRED / ALFRED: parameters and fields of `series/observations` and `series/vintagedates`; how a missing observation is marked; where series notes are returned | FRED documentation | The `fred/series/observations`, `fred/series/vintagedates` and `fred/series` pages under `fred.stlouisfed.org/docs/api/fred/` (exact pages not retrieved by this phase) | **Blocks freeze** of the FRED adapter |
-| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone | Kite Connect documentation | The historical-candle and instruments pages under `kite.trade/docs/connect/v3/` (exact pages not retrieved by this phase) | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures |
+| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone; whether the dump for a session is published before that session's order window (IR-21) | Kite Connect documentation | The historical-candle and instruments pages under `kite.trade/docs/connect/v3/` (exact pages not retrieved by this phase) | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures |
 | OQ-26 | What is the source of `HALTED` and `SUSPENDED` status? | Owner; vendor documentation | Alpaca's `s` trading-status channel is excluded by SPEC-P0.3 §13.3 row 40; RULE-B12c refers to "the calendar" reporting a halt | P3.3; P2.1 writes neither status |
 | OQ-27 | How is an `exchange_session` row corrected after an unscheduled early close? | Owner / SPEC-P1.2 | The table has no bitemporal axis and `app_rw` cannot update it | Operational runbook, P6.4 |
 | OQ-28 | Which FIGI does `instrument.figi` hold? | SPEC-P1.1 / SPEC-P1.2 author | Both columns are documented only by name | Not blocking; the column stays `NULL` |
@@ -2632,6 +2636,7 @@ open. Nothing here is answered by this document.
 | OQ-31 | Which macro series does regime detection need? | P2.6 | ADR-04: "rates, yields, VIX, macro series" | P2.6; macro ingest is disabled until then |
 | OQ-32 | How is migration 0002 applied, and does `trading.deny_mutation()` serve tables beyond 0001's? | Owner / SPEC-P1.2 §11 | `scripts/apply-migration.sh`; X3R-C12 | P2.1 code |
 | OQ-33 | Should `ingest.yaml` be signed like `policy.yaml`? | Owner / P6.2 | SPEC-P1.3 §5 | Not blocking |
+| OQ-34 | Is IR-21's one-day row form accepted? The Owner approved "one row per symbol, a new row only when the value changes"; `[P21-28]` shows that form cannot be written by `app_rw` | Owner | Options: (a) one row per symbol per dump date, valid one day, as IR-21 states; (b) drop IR-21 and leave India tick loading to P3.1 or P3.2; (c) amend SPEC-P1.2 so a regime row can be closed | **Blocks freeze** of IR-21 only. India is unfunded |
 
 ## CONTRACTS EXPORTED
 
@@ -2655,11 +2660,11 @@ open. Nothing here is answered by this document.
 | Gap definition | rule | §11 | P2.2 |
 | Freshness facts per data type | rule | §16.1 | P2.2, P2.9 |
 | `HeldNamesBarFeed`, `StreamGapNotice` | type (interface) | §13.6 | **P3.3** |
-| Calendar loader; reference-data loader | function | §6; writes `exchange_session`, `instrument`, `symbol_mapping` | P2.3, P2.9, P3.2 |
+| Calendar loader; reference-data loader | function | §6; writes `exchange_session`, `instrument`, `symbol_mapping`, and India rows of `tick_size_regime` (IR-21) | P2.3, P2.9, P3.2 |
 | `config/ingest.yaml`, `IngestConfig` | config | §23, §28.2 | P6.2, P6.4 |
 | `IngestSet`, `BackfillJobRequest`, `DailyRunRequest`, `DailyRunResult` | type (model) | §12.3, §28.3 | P2.3 (builds the ingest set), P6.4 (invokes runs and jobs) |
 | Redis keys under the prefix `ingest:v1:` | convention | §17 | Other phases must not write under this prefix |
-| Rules IR-1 to IR-20 | rule | §5, §6, §8, §9 | P2.2, X2 |
+| Rules IR-1 to IR-21 | rule | §5, §6, §8, §9 | P2.2, X2 |
 | Measurement of maximum vendor price scale | measurement | §21 | P2.2 (X5 condition 4) |
 | `DATA_RECEIVED`, `FX_RATE_RECORDED`, `CORPORATE_ACTION_APPLIED` — P2.1's proposed emission points | event (proposal, gated) | §20. **Defined by SPEC-P1.4; nothing is added or changed** | Condition 9 decision; P1.4 |
 
@@ -2673,6 +2678,10 @@ open. Nothing here is answered by this document.
 | Every entity has a Pydantic model or DDL | Wire records, protocols, errors: §4. Request and result models: §12.3. Stream interface: §13.6. Enums: §4.1, §15.1. Config: §23. Tables: §22 |
 | Every field: name, type, unit, timezone, nullability, valid range, violation | §28 |
 | Every error path enumerated with fail-closed behaviour | §24, 35 rows |
+| Block C: at most ten blocking questions, each with options, default and consequence | §1: ten grouped questions covering `[DEFAULT-1]` to `[DEFAULT-17]` |
+| Block C: every default marked inline and listed in ASSUMPTIONS | Markers throughout the body; rows D-1 to D-17 |
+| Block C: non-blocking details | §2, including rounding, tick and lot size, percentage units, DST, half-days, integer or decimal, inclusive or exclusive bounds |
+| Block C: every rule has its edge case | Rule tables in §5, §6, §8, §9, §13.1, §16, §17, §18, §19, §23.1 each carry an edge-case column with no empty cell |
 | No pseudocode; no ellipsis; no placeholder | No stub body is an ellipsis. The four remaining ellipsis characters are elisions inside quotations of the P2.1 prompt and of X5 condition 11. Six adapters have no field mapping. That is stated as open questions with exact queries (§4.4, `[P21-25]`), which is what Block A prescribes for an unknown API field |
 | P2.1 prompt items | Protocol and adapters §4; backfill §10; streaming §13; normalisation §7, §8; idempotency and reconciliation §9, §14; failure policy §15; freshness §16; Redis §17; tests §25 |
 | Frozen specs modified | None |
@@ -2687,4 +2696,4 @@ may rely on it until `[A-10]` is verified against one documented ticker-rename c
 
 ---
 
-# SPEC-P2.1-INGEST v0.2 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.3 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
