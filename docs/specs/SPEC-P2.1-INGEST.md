@@ -1,6 +1,6 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.4
+version: 0.5
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
@@ -81,6 +81,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | 0.2 | 2026-10-08 | Block B conformance correction and Owner decisions O-9 and O-10. Adds the request and result models (§12.3) and the field specifications (§28); replaces stub bodies with docstrings; lists `[DEFAULT-1]` to `[DEFAULT-16]` individually; writes out abbreviated lists; adds four validators that §28 relies on. Records the approval of `[DEFAULT-11]` to `[DEFAULT-16]` (O-9). Closes `[OQ-21]` (O-10): adds the table `corporate_action_terms` (§22.12) and changes `[DEFAULT-14]` for dividend amounts and split ratios from "reject" to "store exactly, 0001 row rounded and flagged" (§7.2, §8.2, §8.4). No other decision, default, rule or DDL constraint is changed |
 | 0.3 | 2026-10-09 | Block C conformance correction and Owner decision O-11. Section 1 is restructured into ten grouped blocking questions with an Options column; no approved default is changed or renumbered. Section 2 gains seven non-blocking categories. Every rule gains its edge case: IR-14, IR-19, and a new edge-case column in §13.1, §16.1, §16.2, §17, §18, §19.2, §19.5 and §23.1. Adds `[DEFAULT-17]` and rule IR-21 (India tick-size loading) and findings `[P21-26]` to `[P21-28]`. No DDL is changed |
 | 0.4 | 2026-10-09 | Owner decision O-12: rule IR-21's one-day row form is adopted provisionally, conditional on `[OQ-25]`. Wording only; no other rule, default or DDL is changed |
+| 0.5 | 2026-10-09 | Vendor evidence pass. Adds §29: what the retrieved vendor documentation says, and what it settles and leaves open for each open question. Adds findings `[P21-29]` to `[P21-31]`. **No rule, default, field mapping or DDL is changed, and no source is adopted**: adopting any of this evidence is a later, separate change |
 
 ---
 
@@ -1547,7 +1548,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.4 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.5 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -2246,6 +2247,9 @@ file is edited. Each item names what it needs.
 | P21-26 | No precedence is defined between a symbol-specific `tick_size_regime` row and a `*` row. The 0001 `EXCLUDE` constraint covers `(market, symbol)`, so both can cover one date | Migration §6.2; SPEC-P0.2 §10.3 | P3.2 and rule N10 most of all. P2.1 treats the overlap as fail-closed for its own tolerance (§14.2) and decides nothing else |
 | P21-27 | The India `tick_size` in the Zerodha instruments dump was read and mapped to no table, so India's reference source for tick size never reached `tick_size_regime` | SPEC-P0.2 §0.6; this spec's v0.2 §7.4 | **Decided by the Owner 2026-10-09 (O-11):** rule IR-21, `[DEFAULT-17]` |
 | P21-28 | A `tick_size_regime` row cannot be superseded by the application: `app_rw` has no `UPDATE` on the table, and the `EXCLUDE` constraint rejects a new row that overlaps an open-ended one. A changed tick cannot be recorded by closing the old row | Migration §6.2, §6.10 grants | Worked around by IR-21's one-day rows. The US changeover of November 2027 (SPEC-P0.2 F-10) meets the same limit and will need `trading_owner` or a SPEC-P1.2 amendment |
+| P21-29 | A vendor volume can be fractional. Massive's aggregate `v` is a JSON number, not an integer, and its trade records carry a `decimal_size` with a fractional component (§29, E-12, E-13). `bar_*.volume` is `bigint`, and §7.2 rejects a non-integer volume, so a bar containing fractional-share trades would be refused whole | Migration §6.4; §29 | **Owner decision, after a measurement** of how often `v` is non-integer on the bought tier. Not resolved here; §7.2 stands |
+| P21-30 | `fx.source_primary` is `RBI_REFERENCE`, but the USD/INR reference rate has been computed and published by FBIL, not the RBI, since 2018-07-10 (§29, E-21) | `config/policy.yaml`; SPEC-P0.1 ADR-15 | Owner / SPEC-P1.3. The key is frozen and labelled an assumption there; P2.1 does not rename it |
+| P21-31 | `[A-13]` computes "next EDGAR business day" as the next Monday to Friday. EDGAR also closes on federal holidays and on other announced days (§29, E-8), so the computed `disseminated_at` can be a day early: look-ahead | §19.2; §29 | A source of EDGAR closure dates `[OQ-30]`. Until then every `disseminated_at` computed across a closure day is suspect, as §19.2 already says |
 
 ---
 
@@ -2535,6 +2539,70 @@ Per table, the remaining columns:
 
 ---
 
+## 29. Vendor evidence retrieved 2026-10-09
+
+A read-only pass over public vendor documentation, made to see how much of `[P21-25]` and the
+freeze-blocking open questions the vendors' own pages settle. **This section records evidence. It
+adopts nothing**: no provider is chosen, no field mapping is added to §7.3, and no open question is
+closed by it. Each fact below is paraphrased from the page named beside it; field and parameter
+names are the vendors' own.
+
+How each item was obtained matters and is stated: *page* means the page itself was retrieved and
+read; *summary* means an extraction tool summarised the page and the page text was not read;
+*excerpt* means only a search-result excerpt was seen. A *summary* or *excerpt* item is a lead to
+verify, not a verified fact. Nothing here was checked against a live API response: no vendor
+account or API key was used.
+
+### 29.1 What the pages say
+
+| # | Source and method | What it says | Bears on |
+|---|---|---|---|
+| E-1 | Zerodha, `kite.trade/docs/connect/v3/historical/` — page | Historical candles: `GET /instruments/historical/{instrument_token}/{interval}`. Intervals: `minute`, `3minute`, `5minute`, `10minute`, `15minute`, `30minute`, `60minute`, `day`. Parameters `from` and `to` in `yyyy-mm-dd hh:mm:ss`, plus `continuous` and `oi`. The response is `data.candles`, an array of arrays `[timestamp, open, high, low, close, volume]`, with open interest appended when requested. Sample timestamps are ISO 8601 with a `+0530` offset; prices are JSON numbers | `[OQ-25]` |
+| E-2 | Zerodha, `kite.trade/docs/connect/v3/market-quotes/` — page | Instruments dump: `GET /instruments` and `GET /instruments/{exchange}` return a gzipped CSV with columns `instrument_token`, `exchange_token`, `tradingsymbol`, `name`, `last_price`, `expiry`, `strike`, `tick_size`, `lot_size`, `instrument_type`, `segment`, `exchange`. The page says the dump is generated once a day and advises fetching it once a day at around 08:30 in the morning. It advises storing by exchange and `tradingsymbol`, because exchanges may reuse instrument tokens for derivatives after expiry | `[OQ-25]`, IR-21, `[OQ-34]` |
+| E-3 | FRED, `fred.stlouisfed.org/docs/api/fred/series_observations.html` — page | `fred/series/observations` returns observations with `realtime_start`, `realtime_end`, `date` and `value`; `value` is a string. Parameters include `realtime_start`, `realtime_end`, `observation_start`, `observation_end`, `limit` (1 to 100,000), `offset`, `output_type` (1 to 4; 4 is initial release only), and `vintage_dates` (at most 2,000 dates for JSON). JSON is requested with `file_type=json` | `[OQ-24]` |
+| E-4 | FRED, `fred.stlouisfed.org/docs/api/fred/series_vintagedates.html` — summary | `fred/series/vintagedates` returns a `vintage_dates` list; `limit` is 1 to 10,000. A vintage date is a release date on which the series' data changed | `[OQ-24]` |
+| E-5 | FRED, `fred.stlouisfed.org/docs/api/fred/series.html` — summary | `fred/series` returns per-series fields including `notes`, `frequency`, `units` and `last_updated` | `[OQ-24]`, §19.5 copyright screen |
+| E-6 | SEC, `sec.gov/search-filings/edgar-application-programming-interfaces` — page | `data.sec.gov` serves JSON without authentication: filing history per entity at `/submissions/CIK{10 digits}.json`, and XBRL data at `/api/xbrl/companyconcept/`, `/api/xbrl/companyfacts/` and `/api/xbrl/frames/`. The page says the APIs update as filings are disseminated, with a typical processing delay of under a second for submissions and under a minute for XBRL, longer at peak times, and that bulk ZIP files are rebuilt nightly at about 03:00 Eastern. **The page does not list the field names inside the submissions JSON** | `[OQ-9]`, `[OQ-6]` |
+| E-7 | SEC technical specifications — excerpt | An EDGAR Ownership XML Technical Specification for Forms 3, 4 and 5 exists; version 5.4 is dated 2023-07-17. The filer manual lists submission types `3`, `3/A`, `4`, `4/A`, `5`, `5/A`. The specification itself was not opened | `[OQ-9]` |
+| E-8 | SEC announcements — excerpt | EDGAR is closed on some weekdays: announcements name 2025-01-09 and 2025-12-24 to 2025-12-26, during which filings are not accepted | `[OQ-30]`, `[A-13]`, `[P21-31]` |
+| E-9 | Massive, `massive.com/docs/rest/stocks/tickers/all-tickers.md` — page | `GET /v3/reference/tickers`: `limit` at most 1,000, paged by `next_url`. `primary_exchange` is an ISO 10383 MIC (sample `XNYS`); `type` is a code from the ticker-types endpoint (sample `CS`); `currency_name` appears in lower case in the sample; the CUSIP can be queried and is not returned. Records go back to 2003-09-10 | `[OQ-22]` |
+| E-10 | Massive, `massive.com/docs/rest/stocks/tickers/ticker-types.md` — page | `GET /v3/reference/tickers/types` returns `code`, `description`, `asset_class`, `locale`. The list of codes is the endpoint's response, not the page | `[OQ-22]` |
+| E-11 | Massive, `massive.com/docs/rest/stocks/corporate-actions/ticker-events.md` — page | `GET /vX/reference/tickers/{id}/events`, marked experimental. `id` may be a ticker, a CUSIP or a Composite FIGI. Only `ticker_change` events are supported. The sample shows one entity under two tickers in turn | `[OQ-22]`, `[OQ-29]`, `[A-10]` |
+| E-12 | Massive, `massive.com/docs/rest/stocks/trades-quotes/trades.md` — page | `GET /v3/trades/{stockTicker}`: `price` is a JSON number; `size` is a number; `decimal_size` is a string that includes a fractional component; `sip_timestamp` and `participant_timestamp` are nanosecond Unix times; `limit` at most 50,000 | `[OQ-22]`, `Q-P1.1-6`, `[P21-29]` |
+| E-13 | Massive, `massive.com/docs/rest/stocks/aggregates/custom-bars.md` — page | Aggregates: `v` is a number, `n` an integer, `t` the millisecond start of the window. The page says no bar is produced for a window with no eligible trades. `adjusted` defaults to true, as SPEC-P0.2 recorded | §11 gap meaning, `[P21-29]` |
+| E-14 | Massive, `massive.com/docs/rest/stocks/corporate-actions/splits.md` — page | Splits carry `id`, `adjustment_type` (`forward_split`, `reverse_split`, `stock_dividend`), and a vendor-computed `historical_adjustment_factor`, besides the fields SPEC-P0.2 recorded | `[OQ-29]`, §8.1 |
+| E-15 | Massive, `massive.com/docs/rest/stocks/corporate-actions/dividends.md` — page | Dividends carry `id`, `currency`, a vendor-computed `historical_adjustment_factor` and `split_adjusted_cash_amount`, besides the fields SPEC-P0.2 recorded. `frequency` 0 means non-recurring | §8, `corporate_action_terms` |
+| E-16 | Massive, `massive.com/docs/rest/stocks/market-operations/market-holidays.md` — page | `GET /v1/marketstatus/upcoming` lists **upcoming** holidays only, per exchange (`NYSE`, `NASDAQ`, `OTC` in the sample), with status `closed` or `early-close` and UTC open and close times for early closes | `[OQ-1]` |
+| E-17 | Alpaca, `docs.alpaca.markets/us/reference/legacycalendar.md` — page | `GET /v2/calendar` on the trading API host returns, per market day, `date`, `open`, `close` (HH:MM), `session_open`, `session_close` (HHMM) and `settlement_date`. The page describes coverage from 1970 to 2029 | `[OQ-1]`, `Q-P1.1-1` |
+| E-18 | Alpaca, `docs.alpaca.markets/us/reference/calendar-2.md` — page | `GET /v3/calendar/{market}` returns per day `date`, `core_start`, `core_end`, and optional `pre_start`, `pre_end`, `post_start`, `post_end`, `lunch_start`, `lunch_end`, `settlement_date`, as date-times with an offset, or in UTC on request. Accepted markets include `NYSE`, `NASDAQ`, `XNYS` and `XNAS`. **No Indian exchange is in the list** | `[OQ-1]` |
+| E-19 | Alpaca, `docs.alpaca.markets/us/reference/corporateactions-1.md` — page | `GET /v1/corporate-actions` on the data host returns, by type: cash dividends, stock dividends, forward splits, reverse splits, unit splits, spin-offs, cash mergers, stock mergers, stock-and-cash mergers, name changes, rights distributions, redemptions, partial calls, reorganizations, worthless removals and capital-gains distributions. Records carry an `id`, symbols, CUSIP and ISIN where applicable, dates and rates. Which data plan includes it was not checked | `[OQ-29]`, `[P21-24]` |
+| E-20 | FMP, `site.financialmodelingprep.com/developer/docs/stable/income-statement` — page | Income statement endpoint with parameters `symbol`, `limit` (at most 1,000 records) and `period`. Records carry `date`, `symbol`, `reportedCurrency`, `cik`, `filingDate`, `acceptedDate` (a date and time with no timezone stated), `fiscalYear`, `period`, and the statement lines. The page says the filing date comes from the SEC and that a null means missing or not reported. Balance sheet and cash flow pages were not retrieved | `[OQ-23]`, `[DEFAULT-12]` |
+| E-21 | IMF data-standards page for India, and an FBIL methodology document — excerpt | The USD/INR reference rate has been computed and published by FBIL since 2018-07-10, at around 13:30 Indian time on Mumbai business days; before that the RBI published it. No API, endpoint or field list was found | `[OQ-7]`, `[P21-30]` |
+| E-22 | OpenFIGI overview page — summary | Nothing was found there on whether a FIGI survives a ticker change | `[A-10]` |
+| E-23 | Massive documentation index, `massive.com/docs/llms.txt` — page | Massive now lists its own endpoints for an SEC EDGAR index, Forms 3 and 4, fundamentals statements and Benzinga news. Noted only: SPEC-P0.2 assigns filings to SEC EDGAR and fundamentals to FMP, and nothing here changes that | SPEC-P0.2 `[A-15]` |
+
+### 29.2 What this settles, and what it leaves open
+
+"Settles" means the documentation states it. It does not mean this spec has adopted it.
+
+| Item | What the evidence supports | What is still open |
+|---|---|---|
+| `[OQ-1]` calendar source | A documented source of US sessions exists at a provider already in the stack: Alpaca's calendar endpoints give session open and close per day, early closes by their times, and a settlement date (E-17, E-18). Massive lists upcoming closures only (E-16) | Whether to adopt Alpaca's calendar is an Owner decision (O-6 keeps the source open). **No source for NSE or BSE sessions was found.** Neither endpoint flags a half-day or a special session explicitly |
+| `[OQ-6]` EDGAR latency | The SEC states a typical processing delay (E-6) | A stated typical delay is not a measured one; the measurement of §21 stands |
+| `[OQ-7]` FX source | Who publishes the rate and roughly when (E-21, excerpt) | Any endpoint, format or field; the fallback; `[P21-30]` |
+| `[OQ-9]` EDGAR fields | The endpoints, their update behaviour, and that an ownership XML specification exists (E-6, E-7) | The field names in the submissions JSON; the content of the ownership specification; the fields to extract from Forms 3, 4 and 5 |
+| `[OQ-22]` Massive | Ticker fields, that `primary_exchange` is a MIC, the ticker-types and ticker-events endpoints, and the trade record (E-9 to E-13) | The list of type codes and of MICs, which need a live call; how often `v` is non-integer `[P21-29]` |
+| `[OQ-23]` FMP | The income statement record and that it carries a CIK, a filing date and an acceptance time (E-20) | Balance sheet and cash flow; the timezone of `acceptedDate`; how a restatement appears |
+| `[OQ-24]` FRED | The observation, vintage and series records (E-3 read; E-4, E-5 summaries) | How a missing observation is marked; the rate limit |
+| `[OQ-25]` Zerodha | The candle record, the dump's columns, and that the dump is generated daily with a morning fetch advised (E-1, E-2) | The dump's actual generation time and whether it is guaranteed; whether a candle's timestamp is the window start; the timestamp of a `day` candle |
+| `[OQ-29]` other corporate actions | Massive's splits endpoint includes stock dividends (E-14). Alpaca's corporate-actions endpoint covers mergers, spin-offs, name changes and rights (E-19) | Plan access for the Alpaca endpoint; whether to adopt it, which changes who supplies corporate actions and is an Owner decision |
+| `[OQ-30]` EDGAR business days | EDGAR closes on days other than weekends (E-8, excerpt) | A complete, machine-readable list of closure days; the instant of next-day dissemination |
+| `[OQ-34]` IR-21 form | The dump is described as daily, with a fetch advised before the India order window (E-2) | The page gives advice, not a publication guarantee. IR-21 stays provisional (O-12) |
+| `[A-10]` FIGI stability | Massive's ticker-events endpoint identifies one entity across a ticker change and accepts a Composite FIGI as its identifier (E-11) | Supporting only. O-9's condition, one documented rename checked by FIGI, needs a live call and is not met |
+| §11 missing daily bar | Massive says a window with no eligible trades produces no bar (E-13) | Whether that applies to a daily bar of a halted or untraded name in practice; SPEC-P0.3 Q-7 on finality is untouched |
+
+---
+
 ## DECISIONS MADE
 
 | # | Decision | Rationale | Reversible? | Blast radius if wrong |
@@ -2574,10 +2642,10 @@ Per table, the remaining columns:
 | A-7 | Stream ping interval and timeout 20 s; reconnect base 1 s, cap 60 s; silent-window recheck 10 s | SPEC-P0.2 records no application heartbeat or reconnect guidance for the Alpaca stream | Vendor documentation or support; observation at the stage 5 rehearsal | Slow detection of a dead socket, or needless reconnects |
 | A-8 | Calendar must cover 20 sessions ahead | No frozen number | Owner | A late calendar load stops ingest earlier or later than intended |
 | A-9 | Cache TTLs 86,400 s, 3,600 s, 60 s; lock 5,000 ms | No frozen number; none of the three values is authoritative | Load observation | Database load only |
-| A-10 | `composite_figi` is stable across a ticker change | Not stated in any frozen spec | Vendor documentation and one documented ticker-rename case in the reference history. **Required by the Owner (O-9) before any P2.1 code relies on `[DEFAULT-13]`** | `[DEFAULT-13]` fails: identity breaks on rename |
+| A-10 | `composite_figi` is stable across a ticker change | Not stated in any frozen spec | Vendor documentation and one documented ticker-rename case in the reference history. **Required by the Owner (O-9) before any P2.1 code relies on `[DEFAULT-13]`** | `[DEFAULT-13]` fails: identity breaks on rename. Evidence of 2026-10-09 supports this and does not prove it: §29.2 |
 | A-11 | Massive's "Eastern Time" is IANA `America/New_York` | SPEC-P0.2 says "presented in ET" | Vendor documentation | Bars assigned to the wrong trading date around midnight |
 | A-12 | Settlement cycle of one session in both markets | Carried from SPEC-P1.1 A11 / `Q-P1.1-1`; this phase must write `settlement_date NOT NULL` | `Q-P1.1-1`, `Q-P1.1-2` | Wrong `settlement_date` on every session row; P2.9's settled-cash sizing inherits it |
-| A-13 | A filing accepted after its cutoff is disseminated at 06:00 Eastern on the next Monday to Friday; one accepted before its cutoff is disseminated at acceptance | SPEC-P0.2 gives the cutoffs and "next business day", not the instant, the holiday list, or the propagation delay (M-8) | `[OQ-30]`; the M-8 measurement of §21 | `disseminated_at` too early: look-ahead by the difference, a full day across a federal holiday |
+| A-13 | A filing accepted after its cutoff is disseminated at 06:00 Eastern on the next Monday to Friday; one accepted before its cutoff is disseminated at acceptance | SPEC-P0.2 gives the cutoffs and "next business day", not the instant, the holiday list, or the propagation delay (M-8) | `[OQ-30]`; the M-8 measurement of §21 | `disseminated_at` too early: look-ahead by the difference, a full day across a federal holiday. Evidence of 2026-10-09 shows the Monday-to-Friday rule is incomplete: `[P21-31]` |
 | D-1 | `[DEFAULT-1]` A daily bar's `ts` is the session's `regular_close_utc`; a 5-minute bar's is its window start | No frozen spec fixes the daily `ts`; SPEC-P0.2 §0.6 speaks of window start for minute bars | Owner approved 2026-10-07; check against P5.1's read set at its freeze | Look-ahead through `bars_asof`, or a re-key of `bar_daily` |
 | D-2 | `[DEFAULT-2]` A daily bar is written at the scheduled ingest and compared with a re-fetch at the next session's ingest | SPEC-P0.3 Q-7 is open; storage is insert-only | Owner approved 2026-10-07; the `REVISION` measurement of §21 | A vendor revision is stored wrong for good, or caught one session late |
 | D-3 | `[DEFAULT-3]` A second source's bar goes to `ingest_reconciliation`; only the SPEC-P0.2 primary writes a 0001 market-data table | One row per `(instrument_id, ts)`; rule N7 forbids a silent tiebreak | Owner approved 2026-10-07 | No second-source evidence, or a silent tiebreak |
@@ -2605,15 +2673,15 @@ open. Nothing here is answered by this document.
 
 | # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
 |---|---|---|---|---|
-| OQ-1 | What is the source of exchange sessions, half-days and special sessions for NYSE, NASDAQ, NSE and BSE? | Owner, then vendor documentation | Does any bought provider publish a trading-calendar endpoint with early closes? For India: the NSE and BSE holiday and Muhurat circulars. Name the source, its fields and its update cadence | **Blocks freeze** of §6.2 and the calendar adapter; all P2.1 gap detection |
+| OQ-1 | What is the source of exchange sessions, half-days and special sessions for NYSE, NASDAQ, NSE and BSE? | Owner, then vendor documentation | Does any bought provider publish a trading-calendar endpoint with early closes? For India: the NSE and BSE holiday and Muhurat circulars. Name the source, its fields and its update cadence | **Blocks freeze** of §6.2 and the calendar adapter; all P2.1 gap detection. Evidence of 2026-10-09: §29.2 |
 | OQ-2 | When is a Massive daily aggregate final? (SPEC-P0.3 Q-7) | Massive documentation or support | "Is a `1/day` aggregate for date D final at 21:45 UTC on D, or revised later, and until when?" | P2.1 schedule; mitigated by `[DEFAULT-2]` |
 | OQ-3 | FMP payload size per statement request (SPEC-P0.3 Q-5) | Measurement | `Content-Length` on 10 representative statement calls | Backfill plan |
 | OQ-4 | Throttle status and headers for Massive, FMP, SEC; FRED's numeric limit (SPEC-P0.2 M-4) | Vendor support | "Which status code and headers indicate throttling, and is `Retry-After` set?" | Client tuning only |
 | OQ-5 | Stream reconnect and replay semantics (SPEC-P0.2 M-3) | Vendor support | "On reconnect, are missed messages replayed; is there a resume token or sequence number?" | Nothing — rule N5 holds either way |
-| OQ-6 | EDGAR propagation latency (SPEC-P0.2 M-8) | Measurement, §21 | Acceptance-to-availability deltas over one week of Form 4 filings | The margin in §19.2 |
-| OQ-7 | The RBI USD/INR reference-rate endpoint, its fields and a fallback (SPEC-P0.1 Q12) | RBI publications | The published location and format of the daily reference rate; publication time; holiday behaviour | FX adapter; India activation |
+| OQ-6 | EDGAR propagation latency (SPEC-P0.2 M-8) | Measurement, §21 | Acceptance-to-availability deltas over one week of Form 4 filings | The margin in §19.2. Evidence of 2026-10-09: §29.2 |
+| OQ-7 | The RBI USD/INR reference-rate endpoint, its fields and a fallback (SPEC-P0.1 Q12) | RBI publications | The published location and format of the daily reference rate; publication time; holiday behaviour | FX adapter; India activation. Evidence of 2026-10-09: §29.2 |
 | OQ-8 | India sources for fundamentals, corporate actions and news | Owner | Does Zerodha Kite Connect publish corporate actions? Which vendor covers NSE/BSE fundamentals? | India activation |
-| OQ-9 | SEC EDGAR response fields: the filing identifier, acceptance timestamp, form type, document path on `data.sec.gov` submissions; the XBRL company-facts shape; the Forms 3/4/5 document format and the fields to extract | SEC documentation | The SEC's EDGAR API documentation for `data.sec.gov`, and its technical specification for ownership documents (exact pages not retrieved by this phase) | **Blocks freeze** of §19 mappings and the EDGAR adapter; P2.5's insider feature |
+| OQ-9 | SEC EDGAR response fields: the filing identifier, acceptance timestamp, form type, document path on `data.sec.gov` submissions; the XBRL company-facts shape; the Forms 3/4/5 document format and the fields to extract | SEC documentation | The SEC's EDGAR API documentation for `data.sec.gov`, and its technical specification for ownership documents (exact pages not retrieved by this phase) | **Blocks freeze** of §19 mappings and the EDGAR adapter; P2.5's insider feature. Evidence of 2026-10-09: §29.2 |
 | OQ-10 | What is a "material" disagreement under rule N7, and which metrics are compared under which names in each source? | Owner | SPEC-P0.2 rule N7 gives no threshold or list | **Blocks freeze** of §19.3 step 4 |
 | OQ-11 | Replace `[A-1]` and `[A-2]` with measured or decided values | Measurement; Owner | §21 | Not blocking |
 | OQ-12 | Who emits `RUN_STARTED` and `RUN_FINISHED` for an ingest run before P6.4 exists? | Owner, **with condition 9** | `EVENT_REGISTRY`: producer `P6.4_ORCHESTRATOR` | P2.1 code that writes an audit event |
@@ -2626,19 +2694,19 @@ open. Nothing here is answered by this document.
 | OQ-19 | Which instruments outside the current universe need daily bars so that reconstitution can rank them, and which phase requests them? | P2.3 | ADR-14: 1,300/1,700 hysteresis needs ranks beyond membership | P2.3; P2.1's ingest-set default `[DEFAULT-11]` |
 | OQ-20 | Does an ingest run write `stage_latency_observation`, and with what `strategy_version`? | Owner / P6.1 | Migration §6.9: `strategy_version NOT NULL` | Not blocking |
 | OQ-21 | ~~How are corporate-action terms that 0001 cannot hold exactly to be stored?~~ | **CLOSED 2026-10-08 by Owner decision O-10** | Option 2 was chosen: the P2.1-owned table `corporate_action_terms` (§22.12), keyed by `action_id`. SPEC-P1.1 and SPEC-P1.2 are not re-opened | **Closed** |
-| OQ-22 | Massive: the Ticker Types value list; `primary_exchange` values; the Ticker Events endpoint and fields; the trades endpoint and fields; whether `v` is ever non-integer | Massive documentation | Massive's REST documentation for tickers, ticker types, ticker events and trades, under `massive.com/docs/rest/stocks/` (exact pages not retrieved by this phase) | **Blocks freeze** of the reference mapping tables and `Q-P1.1-6` method (b) |
-| OQ-23 | FMP: statement endpoints, field names, period and date fields, how restatements appear | FMP documentation | FMP's developer documentation under `site.financialmodelingprep.com/developer/docs` for income statement, balance sheet and cash flow (exact pages not retrieved by this phase) | **Blocks freeze** of the FMP adapter |
-| OQ-24 | FRED / ALFRED: parameters and fields of `series/observations` and `series/vintagedates`; how a missing observation is marked; where series notes are returned | FRED documentation | The `fred/series/observations`, `fred/series/vintagedates` and `fred/series` pages under `fred.stlouisfed.org/docs/api/fred/` (exact pages not retrieved by this phase) | **Blocks freeze** of the FRED adapter |
-| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone; whether the dump for a session is published before that session's order window (IR-21) | Kite Connect documentation | The historical-candle and instruments pages under `kite.trade/docs/connect/v3/` (exact pages not retrieved by this phase) | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures; IR-21's provisional form (O-12) |
+| OQ-22 | Massive: the Ticker Types value list; `primary_exchange` values; the Ticker Events endpoint and fields; the trades endpoint and fields; whether `v` is ever non-integer | Massive documentation | Massive's REST documentation for tickers, ticker types, ticker events and trades, under `massive.com/docs/rest/stocks/` (exact pages not retrieved by this phase) | **Blocks freeze** of the reference mapping tables and `Q-P1.1-6` method (b). Evidence of 2026-10-09: §29.2 |
+| OQ-23 | FMP: statement endpoints, field names, period and date fields, how restatements appear | FMP documentation | FMP's developer documentation under `site.financialmodelingprep.com/developer/docs` for income statement, balance sheet and cash flow (exact pages not retrieved by this phase) | **Blocks freeze** of the FMP adapter. Evidence of 2026-10-09: §29.2 |
+| OQ-24 | FRED / ALFRED: parameters and fields of `series/observations` and `series/vintagedates`; how a missing observation is marked; where series notes are returned | FRED documentation | The `fred/series/observations`, `fred/series/vintagedates` and `fred/series` pages under `fred.stlouisfed.org/docs/api/fred/` (exact pages not retrieved by this phase) | **Blocks freeze** of the FRED adapter. Evidence of 2026-10-09: §29.2 |
+| OQ-25 | Zerodha: historical-candle endpoint parameters and response shape; the instruments dump columns; timestamp timezone; whether the dump for a session is published before that session's order window (IR-21) | Kite Connect documentation | The historical-candle and instruments pages under `kite.trade/docs/connect/v3/` (exact pages not retrieved by this phase) | **Blocks freeze** of the Zerodha adapter; `[DEFAULT-9]` fixtures; IR-21's provisional form (O-12). Evidence of 2026-10-09: §29.2 |
 | OQ-26 | What is the source of `HALTED` and `SUSPENDED` status? | Owner; vendor documentation | Alpaca's `s` trading-status channel is excluded by SPEC-P0.3 §13.3 row 40; RULE-B12c refers to "the calendar" reporting a halt | P3.3; P2.1 writes neither status |
 | OQ-27 | How is an `exchange_session` row corrected after an unscheduled early close? | Owner / SPEC-P1.2 | The table has no bitemporal axis and `app_rw` cannot update it | Operational runbook, P6.4 |
 | OQ-28 | Which FIGI does `instrument.figi` hold? | SPEC-P1.1 / SPEC-P1.2 author | Both columns are documented only by name | Not blocking; the column stays `NULL` |
-| OQ-29 | What is the source for stock dividends, mergers, acquisitions, spin-offs, rights issues and exchange transfers? | Vendor documentation | Alpaca's corporate-actions announcements API; Massive Ticker Events | Seven of eleven action types; P3.3 conversion |
-| OQ-30 | Which days are EDGAR business days, and at what instant on the next business day is a post-cutoff filing disseminated? | SEC | The SEC's published federal-holiday closure list; the EDGAR dissemination schedule | §19.2; `[A-13]` |
+| OQ-29 | What is the source for stock dividends, mergers, acquisitions, spin-offs, rights issues and exchange transfers? | Vendor documentation | Alpaca's corporate-actions announcements API; Massive Ticker Events | Seven of eleven action types; P3.3 conversion. Evidence of 2026-10-09: §29.2 |
+| OQ-30 | Which days are EDGAR business days, and at what instant on the next business day is a post-cutoff filing disseminated? | SEC | The SEC's published federal-holiday closure list; the EDGAR dissemination schedule | §19.2; `[A-13]`. Evidence of 2026-10-09: §29.2 |
 | OQ-31 | Which macro series does regime detection need? | P2.6 | ADR-04: "rates, yields, VIX, macro series" | P2.6; macro ingest is disabled until then |
 | OQ-32 | How is migration 0002 applied, and does `trading.deny_mutation()` serve tables beyond 0001's? | Owner / SPEC-P1.2 §11 | `scripts/apply-migration.sh`; X3R-C12 | P2.1 code |
 | OQ-33 | Should `ingest.yaml` be signed like `policy.yaml`? | Owner / P6.2 | SPEC-P1.3 §5 | Not blocking |
-| OQ-34 | Does IR-21's one-day row form survive the answer to `[OQ-25]`? **Decided provisionally 2026-10-09 (O-12): one row per symbol per dump date, valid one day.** The Owner first approved "a new row only when the value changes"; `[P21-28]` shows that form cannot be written by `app_rw` | Owner, once `[OQ-25]` is answered | If the dump for a session is available before that session's order window: confirm the form. If it is not: choose between writing the next session's row from the previous dump, a pre-open reference run, removing IR-21 in favour of P3.1 or P3.2, or amending SPEC-P1.2 so a regime row can be closed | **Blocks freeze** of IR-21 only. India is unfunded |
+| OQ-34 | Does IR-21's one-day row form survive the answer to `[OQ-25]`? **Decided provisionally 2026-10-09 (O-12): one row per symbol per dump date, valid one day.** The Owner first approved "a new row only when the value changes"; `[P21-28]` shows that form cannot be written by `app_rw` | Owner, once `[OQ-25]` is answered | If the dump for a session is available before that session's order window: confirm the form. If it is not: choose between writing the next session's row from the previous dump, a pre-open reference run, removing IR-21 in favour of P3.1 or P3.2, or amending SPEC-P1.2 so a regime row can be closed | **Blocks freeze** of IR-21 only. India is unfunded. Evidence of 2026-10-09: §29.2 |
 
 ## CONTRACTS EXPORTED
 
@@ -2698,4 +2766,4 @@ may rely on it until `[A-10]` is verified against one documented ticker-rename c
 
 ---
 
-# SPEC-P2.1-INGEST v0.4 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.5 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
