@@ -1,6 +1,6 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.6
+version: 0.7
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
@@ -56,7 +56,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | Closed | X5 condition 10 (X3R-M2). Not P2.1's |
 | P2.1 code that relies on `[DEFAULT-13]` | Closed | Requires `ASSUMPTION [A-10]` verified against one documented ticker-rename case (Owner decision O-9) |
 
-### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11 to O-13: 2026-10-09)
+### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11 to O-14: 2026-10-09)
 
 | # | Decision |
 |---|---|
@@ -73,6 +73,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | O-11 | Block C correction: the blocking questions are presented as ten grouped questions with their options (§1). P2.1's reference loader writes India tick-size rows to `tick_size_regime` from the instruments dump (`[DEFAULT-17]`, rule IR-21). The wording approved was "a new row only when the value changes"; `[P21-28]` makes that unwritable, so IR-21 uses one-day rows; see O-12 |
 | O-12 | IR-21's one-day row form is adopted **provisionally**. `[OQ-25]` stays open: whether the India instruments dump is available before the order window it must serve has not been verified, and no pre-open readiness is claimed. The form must be revisited if the dump is not available in time `[OQ-34]` |
 | O-13 | Three decisions on the evidence of §29. (a) **US calendar source:** Alpaca's calendar endpoint supplies NYSE and NASDAQ sessions (rules IR-22, IR-23). This supersedes the last sentence of O-6 for the US only; the India source stays open `[OQ-1]`. (b) **Other corporate actions:** Alpaca's corporate-actions endpoint is the source for spin-offs, mergers, name changes and rights distributions, **subject to confirming plan access** `[OQ-36]`. This draft specifies spin-offs and rights distributions; mergers and name changes are named and not yet specified, for the reasons in §8.1. (c) **Fractional volume `[P21-29]`:** the reject rule of §7.2 stands until a measurement shows how often it applies (§21) |
+| O-14 | Two decisions on v0.6. (a) Mergers and name changes stay out of this spec, as §8.1 states, until condition 9 and `[P21-33]` are settled. (b) **Calendar credential `[OQ-37]`:** the US calendar adapter uses the Alpaca paper host and a paper-account key only, so the ingest process never holds a key that can place a funded order. Whether the paper host serves the same calendar as the live host has not been verified and stays open under `[OQ-37]` |
 
 ### 0.4 Version history
 
@@ -84,6 +85,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | 0.4 | 2026-10-09 | Owner decision O-12: rule IR-21's one-day row form is adopted provisionally, conditional on `[OQ-25]`. Wording only; no other rule, default or DDL is changed |
 | 0.5 | 2026-10-09 | Vendor evidence pass. Adds §29: what the retrieved vendor documentation says, and what it settles and leaves open for each open question. Adds findings `[P21-29]` to `[P21-31]`. **No rule, default, field mapping or DDL is changed, and no source is adopted**: adopting any of this evidence is a later, separate change |
 | 0.6 | 2026-10-09 | Owner decision O-13, adopting part of the evidence of §29. US sessions from Alpaca's calendar endpoint: rules IR-22 and IR-23, a field mapping (§7.3), the config key `full_session_seconds`. Spin-offs and rights distributions from Alpaca's corporate-actions endpoint: the wire record `WireCorporateEvent`, the protocol `CorporateEventProvider`, a field mapping, four columns and one constraint on the P2.1-owned table `corporate_action_terms`. Adds `[A-16]` to `[A-18]`, `[OQ-35]` to `[OQ-37]`, findings `[P21-32]` and `[P21-33]`, error paths 36 and 37, tests T-19 and T-20. Narrows `[OQ-1]` to India and `[OQ-29]` to what is left. Mergers and name changes are **not** specified. No 0001 object and no frozen spec is touched; no approved default is changed |
+| 0.7 | 2026-10-09 | Owner decision O-14: mergers and name changes stay unspecified; the US calendar adapter uses the paper host and a paper-account key only. Wording only: `[P21-32]` and `[OQ-37]` record the decision. No rule, default, field mapping or DDL is changed |
 
 ---
 
@@ -1632,7 +1634,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.6 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.7 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -2361,7 +2363,7 @@ file is edited. Each item names what it needs.
 | P21-29 | A vendor volume can be fractional. Massive's aggregate `v` is a JSON number, not an integer, and its trade records carry a `decimal_size` with a fractional component (§29, E-12, E-13). `bar_*.volume` is `bigint`, and §7.2 rejects a non-integer volume, so a bar containing fractional-share trades would be refused whole | Migration §6.4; §29 | **Owner decision 2026-10-09 (O-13): §7.2 stands** until the measurement of §21 shows how often `v` is non-integer on the bought tier; the Owner then decides again |
 | P21-30 | `fx.source_primary` is `RBI_REFERENCE`, but the USD/INR reference rate has been computed and published by FBIL, not the RBI, since 2018-07-10 (§29, E-21) | `config/policy.yaml`; SPEC-P0.1 ADR-15 | Owner / SPEC-P1.3. The key is frozen and labelled an assumption there; P2.1 does not rename it |
 | P21-31 | `[A-13]` computes "next EDGAR business day" as the next Monday to Friday. EDGAR also closes on federal holidays and on other announced days (§29, E-8), so the computed `disseminated_at` can be a day early: look-ahead | §19.2; §29 | A source of EDGAR closure dates `[OQ-30]`. Until then every `disseminated_at` computed across a closure day is suspect, as §19.2 already says |
-| P21-32 | Alpaca serves its calendar only from the trading API hosts (§29, E-17, E-18). SPEC-P0.2 assigns `ALPACA_TRADING` to execution; with O-13 the ingest process also calls that host and needs a credential for it. No retrieved page says whether an Alpaca key can be limited to reading | SPEC-P0.2 §10.1; §29 | Owner, `[OQ-37]`. Not resolved here |
+| P21-32 | Alpaca serves its calendar only from the trading API hosts (§29, E-17, E-18). SPEC-P0.2 assigns `ALPACA_TRADING` to execution; with O-13 the ingest process also calls that host and needs a credential for it. No retrieved page says whether an Alpaca key can be limited to reading | SPEC-P0.2 §10.1; §29 | **Decided by the Owner 2026-10-09 (O-14):** the paper host and a paper-account key only. Whether a key can be made read-only stays unknown `[OQ-37]` |
 | P21-33 | A cash merger cannot be constructed. `CorporateAction` requires a `SuccessorLink` for `MERGER` and `ACQUISITION`, and `SuccessorLink` requires a successor instrument and a `share_ratio` above zero. Alpaca's cash-merger record has a cash rate, no share rate, and an acquirer that is optional (§29, E-19) | `models.py` `CorporateAction`, `SuccessorLink` | SPEC-P1.1 owner, with condition 9. P2.1 requests no merger type until then (§8.1) |
 
 ---
@@ -2842,7 +2844,7 @@ open. Nothing here is answered by this document.
 | OQ-34 | Does IR-21's one-day row form survive the answer to `[OQ-25]`? **Decided provisionally 2026-10-09 (O-12): one row per symbol per dump date, valid one day.** The Owner first approved "a new row only when the value changes"; `[P21-28]` shows that form cannot be written by `app_rw` | Owner, once `[OQ-25]` is answered | If the dump for a session is available before that session's order window: confirm the form. If it is not: choose between writing the next session's row from the previous dump, a pre-open reference run, removing IR-21 in favour of P3.1 or P3.2, or amending SPEC-P1.2 so a regime row can be closed | **Blocks freeze** of IR-21 only. India is unfunded. Evidence of 2026-10-09: §29.2 |
 | OQ-35 | Alpaca `GET /v3/calendar/{market}`: how far back and forward does it reach; is there a largest span per request; can a long range be cut short without an error; should the vendor's `settlement_date` be compared with IR-16's? | Alpaca documentation or support; one recorded response | "What date range does /v3/calendar/{market} cover, what is the largest start-to-end span one request returns, and is a response ever truncated?" The older `GET /v2/calendar` page states 1970 to 2029 | **Blocks freeze** of the US calendar adapter: an undetected short response would make open days read as closed (IR-22) |
 | OQ-36 | Alpaca `GET /v1/corporate-actions`: is it included in the bought data plan; which date do `start` and `end` select on; how far back does it reach; are `source_rate`, `new_rate` and `rate` exact decimals? | Alpaca documentation or support; one recorded response | "Is /v1/corporate-actions on the data host included in Algo Trader Plus; do start and end filter on process_date; what is the earliest process_date served?" SPEC-P0.2 §3.2 lists corporate actions among both data plans' features and does not name this endpoint | **Blocks** the corporate-event adapter's code; O-13 is conditional on it. `[A-18]` |
-| OQ-37 | Which credential does the US calendar adapter use? The endpoint is on the trading hosts only `[P21-32]` | Owner; Alpaca documentation | Can an Alpaca API key be restricted to read-only calls? If not: is a paper-account key acceptable for a production calendar, and does the paper host serve the same calendar as the live host? | **Blocks** the US calendar adapter's code. No interim answer is assumed here |
+| OQ-37 | Which credential does the US calendar adapter use? The endpoint is on the trading hosts only `[P21-32]` | Owner; Alpaca documentation | Can an Alpaca API key be restricted to read-only calls? If not: is a paper-account key acceptable for a production calendar, and does the paper host serve the same calendar as the live host? | **Decided 2026-10-09 (O-14): the paper host and a paper-account key only.** Still open, and still blocking the US calendar adapter's code: that the paper host serves the same calendar as the live host, to be shown by one recorded response from each |
 
 ## CONTRACTS EXPORTED
 
@@ -2902,4 +2904,4 @@ may rely on it until `[A-10]` is verified against one documented ticker-rename c
 
 ---
 
-# SPEC-P2.1-INGEST v0.6 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.7 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
