@@ -1,10 +1,10 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.5
+version: 0.6
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
-produces: [migrations/0002_ingest.sql, config/ingest.yaml, src/provider/enums.py, src/provider/spec.py, src/data/, enum.IngestDataType, enum.ManifestStatus, enum.FailureKind, enum.GapKind, enum.GapState, enum.ReconKind, class.IngestConfig, class.IngestSet, class.BackfillJobRequest, class.DailyRunRequest, class.DailyRunResult, protocol.ReferenceProvider, protocol.CalendarProvider, protocol.DailyBarProvider, protocol.IntradayBarProvider, protocol.CorporateActionProvider, protocol.FundamentalsProvider, protocol.FilingsProvider, protocol.MacroProvider, protocol.FxProvider, protocol.NewsProvider, protocol.BarStream, table.ingest_manifest, table.ingest_checkpoint, table.ingest_failure, table.ingest_gap, table.ingest_reconciliation, table.provider_instrument_ref, table.raw_news_snapshot, table.macro_series, table.macro_observation, table.edgar_index_snapshot, table.edgar_filing, table.insider_filing_raw, table.corporate_action_terms, rule.IR-1..IR-21]
+produces: [migrations/0002_ingest.sql, config/ingest.yaml, src/provider/enums.py, src/provider/spec.py, src/data/, enum.IngestDataType, enum.ManifestStatus, enum.FailureKind, enum.GapKind, enum.GapState, enum.ReconKind, class.IngestConfig, class.IngestSet, class.BackfillJobRequest, class.DailyRunRequest, class.DailyRunResult, protocol.ReferenceProvider, protocol.CalendarProvider, protocol.DailyBarProvider, protocol.IntradayBarProvider, protocol.CorporateActionProvider, protocol.CorporateEventProvider, protocol.FundamentalsProvider, protocol.FilingsProvider, protocol.MacroProvider, protocol.FxProvider, protocol.NewsProvider, protocol.BarStream, table.ingest_manifest, table.ingest_checkpoint, table.ingest_failure, table.ingest_gap, table.ingest_reconciliation, table.provider_instrument_ref, table.raw_news_snapshot, table.macro_series, table.macro_observation, table.edgar_index_snapshot, table.edgar_filing, table.insider_filing_raw, table.corporate_action_terms, rule.IR-1..IR-23]
 ---
 
 # SPEC-P2.1 — Data Ingestion
@@ -56,7 +56,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | Closed | X5 condition 10 (X3R-M2). Not P2.1's |
 | P2.1 code that relies on `[DEFAULT-13]` | Closed | Requires `ASSUMPTION [A-10]` verified against one documented ticker-rename case (Owner decision O-9) |
 
-### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11, O-12: 2026-10-09)
+### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11 to O-13: 2026-10-09)
 
 | # | Decision |
 |---|---|
@@ -72,6 +72,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | O-10 | `[OQ-21]`: a P2.1-owned 0002 table of exact corporate-action terms keyed by `action_id` (`corporate_action_terms`, §22.12). The 0001 `corporate_action` row keeps its constrained, rounded representation. SPEC-P1.1 and SPEC-P1.2 are not re-opened. `[DEFAULT-14]` is amended to match |
 | O-11 | Block C correction: the blocking questions are presented as ten grouped questions with their options (§1). P2.1's reference loader writes India tick-size rows to `tick_size_regime` from the instruments dump (`[DEFAULT-17]`, rule IR-21). The wording approved was "a new row only when the value changes"; `[P21-28]` makes that unwritable, so IR-21 uses one-day rows; see O-12 |
 | O-12 | IR-21's one-day row form is adopted **provisionally**. `[OQ-25]` stays open: whether the India instruments dump is available before the order window it must serve has not been verified, and no pre-open readiness is claimed. The form must be revisited if the dump is not available in time `[OQ-34]` |
+| O-13 | Three decisions on the evidence of §29. (a) **US calendar source:** Alpaca's calendar endpoint supplies NYSE and NASDAQ sessions (rules IR-22, IR-23). This supersedes the last sentence of O-6 for the US only; the India source stays open `[OQ-1]`. (b) **Other corporate actions:** Alpaca's corporate-actions endpoint is the source for spin-offs, mergers, name changes and rights distributions, **subject to confirming plan access** `[OQ-36]`. This draft specifies spin-offs and rights distributions; mergers and name changes are named and not yet specified, for the reasons in §8.1. (c) **Fractional volume `[P21-29]`:** the reject rule of §7.2 stands until a measurement shows how often it applies (§21) |
 
 ### 0.4 Version history
 
@@ -82,6 +83,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | 0.3 | 2026-10-09 | Block C conformance correction and Owner decision O-11. Section 1 is restructured into ten grouped blocking questions with an Options column; no approved default is changed or renumbered. Section 2 gains seven non-blocking categories. Every rule gains its edge case: IR-14, IR-19, and a new edge-case column in §13.1, §16.1, §16.2, §17, §18, §19.2, §19.5 and §23.1. Adds `[DEFAULT-17]` and rule IR-21 (India tick-size loading) and findings `[P21-26]` to `[P21-28]`. No DDL is changed |
 | 0.4 | 2026-10-09 | Owner decision O-12: rule IR-21's one-day row form is adopted provisionally, conditional on `[OQ-25]`. Wording only; no other rule, default or DDL is changed |
 | 0.5 | 2026-10-09 | Vendor evidence pass. Adds §29: what the retrieved vendor documentation says, and what it settles and leaves open for each open question. Adds findings `[P21-29]` to `[P21-31]`. **No rule, default, field mapping or DDL is changed, and no source is adopted**: adopting any of this evidence is a later, separate change |
+| 0.6 | 2026-10-09 | Owner decision O-13, adopting part of the evidence of §29. US sessions from Alpaca's calendar endpoint: rules IR-22 and IR-23, a field mapping (§7.3), the config key `full_session_seconds`. Spin-offs and rights distributions from Alpaca's corporate-actions endpoint: the wire record `WireCorporateEvent`, the protocol `CorporateEventProvider`, a field mapping, four columns and one constraint on the P2.1-owned table `corporate_action_terms`. Adds `[A-16]` to `[A-18]`, `[OQ-35]` to `[OQ-37]`, findings `[P21-32]` and `[P21-33]`, error paths 36 and 37, tests T-19 and T-20. Narrows `[OQ-1]` to India and `[OQ-29]` to what is left. Mergers and name changes are **not** specified. No 0001 object and no frozen spec is touched; no approved default is changed |
 
 ---
 
@@ -221,12 +223,13 @@ class IngestDataType(StrEnum):
 |---|---|---|
 | `REFERENCE` (US) | `US_REFERENCE_DATA` | `MASSIVE` |
 | `REFERENCE` (IN) | `IN_MARKET_DATA` | `ZERODHA` (instruments dump) |
-| `CALENDAR` | none `[P21-15]` | **`[OQ-1]` — no frozen spec names a source** |
+| `CALENDAR` (US) | none `[P21-15]` | `ALPACA_TRADING`, `GET /v3/calendar/{market}` (O-13; §29, E-18). Not recorded in SPEC-P0.2 `[A-17]` |
+| `CALENDAR` (IN) | none `[P21-15]` | **`[OQ-1]` — no source found** |
 | `BAR_DAILY` (US) | `US_DAILY_HISTORY` | `MASSIVE` |
 | `BAR_DAILY` (IN) | `IN_MARKET_DATA` | `ZERODHA` |
 | `BAR_5M` | `US_REALTIME_INTRADAY` | `ALPACA_DATA`, from `[RS §12]` stage 5 `[FROZEN P0.2 DEFAULT-P9]` |
 | `BAR_5M_VALIDATION` | `US_DAILY_HISTORY` | `MASSIVE` `[FROZEN P0.3 §3.4]` |
-| `CORPORATE_ACTION` (US) | none `[P21-15]` | `MASSIVE` splits and dividends `[FROZEN P0.3 §3.4]`; other types `[P21-24]` |
+| `CORPORATE_ACTION` (US) | none `[P21-15]` | `MASSIVE` splits and dividends `[FROZEN P0.3 §3.4]`; `ALPACA_DATA` spin-offs and rights distributions (O-13; §29, E-19); other types `[P21-24]` |
 | `CORPORATE_ACTION` (IN) | none | **`[OQ-8]`** |
 | `FUNDAMENTALS` (US) | `US_FUNDAMENTALS` | `FMP` primary; `SEC_EDGAR` authority (N7) |
 | `FUNDAMENTALS` (IN) | none | **`[OQ-8]`** |
@@ -254,6 +257,8 @@ tz-aware UTC; a violation raises and the record becomes an `ingest_failure` row 
 # src/data/wire.py
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from provider.enums import ProviderId
@@ -296,6 +301,23 @@ class WireDividend(_Wire):
     cash_amount: Decimal = Field(gt=0, description="Per share, listing currency, vendor precision.")
     distribution_type: str | None = Field(default=None, max_length=32)
     frequency: int | None = Field(default=None, ge=0, le=365)
+
+
+class WireCorporateEvent(_Wire):
+    """A spin-off or a rights distribution (O-13). The rates are share counts, never price factors."""
+    vendor_id: str = Field(min_length=1, max_length=128, description="The vendor's identifier of the action.")
+    kind: Literal["spin_off", "rights_distribution"]
+    source_symbol: str = Field(min_length=1, max_length=32, description="The existing security.")
+    new_symbol: str = Field(min_length=1, max_length=32, description="The security distributed. Never resolved.")
+    source_rate: Decimal | None = Field(default=None, gt=0, description="Vendor source_rate. Spin-off only.")
+    new_rate: Decimal = Field(gt=0, description="Vendor new_rate (spin-off) or rate (rights distribution).")
+    ex_date: date = Field(description="Exchange-local date.")
+
+    @model_validator(mode="after")
+    def _rate_matches_kind(self) -> "WireCorporateEvent":
+        if (self.kind == "spin_off") != (self.source_rate is not None):
+            raise ValueError("source_rate is required for a spin-off and absent for a rights distribution")
+        return self
 
 
 class WireInstrument(_Wire):
@@ -392,8 +414,9 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from data.wire import (WireBar, WireDividend, WireFiling, WireFundamentals, WireFxRate,
-                       WireInstrument, WireMacroObservation, WireNews, WireSession, WireSplit)
+from data.wire import (WireBar, WireCorporateEvent, WireDividend, WireFiling, WireFundamentals,
+                       WireFxRate, WireInstrument, WireMacroObservation, WireNews, WireSession,
+                       WireSplit)
 from provider.enums import ProviderId
 
 
@@ -448,6 +471,14 @@ class CorporateActionProvider(Protocol):
     def fetch_dividends(self, *, provider_symbol: str | None, ex_date_from: date, ex_date_to: date,
                         cursor: str | None) -> Page[WireDividend]:
         """Dividends going ex in `[ex_date_from, ex_date_to]`; every symbol when `provider_symbol` is None."""
+
+
+@runtime_checkable
+class CorporateEventProvider(Protocol):
+    provider_id: ProviderId
+    def fetch_events(self, *, provider_symbols: Sequence[str], date_from: date, date_to: date,
+                     cursor: str | None) -> Page[WireCorporateEvent]:
+        """Spin-offs and rights distributions for the symbols, `[date_from, date_to]` both inclusive."""
 
 
 @runtime_checkable
@@ -561,12 +592,13 @@ An error is never translated into `None`.
 | Adapter | Protocols | Source fields | State |
 |---|---|---|---|
 | `adapters/massive.py` | `ReferenceProvider`, `DailyBarProvider`, `IntradayBarProvider`, `CorporateActionProvider` | §7.3 | Bars, splits, dividends, tickers: fields `[V-P0.2]`. Ticker-type values, `primary_exchange` values, Ticker Events, trades: **`[OQ-22]`** |
-| `adapters/alpaca_data.py` | `IntradayBarProvider`, `BarStream`, `NewsProvider` | §7.3 | Fields `[V-P0.2]` |
+| `adapters/alpaca_data.py` | `IntradayBarProvider`, `BarStream`, `NewsProvider`, `CorporateEventProvider` | §7.3 | Bars, stream, news: fields `[V-P0.2]`. Corporate events: fields from §29, E-19, `ASSUMPTION [A-17]`; plan access and what the date interval selects on: **`[OQ-36]`** |
 | `adapters/fmp.py` | `FundamentalsProvider` | none recorded | **`[OQ-23]`** — SPEC-P0.2 §3.4 records pricing and quotas only |
 | `adapters/sec_edgar.py` | `FilingsProvider` | none recorded | **`[OQ-9]`** — SPEC-P0.2 §3.8 records policy, hosts and cutoffs only |
 | `adapters/fred.py` | `MacroProvider` | endpoint names only | **`[OQ-24]`** |
 | `adapters/zerodha.py` | `ReferenceProvider`, `DailyBarProvider` | `tick_size`, `lot_size` only | **`[OQ-25]`** |
-| Calendar adapter | `CalendarProvider` | — | **`[OQ-1]`** — no provider named |
+| `adapters/alpaca_trading.py` | `CalendarProvider`, US exchanges only | §7.3 | Fields from §29, E-18, `ASSUMPTION [A-17]`. Range and span limits: **`[OQ-35]`**. Credential: **`[OQ-37]`** |
+| India calendar adapter | `CalendarProvider` | — | **`[OQ-1]`** — no source found |
 | FX adapter | `FxProvider` | — | **`[OQ-7]`** |
 
 **An adapter whose row names an open question has a complete contract (its protocol, its wire
@@ -647,6 +679,14 @@ because `instrument` has no column for a CIK, a share-class FIGI or a Zerodha in
 `session_type` is `HALF_DAY` when the wire record says so, `SPECIAL` when it says so (with
 `counts_for_sequencing = false` `[FROZEN P1.1 §4.2]`), otherwise `REGULAR`.
 
+**US sessions come from Alpaca's calendar endpoint (O-13).** India has no source `[OQ-1]`: an India
+calendar load cannot run, so every India date is outside coverage and is `MISSING_SESSION`.
+
+| # | Rule | Edge case |
+|---|---|---|
+| **IR-22** | NYSE and NASDAQ sessions are requested from `GET /v3/calendar/{market}` on the Alpaca trading host with `timezone=UTC`, one request per `(exchange, year)`, `start` and `end` both inclusive (§7.3). The code sent as `{market}` is the key of `calendar.markets.US.exchange_codes` | **A calendar load is all or nothing.** One rejected record, a record dated outside the requested range, or two records for one date fails the load for that exchange and range: no session row from that response is written and no coverage is recorded (IR-15), because a date missing inside coverage would read as "closed". The page states neither how far back the endpoint reaches nor a maximum span per request `[OQ-35]`; a year that returns no record fails the same way and is never read as a year of closures |
+| **IR-23** | The endpoint does not flag a half-day. `is_half_day` is `true` exactly when `core_end − core_start` is shorter than `calendar.markets.US.full_session_seconds`, `ASSUMPTION [A-16]`. `is_special` is always `false` from this adapter | The label only: expected windows, timers and bar timestamps are computed from the session's own instants, never from the label, so a wrong label moves no window. A core session **longer** than the configured value fails the load (IR-22): it means the configured value is wrong. A US special session, if one ever occurs, would be labelled `REGULAR` or `HALF_DAY` and would count for sequencing `[OQ-1]`. `full_session_seconds` absent for the US: the configuration is rejected (§23) |
+
 ---
 
 ## 7. Normalisation
@@ -676,6 +716,7 @@ first:
 | `Price` (`numeric(18,6)`) | 6 | `PRECISION_EXCEEDED`; record not stored |
 | `bar_*.volume` (`bigint`) | 0 | `PRECISION_EXCEEDED` |
 | `corporate_action.ratio` (`numeric(18,6)`) | not bounded | Never refused. The exact `split_from` and `split_to` go to `corporate_action_terms`; the 0001 `ratio` is the quotient rounded half-up to 6 places and `ratio_rounded_in_0001` records whether rounding occurred (§8.2) |
+| `corporate_action.ratio` of a `SPINOFF` or `RIGHTS_ISSUE` | not bounded | Never refused. The exact `source_rate` and `new_rate` go to `corporate_action_terms`; the 0001 `ratio` is `new_rate / source_rate` (spin-off) or `new_rate` (rights distribution) rounded half-up to 6 places, and `ratio_rounded_in_0001` records whether rounding occurred (§8.2) |
 | `corporate_action.cash_amount` (`numeric(18,2)`) | not bounded | Never refused. The exact amount goes to `corporate_action_terms.cash_amount_exact`; the 0001 `cash_amount` is that amount rounded half-up to 2 places — the `Money` constructor's own rounding — and `cash_rounded_in_0001` records whether rounding occurred (§8.2) |
 | `fx_rate.rate` (`numeric(18,6)`) | 6 | `PRECISION_EXCEEDED` |
 | Fundamentals metrics (`jsonb`, decimal strings) | not bounded by the column | stored at vendor precision |
@@ -684,7 +725,8 @@ Every `PRECISION_EXCEEDED` on a price is also the standing measurement for `Q-P1
 
 ### 7.3 Provider field mappings
 
-Only fields recorded in SPEC-P0.2 are mapped. A vendor field not listed is not read.
+Only fields recorded in SPEC-P0.2, or recorded in §29 as a *page* item and adopted by an Owner decision,
+are mapped. A vendor field not listed is not read.
 
 **Massive — aggregates `GET /v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from}/{to}`,
 always with `adjusted=false`** `[V-P0.2 §3.3]`
@@ -753,7 +795,37 @@ always with `adjusted=false`** `[V-P0.2 §3.3]`
 | `url` | `url` | `url_raw` |
 | `images` | not read | — |
 
-**FMP, SEC EDGAR, FRED, Zerodha, the calendar source and the FX source: no mapping.** See §4.4.
+**Alpaca — calendar `GET /v3/calendar/{market}` with `timezone=UTC`, `start`, `end`** (§29, E-18; O-13)
+
+| Vendor field | Wire field | Stored as |
+|---|---|---|
+| path `market` | `exchange_code` | `exchange_session.exchange`, through `calendar.markets.US.exchange_codes` |
+| `date` | `trading_date` | `trading_date` |
+| `core_start`, `core_end` | `regular_open_utc`, `regular_close_utc` | The columns of the same name. A date-time with no offset is `UNDOCUMENTED_TIMEZONE` |
+| `pre_start` | `pre_market_open_utc` | The column of the same name; absent → `NULL` |
+| `post_end` | `post_market_close_utc` | The column of the same name; absent → `NULL` |
+| `lunch_start`, `lunch_end` | none | **Presence is a `SCHEMA_VIOLATION`**: `exchange_session` cannot hold a session with a break, and the load fails (IR-22) |
+| `settlement_date` | not read | `settlement_date` is computed by IR-16. Whether the vendor's value should be compared with it is `[OQ-35]` |
+| `pre_end`, `post_start`, the response's `market` object | not read | — |
+
+`is_half_day` and `is_special` have no vendor field: rule IR-23.
+
+**Alpaca — corporate actions `GET /v1/corporate-actions` with `types=spin_off,rights_distribution`,
+`symbols`, `start`, `end`, `limit`, `page_token`** (§29, E-19; O-13)
+
+| Vendor field | Wire field | Stored as |
+|---|---|---|
+| the array the record arrives in: `spin_offs`, `rights_distributions` | `kind` | `corporate_action.action_type` `SPINOFF`, `RIGHTS_ISSUE` (IR-18) |
+| `id` | `vendor_id` | `corporate_action_terms.vendor_action_id` |
+| `source_symbol` | `source_symbol` | resolved to `instrument_id` as of `ex_date` |
+| `new_symbol` | `new_symbol` | `corporate_action_terms.counterpart_symbol`, as text; not resolved to an instrument |
+| `source_rate` (spin-off) | `source_rate` | `corporate_action_terms.source_rate` |
+| `new_rate` (spin-off), `rate` (rights distribution) | `new_rate` | `corporate_action_terms.new_rate` |
+| `ex_date` | `ex_date` | `corporate_action.ex_date` and `effective_date`, `ASSUMPTION [A-18]` |
+| `next_page_token` | `Page.next_cursor` | sent back as `page_token` |
+| `process_date`, `record_date`, `payable_date`, `expiration_date`, `due_bill_redemption_date`, `currency`, the CUSIP and ISIN fields | not read | — |
+
+**FMP, SEC EDGAR, FRED, Zerodha, the India calendar source and the FX source: no mapping.** See §4.4.
 
 ### 7.4 Domain type to table
 
@@ -775,7 +847,7 @@ table is therefore the mapping of record for what P2.1 writes. Neither side is c
 | `fundamentals_snapshot.valid_from`, `valid_to` | `valid_from` = `period_end`; `valid_to` = `NULL` |
 | `fundamentals_snapshot.knowledge_from`, `knowledge_to` | As `corporate_action` |
 | `fx_rate.*` | `FxRate` fields of the same name |
-| `corporate_action_terms.*` | The `WireSplit` or `WireDividend` the action was built from, unrounded; `action_id` and `knowledge_from` from the `corporate_action` row written in the same transaction |
+| `corporate_action_terms.*` | The `WireSplit`, `WireDividend` or `WireCorporateEvent` the action was built from, unrounded; `action_id` and `knowledge_from` from the `corporate_action` row written in the same transaction |
 | `instrument.*`, `symbol_mapping.*`, `exchange_session.*` | Fields of the same name; bitemporal columns as above |
 | `tick_size_regime.*` (India rows only) | `WireInstrument.tick_size` and `as_of_date`, by rule IR-21. `min_price` is 0; `source` names the dump and its date |
 
@@ -791,14 +863,17 @@ mapped to the calendar by its end date, and nothing else is inferred.
 
 ### 8.1 What can be ingested today
 
-`CorporateActionType` has eleven members. Verified source fields exist for four `[P21-24]`:
+`CorporateActionType` has eleven members. Verified source fields exist for four `[P21-24]`; O-13 adds a documented source for two more:
 
 | Type | Source | State |
 |---|---|---|
 | `SPLIT`, `REVERSE_SPLIT` | Massive splits | Mapped (§7.3) |
 | `CASH_DIVIDEND` | Massive dividends | Mapped (§7.3); exact terms in `corporate_action_terms` (§8.2) |
 | `DELISTING` | Massive tickers `delisted_utc` | Written when the reference loader first sees the delisting; `ex_date` = `effective_date` = `delisted_on` |
-| `STOCK_DIVIDEND`, `TICKER_CHANGE`, `EXCHANGE_TRANSFER`, `MERGER`, `ACQUISITION`, `SPINOFF`, `RIGHTS_ISSUE` | none recorded | **`[OQ-29]`**. `TICKER_CHANGE` is observable from the reference loader (IR-11) and is written from there; the other six have no source |
+| `SPINOFF`, `RIGHTS_ISSUE` | Alpaca corporate actions (O-13) | Mapped (§7.3) from the documentation page, not from a verified response, `ASSUMPTION [A-17]`; exact terms in `corporate_action_terms` (§8.2). Conditional on plan access `[OQ-36]` |
+| `MERGER` | Alpaca corporate actions (O-13): **named, not requested** | Not specified in this version. A merger needs a `successor_link` row, whose `audit_event_id` is `NOT NULL`, so none can be stored before condition 9 (§20). A cash merger cannot be represented at all `[P21-33]`. The merger types join the request when both are settled |
+| `TICKER_CHANGE` | Reference loader (IR-11) | Written from there, as before. Alpaca's name-change records (O-13) are **not requested**: a second writer would put two open rows on one event, and a name change's only date, `process_date`, is Alpaca's processing date, which the page does not tie to the first session under the new symbol `[OQ-29]` |
+| `STOCK_DIVIDEND`, `EXCHANGE_TRANSFER`, `ACQUISITION` | none adopted | **`[OQ-29]`** |
 
 ### 8.2 Rules
 
@@ -807,10 +882,13 @@ mapped to the calendar by its end date, and nothing else is inferred.
 | **IR-18** | The action type is decided by the **endpoint** the record came from, through a mapping table per adapter. A record that fits no type raises `UnknownCorporateActionError` → `UNKNOWN_CORPORATE_ACTION`; it is never skipped | `parse_corporate_action_type` in the domain only upper-cases a string; no vendor emits our enum names, so adapters do not call it with vendor text |
 | — | `ratio` = `split_to / split_from`, computed in `Decimal` and rounded half-up to 6 places for the 0001 column | A quotient that does not terminate within 6 places (1-for-3 is 0.333333 recurring) cannot be exact in 0001 `[P21-18]`. The exact `split_from` and `split_to` are stored in `corporate_action_terms` with `ratio_rounded_in_0001 = true`. A split is never refused for this reason: a missing split misprices every later bar |
 | — | `cash_amount` in 0001 = the vendor's per-share amount rounded half-up to 2 places, which is the `Money` constructor's own rounding | An amount with more than 2 decimals cannot be exact in 0001 `[P21-17]`. The exact amount is stored in `corporate_action_terms.cash_amount_exact` with `cash_rounded_in_0001 = true`. A dividend is never refused for this reason |
-| — | Every `SPLIT`, `REVERSE_SPLIT` and `CASH_DIVIDEND` row in `corporate_action` has exactly one `corporate_action_terms` row with the same `(action_id, knowledge_from)`, written in the same transaction (O-10) | A changed fact closes the 0001 row and inserts a new one; the new row gets its own terms row. If either insert fails the transaction rolls back: the action is absent, never half-recorded. `DELISTING` and `TICKER_CHANGE` have no terms row |
+| — | Every `SPLIT`, `REVERSE_SPLIT`, `CASH_DIVIDEND`, `SPINOFF` and `RIGHTS_ISSUE` row in `corporate_action` has exactly one `corporate_action_terms` row with the same `(action_id, knowledge_from)`, written in the same transaction (O-10) | A changed fact closes the 0001 row and inserts a new one; the new row gets its own terms row. If either insert fails the transaction rolls back: the action is absent, never half-recorded. `DELISTING` and `TICKER_CHANGE` have no terms row |
 | — | Natural key: `(instrument_id, action_type, ex_date, source)` among rows with `knowledge_to IS NULL` | A re-fetched action identical on every fact column: no write. A changed fact: close the open row, insert a new one with the **same** `action_id` |
 | — | `as_of` = the `retrieved_at` of the first sighting. No verified source field carries an announcement time | A backfilled split therefore has an `as_of` on the backfill date. A backtest must select actions by `effective_date`, not `as_of` |
 | — | An action whose `effective_date` has no session row inside calendar coverage: `CorporateActionCalendarError` → `DOMAIN_VALIDATION_FAILED`, not stored `[FROZEN P1.1 §5.3]` | Applies to splits. A dividend `pay_date` on a closed date is legitimate and is stored |
+| — | A spin-off or rights distribution is stored against the **source** instrument: `ratio` = `new_rate / source_rate` (spin-off) or `new_rate` (rights distribution), computed in `Decimal` and rounded half-up to 6 places; `cash_amount` is `NULL`; `ex_date` and `effective_date` are both the vendor's `ex_date` | The page names the rate fields and does not define them; reading them as new shares for source shares is `ASSUMPTION [A-18]`. The exact `source_rate` and `new_rate` are stored in `corporate_action_terms`, with `ratio_rounded_in_0001` set when rounding occurred. **They are share counts, not price factors**: nothing stored says how much of the source's value left with the distribution (§8.4) |
+| — | Alpaca is asked only for `spin_off` and `rights_distribution`. It never writes a `SPLIT`, `REVERSE_SPLIT` or `CASH_DIVIDEND` row: Massive stays the one source of those (IR-20) | Two vendor records with different `id` and the same natural key (one source distributing two securities on one `ex_date`): the second is `DUPLICATE_CONFLICT` and is not stored, and it does not close the first. A record of any other kind in the response is `UNKNOWN_CORPORATE_ACTION` (IR-18) |
+| — | Events are requested for the ingest set's symbols over the look-back and look-ahead of §12.1 step 5, as calendar dates | The page says results are sorted by `process_date` and does not say which date `start` and `end` select on `[OQ-36]`. The vendor warns that an action can appear late: one that appears after its date has left the look-back is not fetched by the daily run and is found only by a backfill job (§10.1) |
 
 ### 8.3 A split announced during a backfill
 
@@ -830,6 +908,10 @@ representation whenever `ratio_rounded_in_0001` is true and is not used for adju
 that needs a dividend's amount takes `cash_amount_exact`, and its `distribution_type` from the same
 row. Whether and how dividends adjust is P2.4's decision; this phase guarantees only that both
 dates and the exact amount are stored and that `ex_date` is the vendor's ex-dividend date.
+
+A `SPINOFF` or `RIGHTS_ISSUE` row carries share counts only (`source_rate`, `new_rate`). This phase
+defines **no** price adjustment for either and exports none: a reader must not scale a price by
+their `ratio`. Whether the stored terms are enough to adjust a series is P2.4's question `[OQ-29]`.
 
 ---
 
@@ -859,7 +941,7 @@ dates and the exact amount are stored and that `ex_date` is the vendor's ex-divi
 | **IR-19** | **Insert-only.** Every write to a uni-temporal table is an `INSERT` with `ON CONFLICT DO NOTHING` on its key, followed by a read of the stored row when the insert affected nothing | Two runs inserting the same key at once: one inserts; the other's insert affects nothing, so it reads the stored row and classifies it as duplicate or conflict like any other. No lock is taken and no row is overwritten |
 | — | Stored row identical on every fact column (everything except `retrieved_at`): a duplicate. Counted in `duplicate_count`; nothing written | A replayed backfill partition is entirely duplicates and succeeds |
 | — | Stored row **different**: `DUPLICATE_CONFLICT` failure plus an `ingest_reconciliation` row of kind `REVISION`. The stored row is not changed and cannot be | For `fx_rate` this is ADR-15 §5 working as designed: a past rate is never corrected |
-| **IR-20** | Only the SPEC-P0.2 `PRIMARY` provider for a capability writes a 0001 market-data table `[DEFAULT-3]` | Rule N7's EDGAR row in `fundamentals_snapshot` is the one exception, by SPEC-P0.2 decision 5: `SEC_EDGAR` is `AUTHORITY` |
+| **IR-20** | Only the SPEC-P0.2 `PRIMARY` provider for a capability writes a 0001 market-data table `[DEFAULT-3]` | Rule N7's EDGAR row in `fundamentals_snapshot` is the one exception, by SPEC-P0.2 decision 5: `SEC_EDGAR` is `AUTHORITY`. `corporate_action` has no capability `[P21-15]`; one provider writes each action type: Massive for splits and cash dividends, Alpaca for spin-offs and rights distributions (O-13) |
 | — | `is_final = false` is never written to `bar_daily`, `bar_intraday_5m` or its twin | The row could never be finalised. A daily bar is written only after the session's `regular_close_utc`; a 5-minute bar only when completed (§13.3) |
 | — | Market-data writes run at `synchronous_commit = off` `[FROZEN P1.2 §10.3]`. `fx_rate` is NAV state and is written at `remote_write` | A lost market-data commit is re-fetched; that is why the checkpoint is written in the same transaction as its rows (§10.2) |
 | — | Bitemporal tables: `UPDATE` sets `knowledge_to` only, then `INSERT`. Both in one transaction | The 0001 trigger rejects anything else |
@@ -873,8 +955,9 @@ dates and the exact amount are stored and that `ex_date` is the vendor's ex-divi
 | Job | Partition | Source | Budget `[FROZEN P0.3 §3.4]` |
 |---|---|---|---|
 | Reference snapshots | one `as_of_date` | Massive tickers | 2 h |
-| Calendar | one `(exchange, year)` | `[OQ-1]` | — |
+| Calendar | one `(exchange, year)` | US: Alpaca calendar (IR-22). India: `[OQ-1]` | — |
 | Splits, dividends | one instrument | Massive | 15 min |
+| Spin-offs, rights distributions | one calendar year, for the symbols valid in it (§10.3) | Alpaca corporate actions; how far back it reaches is `[OQ-36]` | — |
 | Daily bars | one `(instrument, symbol-validity interval, date range)` of at most 50,000 points | Massive | 2 h |
 | 5-minute validation slice | one `(instrument, trading_date)` | Massive | 2 h |
 | Fundamentals | one `(instrument, fiscal quarter)` `[FROZEN RULE-B5]` | FMP | 6 h |
@@ -1525,6 +1608,7 @@ events above can be written.
 | P0.1 A18 | News items per session | Row count in `raw_news_snapshot` per session | P0.3 storage model |
 | `[A-1]` | Volume agreement between two consolidated sources | Distribution of volume differences once a second source exists | §14.2 |
 | P0.3 Q-12 | Zero-trade bar emitted or omitted | The `RESOLVED_NO_DATA_AT_SOURCE` rows of §13.4 | RULE-B12d |
+| `[P21-29]` | How often a vendor bar volume is not an integer | Standing: every `PRECISION_EXCEEDED` on `volume`, counted per provider and per run in the manifest's `detail`, from the first backfill onward | The Owner's next decision on §7.2's volume rule (O-13) |
 
 A measurement result is reported to the Owner and recorded where the question lives. It does not
 change a threshold by itself.
@@ -1548,7 +1632,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.5 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.6 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -1823,14 +1907,16 @@ CREATE TABLE trading.insider_filing_raw (
 -- ===== 22.12 corporate_action_terms =====
 -- Owner decision O-10 ([OQ-21]). The exact terms of a corporate action that 0001's
 -- corporate_action cannot hold: its cash_amount is numeric(18,2) and its ratio numeric(18,6).
--- One row per SPLIT, REVERSE_SPLIT or CASH_DIVIDEND row of corporate_action, with the same
+-- One row per SPLIT, REVERSE_SPLIT, CASH_DIVIDEND, SPINOFF or RIGHTS_ISSUE row of
+-- corporate_action (the last two by Owner decision O-13), with the same
 -- (action_id, knowledge_from), written in the same transaction.
 -- No foreign key: 0002 adds no constraint that reaches into a 0001 table.
 -- Unconstrained numeric is deliberate: it stores the vendor's decimal exactly, at any scale.
 CREATE TABLE trading.corporate_action_terms (
     action_id             uuid        NOT NULL,              -- corporate_action.action_id
     knowledge_from        timestamptz NOT NULL,              -- corporate_action.knowledge_from of the row described
-    action_type           text        NOT NULL CHECK (action_type IN ('SPLIT','REVERSE_SPLIT','CASH_DIVIDEND')),
+    action_type           text        NOT NULL CHECK (action_type IN (
+                              'SPLIT','REVERSE_SPLIT','CASH_DIVIDEND','SPINOFF','RIGHTS_ISSUE')),
     cash_amount_exact     numeric     NULL CHECK (cash_amount_exact IS NULL
                                           OR (cash_amount_exact > 0 AND cash_amount_exact < 'Infinity'::numeric)),
                                       -- per share, listing currency, vendor precision
@@ -1843,8 +1929,18 @@ CREATE TABLE trading.corporate_action_terms (
     frequency             integer     NULL CHECK (frequency IS NULL OR frequency BETWEEN 0 AND 365),
     record_date           date        NULL,
     declaration_date      date        NULL,
+    vendor_action_id      text        NULL CHECK (vendor_action_id IS NULL
+                                          OR length(vendor_action_id) BETWEEN 1 AND 128),
+    counterpart_symbol    text        NULL CHECK (counterpart_symbol IS NULL
+                                          OR length(counterpart_symbol) BETWEEN 1 AND 32),
+                                      -- the security distributed, as the vendor names it; not resolved
+    source_rate           numeric     NULL CHECK (source_rate IS NULL
+                                          OR (source_rate > 0 AND source_rate < 'Infinity'::numeric)),
+    new_rate              numeric     NULL CHECK (new_rate IS NULL
+                                          OR (new_rate > 0 AND new_rate < 'Infinity'::numeric)),
+                                      -- share counts of a spin-off or rights distribution; never price factors
     cash_rounded_in_0001  boolean     NOT NULL,              -- TRUE: corporate_action.cash_amount <> cash_amount_exact
-    ratio_rounded_in_0001 boolean     NOT NULL,              -- TRUE: corporate_action.ratio <> split_to / split_from
+    ratio_rounded_in_0001 boolean     NOT NULL,              -- TRUE: corporate_action.ratio <> the exact quotient of this row's terms
     provider_id           text        NOT NULL CHECK (length(provider_id) BETWEEN 1 AND 32),
     response_sha256       text        NOT NULL CHECK (response_sha256 ~ '^[0-9a-f]{64}$'),
     retrieved_at          timestamptz NOT NULL,
@@ -1862,7 +1958,13 @@ CREATE TABLE trading.corporate_action_terms (
             AND record_date IS NULL AND declaration_date IS NULL)),
     CONSTRAINT cat_flags_match_type CHECK (
         (NOT cash_rounded_in_0001 OR action_type = 'CASH_DIVIDEND')
-        AND (NOT ratio_rounded_in_0001 OR action_type IN ('SPLIT','REVERSE_SPLIT')))
+        AND (NOT ratio_rounded_in_0001
+             OR action_type IN ('SPLIT','REVERSE_SPLIT','SPINOFF','RIGHTS_ISSUE'))),
+    CONSTRAINT cat_event_fields CHECK (
+        (action_type IN ('SPINOFF','RIGHTS_ISSUE')) = (vendor_action_id IS NOT NULL)
+        AND (action_type IN ('SPINOFF','RIGHTS_ISSUE')) = (counterpart_symbol IS NOT NULL)
+        AND (action_type IN ('SPINOFF','RIGHTS_ISSUE')) = (new_rate IS NOT NULL)
+        AND (action_type = 'SPINOFF') = (source_rate IS NOT NULL))
 );
 
 -- ===== 22.13 append-only, enforced =====
@@ -2000,6 +2102,8 @@ class NewsConfig(_Cfg):                                     # both ASSUMPTION [A
 class CalendarMarketConfig(_Cfg):
     settlement_cycle_sessions: int = Field(ge=0, le=5, description="Carried from SPEC-P1.1 A11. Unverified.")
     exchange_codes: dict[str, str] = Field(min_length=1, description="Vendor exchange code -> Exchange member.")
+    full_session_seconds: int | None = Field(default=None, ge=300, le=86_400,
+                                             description="Core session length. ASSUMPTION [A-16]. IR-23.")
 
 
 class CalendarConfig(_Cfg):
@@ -2016,6 +2120,9 @@ class CalendarConfig(_Cfg):
                 if member not in Exchange.__members__ or Exchange[member].market.value != market:
                     raise ValueError(f"calendar.markets.{market}.exchange_codes[{code!r}] = {member!r} "
                                      f"is not an Exchange member of {market}")
+        if self.markets["US"].full_session_seconds is None:
+            raise ValueError("calendar.markets.US.full_session_seconds is required: the US calendar "
+                             "source does not flag a half-day (IR-23)")
         return self
 
 
@@ -2140,6 +2247,8 @@ limit SPEC-P0.2 marks unpublished is written `published: false` with no number.
 | 33 | Raw news body over the bound | Wire model | `SCHEMA_VIOLATION`; not truncated; not stored |
 | 34 | Macro series notes contain "Copyright" | §19.5 | Recorded; the series is not ingested |
 | 35 | Session row would change after bars reference it | IR-17 | `DUPLICATE_CONFLICT`; the market's ingest stops until an operator resolves it |
+| 36 | A US calendar response holds a rejected record, a record outside the requested range, two records for one date, a session with a lunch break, a core session longer than `full_session_seconds`, or no record at all | IR-22, IR-23 | The calendar load fails for that exchange and range: no session row is written and no coverage is recorded, so those dates stay `MISSING_SESSION` |
+| 37 | Two corporate events with different vendor identifiers and one natural key | §8.2 | `DUPLICATE_CONFLICT` for the second; it is not stored and the first row is not closed |
 
 ---
 
@@ -2167,6 +2276,8 @@ Specified for the code phase. Nothing here is written yet.
 | T-16 | Migration 0002 against the pinned image, after 0001 | Applies with exit 0; `UPDATE` and `DELETE` are rejected on all thirteen tables; `backtest_ro` and `metrics_ro` are denied on all thirteen; a `pg_dump` of every 0001 object is identical before and after |
 | T-17 | Clock, Redis, credential pre-flight failures | Exit 2; no request sent |
 | T-18 | Config | A literal secret, a missing market, an empty time-server list and `macro.enabled` with no allowlist each stop the run |
+| T-19 | US calendar adapter (IR-22, IR-23), on fixtures built from the documented response shape | A 13:00 ET close yields `is_half_day = true` and 42 expected windows; a record with `lunch_start` fails the whole load and no coverage is written; a year with no record fails; a date-time with no offset is `UNDOCUMENTED_TIMEZONE`; `full_session_seconds` absent for the US stops the run |
+| T-20 | Spin-off and rights distribution (§8.2) | Each writes one `corporate_action` row against the source instrument and one terms row holding the exact rates; a quotient needing more than 6 places sets `ratio_rounded_in_0001`; the request names only `spin_off` and `rights_distribution`; a merger record in a response is `UNKNOWN_CORPORATE_ACTION`; a second event with the same natural key is `DUPLICATE_CONFLICT` |
 
 Every test names the rule it covers. X1 requires every non-trivial branch to have a test in the
 same drop; X2 reviews it in a separate conversation.
@@ -2228,7 +2339,7 @@ file is edited. Each item names what it needs.
 | P21-7 | `DATA_RECEIVED` trigger wording; no P2.1 rejection event; `CORPORATE_ACTION_APPLIED` wording; `successor_link.audit_event_id NOT NULL` | `src/audit/events.py` | `[OQ-13]`, condition 9 |
 | P21-8 | Domain types and tables disagree for bars, corporate actions and fundamentals; the contract test omits those three tables and checks one direction | `tests/verify_p11_p12_contract.py` | §7.4 is P2.1's mapping. The test gap is Stage 1's |
 | P21-9 | `policy.yaml` has no provider registry, no per-type staleness, no Redis or clock keys | `config/policy.yaml` | Handled by O-5 |
-| P21-10 | The calendar and reference-data loaders had no owner; no calendar source is named | SPEC-P1.1 §4.1; SPEC-P0.2 | Owner: O-6. Source: `[OQ-1]` |
+| P21-10 | The calendar and reference-data loaders had no owner; no calendar source is named | SPEC-P1.1 §4.1; SPEC-P0.2 | Owner: O-6. Source: the US by O-13; India `[OQ-1]` |
 | P21-11 | Nothing in `src/` opens a database connection; no dependency manifest | Repository | `[DEFAULT-10]` |
 | P21-12 | A window-start `ts` on a daily bar would let `bars_asof` leak the close | `bars_asof` in migration §6.10 | `[DEFAULT-1]`. `bars_asof` itself is unchanged; a 5-minute-bar reader would need its own rule |
 | P21-13 | `UNIQUE (instrument_id, period_end, restatement_seq)` is not limited to open knowledge rows, so a knowledge correction cannot reuse its sequence number | Migration §6.5 | **Owner / SPEC-P1.2.** Worked around by `[DEFAULT-5]`, which conflates a source correction with a restatement |
@@ -2242,14 +2353,16 @@ file is edited. Each item names what it needs.
 | P21-21 | `Exchange` has four members. A US instrument listed elsewhere cannot be represented, including exchange-traded funds `models.py` marks as read-only regime inputs | `models.py` `Exchange`, `READ_ONLY_INSTRUMENT_TYPES_V1` | `[OQ-22]` first (what values the vendor sends); then P2.6's need |
 | P21-22 | SPEC-P0.3 §13.1 row 2 aborts ingest on any shortfall against the universe; the P2.2 prompt defines a minimum coverage fraction | SPEC-P0.3; `PROMPT-PACK.md` P2.2 | P2.2. This phase follows the frozen row |
 | P21-23 | `stage_latency_observation.strategy_version` is `NOT NULL`; an ingest run has no strategy | Migration §6.9 | `[OQ-20]`. P2.1 does not write this table in v0.1 |
-| P21-24 | Verified source fields exist for four of eleven `CorporateActionType` members | SPEC-P0.2 §3.3 | `[OQ-29]` |
+| P21-24 | Verified source fields exist for four of eleven `CorporateActionType` members | SPEC-P0.2 §3.3 | `[OQ-29]`. O-13 adds a documented source for two more (§8.1) |
 | **P21-25** | **SPEC-P0.2 records no response fields for FMP, SEC EDGAR, FRED, Zerodha historical candles or the Zerodha instruments dump beyond `tick_size` and `lot_size`, nor for Massive trades, ticker types, ticker events or `primary_exchange` values.** Six of eight adapters therefore have no field mapping | SPEC-P0.2 §3.3–3.9 | **Blocks freeze of those adapters.** `[OQ-9]`, `[OQ-22]`–`[OQ-25]` |
 | P21-26 | No precedence is defined between a symbol-specific `tick_size_regime` row and a `*` row. The 0001 `EXCLUDE` constraint covers `(market, symbol)`, so both can cover one date | Migration §6.2; SPEC-P0.2 §10.3 | P3.2 and rule N10 most of all. P2.1 treats the overlap as fail-closed for its own tolerance (§14.2) and decides nothing else |
 | P21-27 | The India `tick_size` in the Zerodha instruments dump was read and mapped to no table, so India's reference source for tick size never reached `tick_size_regime` | SPEC-P0.2 §0.6; this spec's v0.2 §7.4 | **Decided by the Owner 2026-10-09 (O-11):** rule IR-21, `[DEFAULT-17]` |
 | P21-28 | A `tick_size_regime` row cannot be superseded by the application: `app_rw` has no `UPDATE` on the table, and the `EXCLUDE` constraint rejects a new row that overlaps an open-ended one. A changed tick cannot be recorded by closing the old row | Migration §6.2, §6.10 grants | Worked around by IR-21's one-day rows. The US changeover of November 2027 (SPEC-P0.2 F-10) meets the same limit and will need `trading_owner` or a SPEC-P1.2 amendment |
-| P21-29 | A vendor volume can be fractional. Massive's aggregate `v` is a JSON number, not an integer, and its trade records carry a `decimal_size` with a fractional component (§29, E-12, E-13). `bar_*.volume` is `bigint`, and §7.2 rejects a non-integer volume, so a bar containing fractional-share trades would be refused whole | Migration §6.4; §29 | **Owner decision, after a measurement** of how often `v` is non-integer on the bought tier. Not resolved here; §7.2 stands |
+| P21-29 | A vendor volume can be fractional. Massive's aggregate `v` is a JSON number, not an integer, and its trade records carry a `decimal_size` with a fractional component (§29, E-12, E-13). `bar_*.volume` is `bigint`, and §7.2 rejects a non-integer volume, so a bar containing fractional-share trades would be refused whole | Migration §6.4; §29 | **Owner decision 2026-10-09 (O-13): §7.2 stands** until the measurement of §21 shows how often `v` is non-integer on the bought tier; the Owner then decides again |
 | P21-30 | `fx.source_primary` is `RBI_REFERENCE`, but the USD/INR reference rate has been computed and published by FBIL, not the RBI, since 2018-07-10 (§29, E-21) | `config/policy.yaml`; SPEC-P0.1 ADR-15 | Owner / SPEC-P1.3. The key is frozen and labelled an assumption there; P2.1 does not rename it |
 | P21-31 | `[A-13]` computes "next EDGAR business day" as the next Monday to Friday. EDGAR also closes on federal holidays and on other announced days (§29, E-8), so the computed `disseminated_at` can be a day early: look-ahead | §19.2; §29 | A source of EDGAR closure dates `[OQ-30]`. Until then every `disseminated_at` computed across a closure day is suspect, as §19.2 already says |
+| P21-32 | Alpaca serves its calendar only from the trading API hosts (§29, E-17, E-18). SPEC-P0.2 assigns `ALPACA_TRADING` to execution; with O-13 the ingest process also calls that host and needs a credential for it. No retrieved page says whether an Alpaca key can be limited to reading | SPEC-P0.2 §10.1; §29 | Owner, `[OQ-37]`. Not resolved here |
+| P21-33 | A cash merger cannot be constructed. `CorporateAction` requires a `SuccessorLink` for `MERGER` and `ACQUISITION`, and `SuccessorLink` requires a successor instrument and a `share_ratio` above zero. Alpaca's cash-merger record has a cash rate, no share rate, and an acquirer that is optional (§29, E-19) | `models.py` `CorporateAction`, `SuccessorLink` | SPEC-P1.1 owner, with condition 9. P2.1 requests no merger type until then (§8.1) |
 
 ---
 
@@ -2296,6 +2409,12 @@ Every wire record also has the three `_Wire` fields.
 | `WireDividend.cash_amount` | `Decimal` | listing currency per share; — | no | > 0; any scale. Stored exactly in `corporate_action_terms` (§8.2) | W |
 | `WireDividend.distribution_type` | `str` | —; — | yes | ≤ 32 characters | W |
 | `WireDividend.frequency` | `int` | payouts per year; — | yes | 0–365 | W |
+| `WireCorporateEvent.vendor_id` | `str` | —; — | no | 1–128 characters | W |
+| `WireCorporateEvent.kind` | `Literal` | —; — | no | `spin_off`, `rights_distribution` | W; any other kind → `UNKNOWN_CORPORATE_ACTION` |
+| `WireCorporateEvent.source_symbol`, `new_symbol` | `str` | vendor ticker; — | no | 1–32 characters. `new_symbol` is stored as text and never resolved | W; `source_symbol` unmapped → `UNKNOWN_SYMBOL` |
+| `WireCorporateEvent.source_rate` | `Decimal` | shares; — | yes | > 0; any scale. Set exactly when `kind` is `spin_off` | W |
+| `WireCorporateEvent.new_rate` | `Decimal` | shares; — | no | > 0; any scale | W |
+| `WireCorporateEvent.ex_date` | `date` | date; local | no | Any date | W |
 | `WireInstrument.provider_symbol` | `str` | —; — | no | 1–32 characters | W |
 | `WireInstrument.primary_exchange` | `str` | vendor code; — | no | 1–32 characters; must be in the mapping table (IR-12) | W; unmapped → `UNKNOWN_INSTRUMENT_TYPE` |
 | `WireInstrument.security_type` | `str` | vendor code; — | no | 1–32 characters; must be in the mapping table (IR-12) | W; unmapped → `UNKNOWN_INSTRUMENT_TYPE` |
@@ -2378,6 +2497,7 @@ Every wire record also has the three `_Wire` fields.
 | `NewsConfig.revision_lookback_seconds` | `int` | seconds; — | no | 0–2,592,000 | C |
 | `CalendarMarketConfig.settlement_cycle_sessions` | `int` | sequenced sessions after the trade date; — | no | 0–5 | C |
 | `CalendarMarketConfig.exchange_codes` | `dict[str, str]` | vendor code → `Exchange` member; — | no | ≥ 1 entry; every value an `Exchange` member of that market | C |
+| `CalendarMarketConfig.full_session_seconds` | `int` | seconds; — | yes for `IN`; no for `US` | 300–86,400 | C |
 | `CalendarConfig.min_forward_coverage_sessions` | `int` | sequenced sessions; — | no | 1–500 | C |
 | `CalendarConfig.markets` | `dict[str, CalendarMarketConfig]` | —; — | no | Exactly the keys `US` and `IN` | C |
 | `ReferenceMapping.security_type` | `dict[str, str]` | vendor code → `InstrumentType` member or `EXCLUDED`; — | no | Every value a member or the literal `EXCLUDED` | C |
@@ -2526,7 +2646,7 @@ Per table, the remaining columns:
 | `insider_filing_raw.document_bytes` | `bigint` | bytes; — | no | > 0; the length of `document` | D |
 | `corporate_action_terms.action_id` | `uuid` | —; — | no | The `action_id` of the `corporate_action` row described | D |
 | `corporate_action_terms.knowledge_from` | `timestamptz` | instant; UTC | no | The `knowledge_from` of that same row | D |
-| `corporate_action_terms.action_type` | `text` | —; — | no | `SPLIT`, `REVERSE_SPLIT`, `CASH_DIVIDEND` | D |
+| `corporate_action_terms.action_type` | `text` | —; — | no | `SPLIT`, `REVERSE_SPLIT`, `CASH_DIVIDEND`, `SPINOFF`, `RIGHTS_ISSUE` | D |
 | `corporate_action_terms.cash_amount_exact` | `numeric` | listing currency per share, vendor precision; — | yes | > 0 and finite; set exactly when `action_type = CASH_DIVIDEND` | D |
 | `corporate_action_terms.cash_currency` | `text` | ISO currency code; — | yes | `USD`, `INR`; set exactly when `cash_amount_exact` is set | D |
 | `corporate_action_terms.split_from` | `numeric` | old shares; — | yes | > 0 and finite; set exactly for `SPLIT` and `REVERSE_SPLIT`; ≠ `split_to` | D |
@@ -2534,8 +2654,12 @@ Per table, the remaining columns:
 | `corporate_action_terms.distribution_type` | `text` | vendor code; — | yes | ≤ 32 characters; dividends only | D |
 | `corporate_action_terms.frequency` | `integer` | payouts per year; — | yes | 0–365; dividends only | D |
 | `corporate_action_terms.record_date`, `declaration_date` | `date` | date; local | yes | Any date; dividends only | D |
+| `corporate_action_terms.vendor_action_id` | `text` | —; — | yes | 1–128 characters; set exactly for `SPINOFF` and `RIGHTS_ISSUE` | D |
+| `corporate_action_terms.counterpart_symbol` | `text` | vendor ticker; — | yes | 1–32 characters; set exactly for `SPINOFF` and `RIGHTS_ISSUE` | D |
+| `corporate_action_terms.source_rate` | `numeric` | shares; — | yes | > 0 and finite; set exactly for `SPINOFF` | D |
+| `corporate_action_terms.new_rate` | `numeric` | shares; — | yes | > 0 and finite; set exactly for `SPINOFF` and `RIGHTS_ISSUE` | D |
 | `corporate_action_terms.cash_rounded_in_0001` | `boolean` | —; — | no | `true` only for a dividend whose 0001 `cash_amount` differs from `cash_amount_exact` | D |
-| `corporate_action_terms.ratio_rounded_in_0001` | `boolean` | —; — | no | `true` only for a split whose 0001 `ratio` differs from `split_to / split_from` | D |
+| `corporate_action_terms.ratio_rounded_in_0001` | `boolean` | —; — | no | `true` only for a split, spin-off or rights distribution whose 0001 `ratio` differs from the exact quotient of its terms | D |
 
 ---
 
@@ -2552,6 +2676,9 @@ read; *summary* means an extraction tool summarised the page and the page text w
 *excerpt* means only a search-result excerpt was seen. A *summary* or *excerpt* item is a lead to
 verify, not a verified fact. Nothing here was checked against a live API response: no vendor
 account or API key was used.
+
+Adoptions made from this evidence after v0.5 are Owner decisions recorded in §0.3 (O-13). This
+section is left as it was written and is not edited to reflect them.
 
 ### 29.1 What the pages say
 
@@ -2628,6 +2755,9 @@ account or API key was used.
 | 19 | An adapter with no verified field list has a contract and no mapping, and is not implementable (§4.4) | Block A: never invent an API field | — | None; the alternative is invented fields |
 | 20 | Instruments are matched across ticker changes by `composite_figi` `[DEFAULT-13]`. No code may rely on it until `[A-10]` is verified against one documented ticker-rename case (O-9) | The only stable identifier in the verified reference fields | Yes, before live data; costly after | **High** — an identity break corrupts history for that name |
 | 21 | P2.1's reference loader writes India tick-size rows to `tick_size_regime`, one bounded row per symbol per dump date (IR-21) `[DEFAULT-17]`, O-11. The one-day form is provisional (O-12) | P2.1 owns the reference loader (O-6); SPEC-P0.2 names the dump as India's reference source; one-day rows are the only form `app_rw` can write without superseding a row `[P21-28]` | Yes | Low today (India unfunded). After activation: a session with no dump loaded before its order window denies every India order; whether that is every session depends on `[OQ-25]` |
+| 22 | US exchange sessions come from Alpaca's `GET /v3/calendar/{market}`. A calendar load is all or nothing (IR-22); the half-day label is derived from session length (IR-23). O-13 | The only documented session source at a provider already in the stack (§29, E-18). It returns instants with an offset; the older `GET /v2/calendar` returns clock times with no stated zone, which §2 refuses | Yes, until bars reference the rows (IR-17) | **High** if the endpoint omits a session or cuts a range short without an error: a date missing inside coverage reads as closed and its bars are refused `[OQ-35]` |
+| 23 | Spin-offs and rights distributions come from Alpaca's corporate-actions endpoint and are stored against the source instrument, with exact rates in `corporate_action_terms`. Mergers and name changes are named as sourced there and are not requested yet (§8.1). O-13, conditional on `[OQ-36]` | Documented fields exist (§29, E-19). Mergers wait for condition 9 and `[P21-33]`; a second writer of `TICKER_CHANGE` would duplicate IR-11 | Yes: migration 0002 is not applied | Medium. The rates are read as share counts on an assumption `[A-18]`; no price is adjusted by them (§8.4) |
+| 24 | A bar with a non-integer volume stays refused (§7.2) and the refusals are counted (§21). O-13 | `bar_*.volume` is `bigint` in frozen storage; rounding a volume would silently change a market value | Yes | Medium: a symbol with fractional-share prints loses whole bars. That shows as gaps and a non-zero exit (§12.1 step 8); it does not pass unnoticed |
 
 ## ASSUMPTIONS
 
@@ -2665,6 +2795,9 @@ account or API key was used.
 | D-17 | `[DEFAULT-17]` P2.1's reference loader writes India tick sizes to `tick_size_regime` from the instruments dump, by rule IR-21 | `[P21-27]`: nothing else loads them, and SPEC-P0.2 names the dump as India's reference source | Owner approved 2026-10-09 that P2.1 loads them (O-11) and, provisionally, the one-day row form (O-12); the dump's columns and publication time are `[OQ-25]`, unverified | Rule N10 denies every India order for want of a regime row |
 | A-14 | `trading.deny_mutation()` works unchanged on a table 0001 did not attach it to | Read from the migration text, not executed | T-16 | The 0002 triggers need their own function |
 | A-15 | SPEC-P0.2's facts are still true | Retrieved 2026-08-23 to 2026-08-26; this phase re-verified none | Re-read each cited page before the code phase | A field or limit changed under the adapter |
+| A-16 | A full NYSE or NASDAQ core session lasts 23,400 seconds (09:30 to 16:00 Eastern) | The calendar source does not flag a half-day (IR-23). The figure is the documentation's sample session (§29, E-18) and the 78 windows test T-4 already uses | Compare with one year of core sessions from the endpoint: every day that is not an early close must equal it | A label only: `HALF_DAY` on the wrong days. A longer session fails the load, it is not mislabelled |
+| A-17 | Alpaca's calendar and corporate-actions responses carry the fields their documentation pages list (§29, E-18, E-19) | The pages were read; no response was fetched, and SPEC-P0.2 records neither endpoint | One recorded response from each endpoint, kept as a contract fixture | A field that differs is a `SCHEMA_VIOLATION`: the calendar load fails whole and the events are refused. Nothing is stored wrongly |
+| A-18 | In a spin-off, `new_rate` shares of the new security are distributed for every `source_rate` shares of the source; in a rights distribution, `rate` rights for every share held. `effective_date` equals `ex_date` for both | The page names these fields and does not define them, and gives neither type a separate effective date | One documented spin-off and one rights distribution compared with the issuer's announcement | The stored `ratio` and terms would be inverted or mis-scaled. No price is adjusted by them in this phase (§8.4), so the damage would reach a later reader, P2.4 |
 
 ## OPEN QUESTIONS
 
@@ -2673,7 +2806,7 @@ open. Nothing here is answered by this document.
 
 | # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
 |---|---|---|---|---|
-| OQ-1 | What is the source of exchange sessions, half-days and special sessions for NYSE, NASDAQ, NSE and BSE? | Owner, then vendor documentation | Does any bought provider publish a trading-calendar endpoint with early closes? For India: the NSE and BSE holiday and Muhurat circulars. Name the source, its fields and its update cadence | **Blocks freeze** of §6.2 and the calendar adapter; all P2.1 gap detection. Evidence of 2026-10-09: §29.2 |
+| OQ-1 | What is the source of exchange sessions, half-days and special sessions for **NSE and BSE**? For the US the source is decided (O-13): Alpaca's calendar endpoint, which flags neither a half-day (IR-23) nor a special session | Owner, then vendor or exchange documentation | The NSE and BSE holiday and Muhurat circulars, and whether either exchange or a bought provider publishes them in a machine-readable form. Name the source, its fields and its update cadence | **Blocks freeze** of the India calendar adapter and all India gap detection. India is unfunded. Evidence of 2026-10-09: §29.2 |
 | OQ-2 | When is a Massive daily aggregate final? (SPEC-P0.3 Q-7) | Massive documentation or support | "Is a `1/day` aggregate for date D final at 21:45 UTC on D, or revised later, and until when?" | P2.1 schedule; mitigated by `[DEFAULT-2]` |
 | OQ-3 | FMP payload size per statement request (SPEC-P0.3 Q-5) | Measurement | `Content-Length` on 10 representative statement calls | Backfill plan |
 | OQ-4 | Throttle status and headers for Massive, FMP, SEC; FRED's numeric limit (SPEC-P0.2 M-4) | Vendor support | "Which status code and headers indicate throttling, and is `Retry-After` set?" | Client tuning only |
@@ -2701,12 +2834,15 @@ open. Nothing here is answered by this document.
 | OQ-26 | What is the source of `HALTED` and `SUSPENDED` status? | Owner; vendor documentation | Alpaca's `s` trading-status channel is excluded by SPEC-P0.3 §13.3 row 40; RULE-B12c refers to "the calendar" reporting a halt | P3.3; P2.1 writes neither status |
 | OQ-27 | How is an `exchange_session` row corrected after an unscheduled early close? | Owner / SPEC-P1.2 | The table has no bitemporal axis and `app_rw` cannot update it | Operational runbook, P6.4 |
 | OQ-28 | Which FIGI does `instrument.figi` hold? | SPEC-P1.1 / SPEC-P1.2 author | Both columns are documented only by name | Not blocking; the column stays `NULL` |
-| OQ-29 | What is the source for stock dividends, mergers, acquisitions, spin-offs, rights issues and exchange transfers? | Vendor documentation | Alpaca's corporate-actions announcements API; Massive Ticker Events | Seven of eleven action types; P3.3 conversion. Evidence of 2026-10-09: §29.2 |
+| OQ-29 | What is the source for stock dividends, acquisitions and exchange transfers; should Alpaca's name-change records replace or cross-check IR-11's `TICKER_CHANGE`; and are the stored share counts enough for P2.4 to adjust a series across a spin-off or a rights distribution? Spin-offs and rights distributions are sourced (O-13); mergers are named and wait for condition 9 and `[P21-33]` | Vendor documentation; P2.4; SPEC-P1.1 owner | Massive's splits endpoint for `stock_dividend` (§29, E-14); Massive Ticker Events; what Alpaca's `process_date` means for a name change | Four of eleven action types: stock dividend, exchange transfer, merger, acquisition. P2.4 adjustment; P3.3 conversion. Evidence of 2026-10-09: §29.2 |
 | OQ-30 | Which days are EDGAR business days, and at what instant on the next business day is a post-cutoff filing disseminated? | SEC | The SEC's published federal-holiday closure list; the EDGAR dissemination schedule | §19.2; `[A-13]`. Evidence of 2026-10-09: §29.2 |
 | OQ-31 | Which macro series does regime detection need? | P2.6 | ADR-04: "rates, yields, VIX, macro series" | P2.6; macro ingest is disabled until then |
 | OQ-32 | How is migration 0002 applied, and does `trading.deny_mutation()` serve tables beyond 0001's? | Owner / SPEC-P1.2 §11 | `scripts/apply-migration.sh`; X3R-C12 | P2.1 code |
 | OQ-33 | Should `ingest.yaml` be signed like `policy.yaml`? | Owner / P6.2 | SPEC-P1.3 §5 | Not blocking |
 | OQ-34 | Does IR-21's one-day row form survive the answer to `[OQ-25]`? **Decided provisionally 2026-10-09 (O-12): one row per symbol per dump date, valid one day.** The Owner first approved "a new row only when the value changes"; `[P21-28]` shows that form cannot be written by `app_rw` | Owner, once `[OQ-25]` is answered | If the dump for a session is available before that session's order window: confirm the form. If it is not: choose between writing the next session's row from the previous dump, a pre-open reference run, removing IR-21 in favour of P3.1 or P3.2, or amending SPEC-P1.2 so a regime row can be closed | **Blocks freeze** of IR-21 only. India is unfunded. Evidence of 2026-10-09: §29.2 |
+| OQ-35 | Alpaca `GET /v3/calendar/{market}`: how far back and forward does it reach; is there a largest span per request; can a long range be cut short without an error; should the vendor's `settlement_date` be compared with IR-16's? | Alpaca documentation or support; one recorded response | "What date range does /v3/calendar/{market} cover, what is the largest start-to-end span one request returns, and is a response ever truncated?" The older `GET /v2/calendar` page states 1970 to 2029 | **Blocks freeze** of the US calendar adapter: an undetected short response would make open days read as closed (IR-22) |
+| OQ-36 | Alpaca `GET /v1/corporate-actions`: is it included in the bought data plan; which date do `start` and `end` select on; how far back does it reach; are `source_rate`, `new_rate` and `rate` exact decimals? | Alpaca documentation or support; one recorded response | "Is /v1/corporate-actions on the data host included in Algo Trader Plus; do start and end filter on process_date; what is the earliest process_date served?" SPEC-P0.2 §3.2 lists corporate actions among both data plans' features and does not name this endpoint | **Blocks** the corporate-event adapter's code; O-13 is conditional on it. `[A-18]` |
+| OQ-37 | Which credential does the US calendar adapter use? The endpoint is on the trading hosts only `[P21-32]` | Owner; Alpaca documentation | Can an Alpaca API key be restricted to read-only calls? If not: is a paper-account key acceptable for a production calendar, and does the paper host serve the same calendar as the live host? | **Blocks** the US calendar adapter's code. No interim answer is assumed here |
 
 ## CONTRACTS EXPORTED
 
@@ -2714,7 +2850,7 @@ open. Nothing here is answered by this document.
 |---|---|---|---|
 | `IngestDataType`, `ManifestStatus`, `FailureKind`, `GapKind`, `GapState`, `ReconKind` | type (enum) | §4.1, §15.1 | P2.2, P2.3, P6.1 |
 | `ProviderId`, `DataCapability`, `ProviderRole`, `TokenLifetime`, `RateLimit`, `CredentialSpec`, `IdempotencySpec`, `ProviderSpec` at `src/provider/` | type | SPEC-P0.2 §10.1–10.2, verbatim | P3.1, P6.1 |
-| Provider protocols (`ReferenceProvider`, `CalendarProvider`, `DailyBarProvider`, `IntradayBarProvider`, `CorporateActionProvider`, `FundamentalsProvider`, `FilingsProvider`, `MacroProvider`, `FxProvider`, `NewsProvider`, `BarStream`), `Page`, the `IngestError` hierarchy and the wire records (`WireBar`, `WireSplit`, `WireDividend`, `WireInstrument`, `WireSession`, `WireNews`, `WireFundamentals`, `WireFiling`, `WireMacroObservation`, `WireFxRate`) | type (protocol, model, exception) | §4.2, §4.3, §28.1 | P2.1 adapters only; P3.1 as a pattern |
+| Provider protocols (`ReferenceProvider`, `CalendarProvider`, `DailyBarProvider`, `IntradayBarProvider`, `CorporateActionProvider`, `CorporateEventProvider`, `FundamentalsProvider`, `FilingsProvider`, `MacroProvider`, `FxProvider`, `NewsProvider`, `BarStream`), `Page`, the `IngestError` hierarchy and the wire records (`WireBar`, `WireSplit`, `WireDividend`, `WireCorporateEvent`, `WireInstrument`, `WireSession`, `WireNews`, `WireFundamentals`, `WireFiling`, `WireMacroObservation`, `WireFxRate`) | type (protocol, model, exception) | §4.2, §4.3, §28.1 | P2.1 adapters only; P3.1 as a pattern |
 | `trading.ingest_manifest` | table | §22.1. Status of record = latest row by `finished_at` | **P2.2, P2.3**, P6.1 |
 | `trading.ingest_failure`, `trading.ingest_gap` | table | §22.3, §22.4 | **P2.2**, P6.1 |
 | `trading.ingest_reconciliation` | table | §22.5 | **P2.2** (layer 5) |
@@ -2723,7 +2859,7 @@ open. Nothing here is answered by this document.
 | `trading.raw_news_snapshot` and its hand-off guarantees | table + rule | §22.7, §18 | **P4.1 only** |
 | `trading.macro_series`, `trading.macro_observation` and the vintage read rule | table + rule | §22.8, §19.5 | **P2.6**, P5.1 |
 | `trading.edgar_index_snapshot`, `trading.edgar_filing`, `trading.insider_filing_raw` | table | §22.9–22.11 | P2.5, P4.1, P5.1 |
-| `trading.corporate_action_terms` | table | §22.12, §8.2. Exact dividend amount, `split_from`, `split_to`, `distribution_type`, `frequency`, record and declaration dates; one row per `corporate_action` row of those three types | **P2.4**, P2.5, P5.1 |
+| `trading.corporate_action_terms` | table | §22.12, §8.2. Exact dividend amount, `split_from`, `split_to`, `distribution_type`, `frequency`, record and declaration dates, and the share counts of a spin-off or rights distribution; one row per `corporate_action` row of those five types | **P2.4**, P2.5, P5.1 |
 | Absence contract | rule | §15.3 | **Every consumer of market data** |
 | Bar write rules; daily `ts` = session close; `is_final` is always true in storage | rule | IR-19, IR-20, `[DEFAULT-1]`, §9.2 | P2.4, P5.1 |
 | Corporate-action read-time order, using the exact terms | rule | §8.4 | P2.4, P5.1 |
@@ -2734,7 +2870,7 @@ open. Nothing here is answered by this document.
 | `config/ingest.yaml`, `IngestConfig` | config | §23, §28.2 | P6.2, P6.4 |
 | `IngestSet`, `BackfillJobRequest`, `DailyRunRequest`, `DailyRunResult` | type (model) | §12.3, §28.3 | P2.3 (builds the ingest set), P6.4 (invokes runs and jobs) |
 | Redis keys under the prefix `ingest:v1:` | convention | §17 | Other phases must not write under this prefix |
-| Rules IR-1 to IR-21 | rule | §5, §6, §8, §9 | P2.2, X2 |
+| Rules IR-1 to IR-23 | rule | §5, §6, §8, §9 | P2.2, X2 |
 | Measurement of maximum vendor price scale | measurement | §21 | P2.2 (X5 condition 4) |
 | `DATA_RECEIVED`, `FX_RATE_RECORDED`, `CORPORATE_ACTION_APPLIED` — P2.1's proposed emission points | event (proposal, gated) | §20. **Defined by SPEC-P1.4; nothing is added or changed** | Condition 9 decision; P1.4 |
 
@@ -2747,7 +2883,7 @@ open. Nothing here is answered by this document.
 | Block B header, four tables | Present |
 | Every entity has a Pydantic model or DDL | Wire records, protocols, errors: §4. Request and result models: §12.3. Stream interface: §13.6. Enums: §4.1, §15.1. Config: §23. Tables: §22 |
 | Every field: name, type, unit, timezone, nullability, valid range, violation | §28 |
-| Every error path enumerated with fail-closed behaviour | §24, 35 rows |
+| Every error path enumerated with fail-closed behaviour | §24, 37 rows |
 | Block C: at most ten blocking questions, each with options, default and consequence | §1: ten grouped questions covering `[DEFAULT-1]` to `[DEFAULT-17]` |
 | Block C: every default marked inline and listed in ASSUMPTIONS | Markers throughout the body; rows D-1 to D-17 |
 | Block C: non-blocking details | §2, including rounding, tick and lot size, percentage units, DST, half-days, integer or decimal, inclusive or exclusive bounds |
@@ -2760,10 +2896,10 @@ open. Nothing here is answered by this document.
 
 **Known deviations, declared.** (1) This is the specification half of the P2.1 deliverable; the
 implementation and tests are blocked by STAGE-1-FREEZE §9.2. (2) The spec cannot be frozen whole
-while OQ-1, OQ-9, OQ-10 and OQ-22 to OQ-25 are open; it could be frozen for the Massive and Alpaca
+while OQ-1, OQ-9, OQ-10, OQ-22 to OQ-25 and OQ-35 are open; it could be frozen for the Massive and Alpaca
 paths alone if the Owner chose to split it. (3) `[DEFAULT-13]` is approved conditionally: no code
 may rely on it until `[A-10]` is verified against one documented ticker-rename case.
 
 ---
 
-# SPEC-P2.1-INGEST v0.5 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.6 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
