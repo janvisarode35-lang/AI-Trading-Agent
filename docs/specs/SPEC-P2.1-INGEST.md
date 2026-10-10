@@ -1,6 +1,6 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.7
+version: 0.8
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
@@ -86,6 +86,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | 0.5 | 2026-10-09 | Vendor evidence pass. Adds §29: what the retrieved vendor documentation says, and what it settles and leaves open for each open question. Adds findings `[P21-29]` to `[P21-31]`. **No rule, default, field mapping or DDL is changed, and no source is adopted**: adopting any of this evidence is a later, separate change |
 | 0.6 | 2026-10-09 | Owner decision O-13, adopting part of the evidence of §29. US sessions from Alpaca's calendar endpoint: rules IR-22 and IR-23, a field mapping (§7.3), the config key `full_session_seconds`. Spin-offs and rights distributions from Alpaca's corporate-actions endpoint: the wire record `WireCorporateEvent`, the protocol `CorporateEventProvider`, a field mapping, four columns and one constraint on the P2.1-owned table `corporate_action_terms`. Adds `[A-16]` to `[A-18]`, `[OQ-35]` to `[OQ-37]`, findings `[P21-32]` and `[P21-33]`, error paths 36 and 37, tests T-19 and T-20. Narrows `[OQ-1]` to India and `[OQ-29]` to what is left. Mergers and name changes are **not** specified. No 0001 object and no frozen spec is touched; no approved default is changed |
 | 0.7 | 2026-10-09 | Owner decision O-14: mergers and name changes stay unspecified; the US calendar adapter uses the paper host and a paper-account key only. Wording only: `[P21-32]` and `[OQ-37]` record the decision. No rule, default, field mapping or DDL is changed |
+| 0.8 | 2026-10-10 | Second evidence pass and first execution of this spec's models. Adds §30. **No rule, default, field mapping or DDL is changed, no source is adopted and no open question is closed** |
 
 ---
 
@@ -1634,7 +1635,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.7 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.8 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -2732,6 +2733,49 @@ section is left as it was written and is not edited to reflect them.
 
 ---
 
+## 30. Evidence and execution of 2026-10-10
+
+Recorded as §29 was: paraphrase, source, method. *Live* means a response from the vendor's own
+public endpoint was read, through an extraction tool that reported its keys and sample values; the
+raw body was not kept. No vendor account, key or credential was used: none is configured in this
+workspace. **This section adopts nothing.**
+
+### 30.1 Evidence
+
+| # | Source and method | What it says | Bears on |
+|---|---|---|---|
+| E-24 | SEC, `data.sec.gov/submissions/CIK0000320193.json` — live, HTTP 200 | Top-level keys include `cik`, `entityType`, `sic`, `name`, `tickers`, `exchanges`, `fiscalYearEnd`, `formerNames` and `filings`. Records under `filings.recent` carry `accessionNumber`, `filingDate`, `reportDate`, `acceptanceDateTime`, `form`, `primaryDocument`, `isXBRL` and `items`. Entries of `filings.files` carry `name`, `filingCount`, `filingFrom`, `filingTo`. One sampled Form 4 showed `filingDate` 2026-10-08 with `acceptanceDateTime` `2026-10-09T02:30:32.000Z`. The tool listed the keys it was asked for; the full key list of `filings.recent` was not captured | `[OQ-9]`, `[OQ-30]`, `[A-13]` |
+| E-25 | FMP, `site.financialmodelingprep.com/developer/docs/stable/balance-sheet-statement` — summary | Balance sheet records carry the same eight leading fields as the income statement (E-20): `date`, `symbol`, `reportedCurrency`, `cik`, `filingDate`, `acceptedDate`, `fiscalYear`, `period`, then the statement lines. Sample `acceptedDate` `2025-10-31 06:01:26`. The page states no timezone for it and says nothing about restatements | `[OQ-23]` |
+| E-26 | FMP, `site.financialmodelingprep.com/developer/docs/stable/cashflow-statement` — summary | Cash-flow records carry the same eight leading fields, then the statement lines; at most 1,000 records per request. No timezone for `acceptedDate`; nothing about restatements | `[OQ-23]` |
+| E-27 | FRED, `fred.stlouisfed.org/docs/api/fred/series_observations.html` — summary, second reading | The page does not say how a missing observation is represented and states no rate limit | `[OQ-24]` |
+| E-28 | Zerodha, `kite.trade/docs/connect/v3/historical/` — summary, second reading | The page does not say whether a candle's timestamp is the start or the end of its interval, shows no `day` candle, and states neither a rate limit nor a maximum range per request | `[OQ-25]` |
+| E-29 | NSE, `nseindia.com/resources/exchange-communication-holidays` and an NSE circular — excerpt | NSE publishes the year's equity holidays as a web page and a circular. For 2026 it names a Muhurat session on Sunday 2026-11-08 and says its timings will be notified later by circular. No machine-readable endpoint was found | `[OQ-1]` |
+
+### 30.2 What this changes
+
+| Item | What the evidence supports | What is still open |
+|---|---|---|
+| `[OQ-9]` EDGAR fields | The submissions JSON has an acceptance time, a filing date, a form type and an accession number per filing (E-24) | The full key list; the ownership XML fields. **The sampled acceptance time ends in `Z`, yet read as UTC it falls after the 22:00 Eastern cutoff while the filing date is the same day.** Either the suffix is not a true UTC marker or the cutoff reading in `[A-13]` is wrong. Until one recorded response settles it, `accepted_at` from this field cannot be trusted to the hour: look-ahead risk |
+| `[OQ-23]` FMP | All three statements share the same eight leading fields (E-20, E-25, E-26) | The timezone of `acceptedDate`; how a restatement appears. Neither is documented; both need a live response or vendor support |
+| `[OQ-24]` FRED | Nothing new | The missing-value marker is not documented on the page (E-27); it needs one live response for a series with a known gap |
+| `[OQ-25]` Zerodha | Nothing new | Candle timestamp meaning and `day` candle timestamp are not documented (E-28); they need one live response |
+| `[OQ-1]` India calendar | An authoritative human-readable source exists (E-29) | It is a page and a PDF, not an API, and special-session timings arrive later by circular. Loading it would be a manual, reviewed step; that is an Owner decision |
+
+### 30.3 Execution of the models in this spec
+
+The eight Python blocks of this spec and the two of SPEC-P0.2 §10 were extracted, unchanged, into a
+scratch package and imported under Python 3.13 with pydantic 2.14 against the frozen `src/domain`.
+All nine modules import. Sixteen assertions on the models added in v0.6 pass: `WireCorporateEvent`
+accepts a spin-off and a rights distribution and refuses a spin-off with no `source_rate`, a rights
+distribution with one, a merger kind, a zero rate and an unknown field; `CalendarConfig` refuses a
+missing US `full_session_seconds`, a missing market and an exchange of the wrong market;
+`CorporateEventProvider` is runtime-checkable; `FailureKind` equals its `CHECK` list.
+
+This is not the X1 test suite and discharges no gate. **The DDL of §22 has still not been executed**:
+no database was running, and starting one needs the Owner's word.
+
+---
+
 ## DECISIONS MADE
 
 | # | Decision | Rationale | Reversible? | Blast radius if wrong |
@@ -2904,4 +2948,4 @@ may rely on it until `[A-10]` is verified against one documented ticker-rename c
 
 ---
 
-# SPEC-P2.1-INGEST v0.7 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.8 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
