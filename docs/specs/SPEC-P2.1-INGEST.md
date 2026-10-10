@@ -1,6 +1,6 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.9
+version: 0.10
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
@@ -56,7 +56,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | Closed | X5 condition 10 (X3R-M2). Not P2.1's |
 | P2.1 code that relies on `[DEFAULT-13]` | Closed | Requires `ASSUMPTION [A-10]` verified against one documented ticker-rename case (Owner decision O-9) |
 
-### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11 to O-14: 2026-10-09; O-15: 2026-10-10)
+### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11 to O-14: 2026-10-09; O-15, O-16: 2026-10-10)
 
 | # | Decision |
 |---|---|
@@ -75,6 +75,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | O-13 | Three decisions on the evidence of §29. (a) **US calendar source:** Alpaca's calendar endpoint supplies NYSE and NASDAQ sessions (rules IR-22, IR-23). This supersedes the last sentence of O-6 for the US only; the India source stays open `[OQ-1]`. (b) **Other corporate actions:** Alpaca's corporate-actions endpoint is the source for spin-offs, mergers, name changes and rights distributions, **subject to confirming plan access** `[OQ-36]`. This draft specifies spin-offs and rights distributions; mergers and name changes are named and not yet specified, for the reasons in §8.1. (c) **Fractional volume `[P21-29]`:** the reject rule of §7.2 stands until a measurement shows how often it applies (§21) |
 | O-14 | Two decisions on v0.6. (a) Mergers and name changes stay out of this spec, as §8.1 states, until condition 9 and `[P21-33]` are settled. (b) **Calendar credential `[OQ-37]`:** the US calendar adapter uses the Alpaca paper host and a paper-account key only, so the ingest process never holds a key that can place a funded order. Whether the paper host serves the same calendar as the live host has not been verified and stays open under `[OQ-37]` |
 | O-15 | Five decisions of 2026-10-10. (a) **Conditions 9 and 11** stay in their own conversations; nothing here works on them, and neither the freeze nor any code that needs them may proceed until they are satisfied there. (b) **Scope.** The frozen Stage 0 specs remain authoritative for the intended architecture; the Owner's research-only restriction governs what may be **implemented now**. Neither source is changed. Under it: no live trading, no order placement, no funded broker connectivity. The held-names stream adapter of §13 serves P3.3's monitor of open positions and stays specified but **is not implemented** while the restriction stands. The US calendar adapter is needed for gap detection and bar timestamps in research and backtesting and is kept; it makes read-only `GET` calls to the paper host with a paper-account key (O-14), and the host is checked before every request. (c) **`[OQ-10]`:** the N7 metric list stays empty until P2.5 names the metrics it needs; an empty list means no comparison is run. The question stays open and no longer blocks this spec's freeze. (d) **`[P21-30]`:** the frozen key `RBI_REFERENCE` is not renamed; FBIL is to be recorded as the publisher when the FX source is chosen `[OQ-7]`. (e) **`[OQ-1]`:** the India calendar source is outside this spec's freeze. No source is assumed. India cannot be activated until a source, or an approved and reviewed manual load, is defined |
+| O-16 | **SEC requests are paused.** No direct request is made to `sec.gov` or `data.sec.gov` until the Owner has configured a dedicated project contact string locally for `edgar.user_agent`. The Owner's personal or account email is never used in it. `[OQ-9]` and `[OQ-30]` stay open until raw evidence is obtained under that string and verified |
 
 ### 0.4 Version history
 
@@ -89,6 +90,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | 0.7 | 2026-10-09 | Owner decision O-14: mergers and name changes stay unspecified; the US calendar adapter uses the paper host and a paper-account key only. Wording only: `[P21-32]` and `[OQ-37]` record the decision. No rule, default, field mapping or DDL is changed |
 | 0.8 | 2026-10-10 | Second evidence pass and first execution of this spec's models. Adds §30. **No rule, default, field mapping or DDL is changed, no source is adopted and no open question is closed** |
 | 0.9 | 2026-10-10 | Owner decision O-15 and the first execution of migration 0002 (§31). `[A-14]` is verified. `[OQ-1]` and `[OQ-10]` stop blocking this spec's freeze; neither is closed. Wording only: no rule, default, field mapping or DDL is changed |
+| 0.10 | 2026-10-10 | Owner decision O-16: direct SEC requests are paused until a dedicated project contact string is configured. Wording only: no rule, default, field mapping or DDL is changed |
 
 ---
 
@@ -1637,7 +1639,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.9 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.10 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -2885,7 +2887,7 @@ open. Nothing here is answered by this document.
 | OQ-6 | EDGAR propagation latency (SPEC-P0.2 M-8) | Measurement, §21 | Acceptance-to-availability deltas over one week of Form 4 filings | The margin in §19.2. Evidence of 2026-10-09: §29.2 |
 | OQ-7 | The RBI USD/INR reference-rate endpoint, its fields and a fallback (SPEC-P0.1 Q12) | RBI publications | The published location and format of the daily reference rate; publication time; holiday behaviour | FX adapter; India activation. Evidence of 2026-10-09: §29.2 |
 | OQ-8 | India sources for fundamentals, corporate actions and news | Owner | Does Zerodha Kite Connect publish corporate actions? Which vendor covers NSE/BSE fundamentals? | India activation |
-| OQ-9 | SEC EDGAR response fields: the filing identifier, acceptance timestamp, form type, document path on `data.sec.gov` submissions; the XBRL company-facts shape; the Forms 3/4/5 document format and the fields to extract | SEC documentation | The SEC's EDGAR API documentation for `data.sec.gov`, and its technical specification for ownership documents (exact pages not retrieved by this phase) | **Blocks freeze** of §19 mappings and the EDGAR adapter; P2.5's insider feature. Evidence of 2026-10-09: §29.2 |
+| OQ-9 | SEC EDGAR response fields: the filing identifier, acceptance timestamp, form type, document path on `data.sec.gov` submissions; the XBRL company-facts shape; the Forms 3/4/5 document format and the fields to extract | SEC documentation | The SEC's EDGAR API documentation for `data.sec.gov`, and its technical specification for ownership documents (exact pages not retrieved by this phase) | **Blocks freeze** of §19 mappings and the EDGAR adapter; P2.5's insider feature. Evidence of 2026-10-09: §29.2. **Direct SEC requests are paused by O-16** |
 | OQ-10 | What is a "material" disagreement under rule N7, and which metrics are compared under which names in each source? | Owner | SPEC-P0.2 rule N7 gives no threshold or list | **Blocks freeze** of §19.3 step 4. **Deferred to P2.5 by O-15; does not block this spec's freeze** |
 | OQ-11 | Replace `[A-1]` and `[A-2]` with measured or decided values | Measurement; Owner | §21 | Not blocking |
 | OQ-12 | Who emits `RUN_STARTED` and `RUN_FINISHED` for an ingest run before P6.4 exists? | Owner, **with condition 9** | `EVENT_REGISTRY`: producer `P6.4_ORCHESTRATOR` | P2.1 code that writes an audit event |
@@ -2906,7 +2908,7 @@ open. Nothing here is answered by this document.
 | OQ-27 | How is an `exchange_session` row corrected after an unscheduled early close? | Owner / SPEC-P1.2 | The table has no bitemporal axis and `app_rw` cannot update it | Operational runbook, P6.4 |
 | OQ-28 | Which FIGI does `instrument.figi` hold? | SPEC-P1.1 / SPEC-P1.2 author | Both columns are documented only by name | Not blocking; the column stays `NULL` |
 | OQ-29 | What is the source for stock dividends, acquisitions and exchange transfers; should Alpaca's name-change records replace or cross-check IR-11's `TICKER_CHANGE`; and are the stored share counts enough for P2.4 to adjust a series across a spin-off or a rights distribution? Spin-offs and rights distributions are sourced (O-13); mergers are named and wait for condition 9 and `[P21-33]` | Vendor documentation; P2.4; SPEC-P1.1 owner | Massive's splits endpoint for `stock_dividend` (§29, E-14); Massive Ticker Events; what Alpaca's `process_date` means for a name change | Four of eleven action types: stock dividend, exchange transfer, merger, acquisition. P2.4 adjustment; P3.3 conversion. Evidence of 2026-10-09: §29.2 |
-| OQ-30 | Which days are EDGAR business days, and at what instant on the next business day is a post-cutoff filing disseminated? | SEC | The SEC's published federal-holiday closure list; the EDGAR dissemination schedule | §19.2; `[A-13]`. Evidence of 2026-10-09: §29.2 |
+| OQ-30 | Which days are EDGAR business days, and at what instant on the next business day is a post-cutoff filing disseminated? | SEC | The SEC's published federal-holiday closure list; the EDGAR dissemination schedule | §19.2; `[A-13]`. Evidence of 2026-10-09: §29.2. **Direct SEC requests are paused by O-16** |
 | OQ-31 | Which macro series does regime detection need? | P2.6 | ADR-04: "rates, yields, VIX, macro series" | P2.6; macro ingest is disabled until then |
 | OQ-32 | How is migration 0002 applied, and does `trading.deny_mutation()` serve tables beyond 0001's? | Owner / SPEC-P1.2 §11 | `scripts/apply-migration.sh`; X3R-C12 | P2.1 code |
 | OQ-33 | Should `ingest.yaml` be signed like `policy.yaml`? | Owner / P6.2 | SPEC-P1.3 §5 | Not blocking |
@@ -2973,4 +2975,4 @@ may rely on it until `[A-10]` is verified against one documented ticker-rename c
 
 ---
 
-# SPEC-P2.1-INGEST v0.9 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.10 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
