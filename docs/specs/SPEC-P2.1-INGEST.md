@@ -1,6 +1,6 @@
 ---
 id: SPEC-P2.1-INGEST
-version: 0.8
+version: 0.9
 status: DRAFT
 phase: P2.1 — Data Ingestion
 depends_on: [SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1, SPEC-P1.4-AUDIT v0.1, STAGE-0-FREEZE v1.1, STAGE-1-FREEZE v1.0]
@@ -56,7 +56,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | Closed | X5 condition 10 (X3R-M2). Not P2.1's |
 | P2.1 code that relies on `[DEFAULT-13]` | Closed | Requires `ASSUMPTION [A-10]` verified against one documented ticker-rename case (Owner decision O-9) |
 
-### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11 to O-14: 2026-10-09)
+### 0.3 Owner decisions this draft is built on (O-1 to O-8: 2026-10-07; O-9, O-10: 2026-10-08; O-11 to O-14: 2026-10-09; O-15: 2026-10-10)
 
 | # | Decision |
 |---|---|
@@ -74,6 +74,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | O-12 | IR-21's one-day row form is adopted **provisionally**. `[OQ-25]` stays open: whether the India instruments dump is available before the order window it must serve has not been verified, and no pre-open readiness is claimed. The form must be revisited if the dump is not available in time `[OQ-34]` |
 | O-13 | Three decisions on the evidence of §29. (a) **US calendar source:** Alpaca's calendar endpoint supplies NYSE and NASDAQ sessions (rules IR-22, IR-23). This supersedes the last sentence of O-6 for the US only; the India source stays open `[OQ-1]`. (b) **Other corporate actions:** Alpaca's corporate-actions endpoint is the source for spin-offs, mergers, name changes and rights distributions, **subject to confirming plan access** `[OQ-36]`. This draft specifies spin-offs and rights distributions; mergers and name changes are named and not yet specified, for the reasons in §8.1. (c) **Fractional volume `[P21-29]`:** the reject rule of §7.2 stands until a measurement shows how often it applies (§21) |
 | O-14 | Two decisions on v0.6. (a) Mergers and name changes stay out of this spec, as §8.1 states, until condition 9 and `[P21-33]` are settled. (b) **Calendar credential `[OQ-37]`:** the US calendar adapter uses the Alpaca paper host and a paper-account key only, so the ingest process never holds a key that can place a funded order. Whether the paper host serves the same calendar as the live host has not been verified and stays open under `[OQ-37]` |
+| O-15 | Five decisions of 2026-10-10. (a) **Conditions 9 and 11** stay in their own conversations; nothing here works on them, and neither the freeze nor any code that needs them may proceed until they are satisfied there. (b) **Scope.** The frozen Stage 0 specs remain authoritative for the intended architecture; the Owner's research-only restriction governs what may be **implemented now**. Neither source is changed. Under it: no live trading, no order placement, no funded broker connectivity. The held-names stream adapter of §13 serves P3.3's monitor of open positions and stays specified but **is not implemented** while the restriction stands. The US calendar adapter is needed for gap detection and bar timestamps in research and backtesting and is kept; it makes read-only `GET` calls to the paper host with a paper-account key (O-14), and the host is checked before every request. (c) **`[OQ-10]`:** the N7 metric list stays empty until P2.5 names the metrics it needs; an empty list means no comparison is run. The question stays open and no longer blocks this spec's freeze. (d) **`[P21-30]`:** the frozen key `RBI_REFERENCE` is not renamed; FBIL is to be recorded as the publisher when the FX source is chosen `[OQ-7]`. (e) **`[OQ-1]`:** the India calendar source is outside this spec's freeze. No source is assumed. India cannot be activated until a source, or an approved and reviewed manual load, is defined |
 
 ### 0.4 Version history
 
@@ -87,6 +88,7 @@ From STAGE-1-FREEZE §9.2, restated, not changed:
 | 0.6 | 2026-10-09 | Owner decision O-13, adopting part of the evidence of §29. US sessions from Alpaca's calendar endpoint: rules IR-22 and IR-23, a field mapping (§7.3), the config key `full_session_seconds`. Spin-offs and rights distributions from Alpaca's corporate-actions endpoint: the wire record `WireCorporateEvent`, the protocol `CorporateEventProvider`, a field mapping, four columns and one constraint on the P2.1-owned table `corporate_action_terms`. Adds `[A-16]` to `[A-18]`, `[OQ-35]` to `[OQ-37]`, findings `[P21-32]` and `[P21-33]`, error paths 36 and 37, tests T-19 and T-20. Narrows `[OQ-1]` to India and `[OQ-29]` to what is left. Mergers and name changes are **not** specified. No 0001 object and no frozen spec is touched; no approved default is changed |
 | 0.7 | 2026-10-09 | Owner decision O-14: mergers and name changes stay unspecified; the US calendar adapter uses the paper host and a paper-account key only. Wording only: `[P21-32]` and `[OQ-37]` record the decision. No rule, default, field mapping or DDL is changed |
 | 0.8 | 2026-10-10 | Second evidence pass and first execution of this spec's models. Adds §30. **No rule, default, field mapping or DDL is changed, no source is adopted and no open question is closed** |
+| 0.9 | 2026-10-10 | Owner decision O-15 and the first execution of migration 0002 (§31). `[A-14]` is verified. `[OQ-1]` and `[OQ-10]` stop blocking this spec's freeze; neither is closed. Wording only: no rule, default, field mapping or DDL is changed |
 
 ---
 
@@ -1635,7 +1637,7 @@ Rules the migration obeys:
 7. All `timestamptz` values are UTC. All `date` values are exchange-local unless the comment says otherwise.
 
 ```sql
--- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.8 (DRAFT). NOT APPLIED.
+-- migrations/0002_ingest.sql — SPEC-P2.1-INGEST v0.9 (DRAFT). NOT APPLIED.
 SET search_path = trading, extensions, pg_catalog;
 
 -- ===== 22.1 ingest_manifest =====
@@ -2362,7 +2364,7 @@ file is edited. Each item names what it needs.
 | P21-27 | The India `tick_size` in the Zerodha instruments dump was read and mapped to no table, so India's reference source for tick size never reached `tick_size_regime` | SPEC-P0.2 §0.6; this spec's v0.2 §7.4 | **Decided by the Owner 2026-10-09 (O-11):** rule IR-21, `[DEFAULT-17]` |
 | P21-28 | A `tick_size_regime` row cannot be superseded by the application: `app_rw` has no `UPDATE` on the table, and the `EXCLUDE` constraint rejects a new row that overlaps an open-ended one. A changed tick cannot be recorded by closing the old row | Migration §6.2, §6.10 grants | Worked around by IR-21's one-day rows. The US changeover of November 2027 (SPEC-P0.2 F-10) meets the same limit and will need `trading_owner` or a SPEC-P1.2 amendment |
 | P21-29 | A vendor volume can be fractional. Massive's aggregate `v` is a JSON number, not an integer, and its trade records carry a `decimal_size` with a fractional component (§29, E-12, E-13). `bar_*.volume` is `bigint`, and §7.2 rejects a non-integer volume, so a bar containing fractional-share trades would be refused whole | Migration §6.4; §29 | **Owner decision 2026-10-09 (O-13): §7.2 stands** until the measurement of §21 shows how often `v` is non-integer on the bought tier; the Owner then decides again |
-| P21-30 | `fx.source_primary` is `RBI_REFERENCE`, but the USD/INR reference rate has been computed and published by FBIL, not the RBI, since 2018-07-10 (§29, E-21) | `config/policy.yaml`; SPEC-P0.1 ADR-15 | Owner / SPEC-P1.3. The key is frozen and labelled an assumption there; P2.1 does not rename it |
+| P21-30 | `fx.source_primary` is `RBI_REFERENCE`, but the USD/INR reference rate has been computed and published by FBIL, not the RBI, since 2018-07-10 (§29, E-21) | `config/policy.yaml`; SPEC-P0.1 ADR-15 | Owner / SPEC-P1.3. The key is frozen and labelled an assumption there; P2.1 does not rename it. **O-15: the key is kept; FBIL is recorded as publisher when the FX source is chosen** |
 | P21-31 | `[A-13]` computes "next EDGAR business day" as the next Monday to Friday. EDGAR also closes on federal holidays and on other announced days (§29, E-8), so the computed `disseminated_at` can be a day early: look-ahead | §19.2; §29 | A source of EDGAR closure dates `[OQ-30]`. Until then every `disseminated_at` computed across a closure day is suspect, as §19.2 already says |
 | P21-32 | Alpaca serves its calendar only from the trading API hosts (§29, E-17, E-18). SPEC-P0.2 assigns `ALPACA_TRADING` to execution; with O-13 the ingest process also calls that host and needs a credential for it. No retrieved page says whether an Alpaca key can be limited to reading | SPEC-P0.2 §10.1; §29 | **Decided by the Owner 2026-10-09 (O-14):** the paper host and a paper-account key only. Whether a key can be made read-only stays unknown `[OQ-37]` |
 | P21-33 | A cash merger cannot be constructed. `CorporateAction` requires a `SuccessorLink` for `MERGER` and `ACQUISITION`, and `SuccessorLink` requires a successor instrument and a `share_ratio` above zero. Alpaca's cash-merger record has a cash rate, no share rate, and an acquirer that is optional (§29, E-19) | `models.py` `CorporateAction`, `SuccessorLink` | SPEC-P1.1 owner, with condition 9. P2.1 requests no merger type until then (§8.1) |
@@ -2776,6 +2778,29 @@ no database was running, and starting one needs the Owner's word.
 
 ---
 
+## 31. Execution of migration 0002, 2026-10-10
+
+The SQL block of §22 was extracted unchanged and applied, after `migrations/0001_initial.sql`, to a
+disposable database: image `timescale/timescaledb:2.29.2-pg16`, a container, port and volume of
+its own, a database created from `template0` as `scripts/apply-migration.sh` does. The project's
+existing containers and volumes were not touched. `psql` ran with `ON_ERROR_STOP=1`.
+
+| Check | Result |
+|---|---|
+| 0001 then 0002 | Both exit 0 |
+| Inventory | 50 tables in schema `trading`: 37 of 0001 and the 13 of 0002. Still 8 hypertables and 3 continuous aggregates |
+| Append-only | Each of the 13 tables has an update and a delete trigger. On a populated table both are rejected for a superuser by `trading.deny_mutation()`: `[A-14]` holds |
+| Grants | `app_rw` holds `SELECT` and `INSERT` and nothing else on all 13. `backtest_ro` and `metrics_ro` hold nothing, and a `SELECT` by either is denied |
+| `corporate_action_terms` | Accepts a split, a four-decimal dividend (read back exactly), a spin-off and a rights distribution. Refuses a spin-off with no `source_rate` or no `counterpart_symbol`, a rights distribution with a `source_rate`, a split carrying a `vendor_action_id`, a `MERGER` row, a zero rate, the ratio flag on a dividend and a 1-for-1 split |
+| `ingest_failure` | Refuses an unknown `failure_kind`; accepts a listed one from `app_rw` |
+
+28 checks, 28 passed. The models were re-run the same day: 25 checks, 25 passed (§30.3).
+
+What this does not show: it is not test T-16 as X1 will write it, it used no migration tool
+`[OQ-32]`, and it exercised two of the thirteen tables' constraints in detail. It discharges no gate.
+
+---
+
 ## DECISIONS MADE
 
 | # | Decision | Rationale | Reversible? | Blast radius if wrong |
@@ -2839,7 +2864,7 @@ no database was running, and starting one needs the Owner's word.
 | D-15 | `[DEFAULT-15]` `run_id` in the 0002 tables has no foreign key to `run_context` | `[P21-20]`: a key would gate every P2.1 write behind conditions 9 and 10 | Owner approved 2026-10-08 | A manifest row whose run has no `run_context` row |
 | D-16 | `[DEFAULT-16]` A 5-minute bar is the deterministic aggregate of the minute bars received for its window; completion is exactly RULE-B12 | SPEC-P0.3 §6.2 fixes assembly from the `b` stream and does not state the aggregation | Owner approved 2026-10-08; the session-close check of §13.5 | A bar assembled across an unnoticed loss |
 | D-17 | `[DEFAULT-17]` P2.1's reference loader writes India tick sizes to `tick_size_regime` from the instruments dump, by rule IR-21 | `[P21-27]`: nothing else loads them, and SPEC-P0.2 names the dump as India's reference source | Owner approved 2026-10-09 that P2.1 loads them (O-11) and, provisionally, the one-day row form (O-12); the dump's columns and publication time are `[OQ-25]`, unverified | Rule N10 denies every India order for want of a regime row |
-| A-14 | `trading.deny_mutation()` works unchanged on a table 0001 did not attach it to | Read from the migration text, not executed | T-16 | The 0002 triggers need their own function |
+| A-14 | `trading.deny_mutation()` works unchanged on a table 0001 did not attach it to | Read from the migration text, not executed | T-16 | The 0002 triggers need their own function. **Verified 2026-10-10 (§31):** `UPDATE` and `DELETE` are rejected by the trigger on a populated 0002 table |
 | A-15 | SPEC-P0.2's facts are still true | Retrieved 2026-08-23 to 2026-08-26; this phase re-verified none | Re-read each cited page before the code phase | A field or limit changed under the adapter |
 | A-16 | A full NYSE or NASDAQ core session lasts 23,400 seconds (09:30 to 16:00 Eastern) | The calendar source does not flag a half-day (IR-23). The figure is the documentation's sample session (§29, E-18) and the 78 windows test T-4 already uses | Compare with one year of core sessions from the endpoint: every day that is not an early close must equal it | A label only: `HALF_DAY` on the wrong days. A longer session fails the load, it is not mislabelled |
 | A-17 | Alpaca's calendar and corporate-actions responses carry the fields their documentation pages list (§29, E-18, E-19) | The pages were read; no response was fetched, and SPEC-P0.2 records neither endpoint | One recorded response from each endpoint, kept as a contract fixture | A field that differs is a `SCHEMA_VIOLATION`: the calendar load fails whole and the events are refused. Nothing is stored wrongly |
@@ -2852,7 +2877,7 @@ open. Nothing here is answered by this document.
 
 | # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
 |---|---|---|---|---|
-| OQ-1 | What is the source of exchange sessions, half-days and special sessions for **NSE and BSE**? For the US the source is decided (O-13): Alpaca's calendar endpoint, which flags neither a half-day (IR-23) nor a special session | Owner, then vendor or exchange documentation | The NSE and BSE holiday and Muhurat circulars, and whether either exchange or a bought provider publishes them in a machine-readable form. Name the source, its fields and its update cadence | **Blocks freeze** of the India calendar adapter and all India gap detection. India is unfunded. Evidence of 2026-10-09: §29.2 |
+| OQ-1 | What is the source of exchange sessions, half-days and special sessions for **NSE and BSE**? For the US the source is decided (O-13): Alpaca's calendar endpoint, which flags neither a half-day (IR-23) nor a special session | Owner, then vendor or exchange documentation | The NSE and BSE holiday and Muhurat circulars, and whether either exchange or a bought provider publishes them in a machine-readable form. Name the source, its fields and its update cadence | **Blocks freeze** of the India calendar adapter and all India gap detection. India is unfunded. Evidence of 2026-10-09: §29.2. **Outside this spec's freeze by O-15; blocks India activation** |
 | OQ-2 | When is a Massive daily aggregate final? (SPEC-P0.3 Q-7) | Massive documentation or support | "Is a `1/day` aggregate for date D final at 21:45 UTC on D, or revised later, and until when?" | P2.1 schedule; mitigated by `[DEFAULT-2]` |
 | OQ-3 | FMP payload size per statement request (SPEC-P0.3 Q-5) | Measurement | `Content-Length` on 10 representative statement calls | Backfill plan |
 | OQ-4 | Throttle status and headers for Massive, FMP, SEC; FRED's numeric limit (SPEC-P0.2 M-4) | Vendor support | "Which status code and headers indicate throttling, and is `Retry-After` set?" | Client tuning only |
@@ -2861,7 +2886,7 @@ open. Nothing here is answered by this document.
 | OQ-7 | The RBI USD/INR reference-rate endpoint, its fields and a fallback (SPEC-P0.1 Q12) | RBI publications | The published location and format of the daily reference rate; publication time; holiday behaviour | FX adapter; India activation. Evidence of 2026-10-09: §29.2 |
 | OQ-8 | India sources for fundamentals, corporate actions and news | Owner | Does Zerodha Kite Connect publish corporate actions? Which vendor covers NSE/BSE fundamentals? | India activation |
 | OQ-9 | SEC EDGAR response fields: the filing identifier, acceptance timestamp, form type, document path on `data.sec.gov` submissions; the XBRL company-facts shape; the Forms 3/4/5 document format and the fields to extract | SEC documentation | The SEC's EDGAR API documentation for `data.sec.gov`, and its technical specification for ownership documents (exact pages not retrieved by this phase) | **Blocks freeze** of §19 mappings and the EDGAR adapter; P2.5's insider feature. Evidence of 2026-10-09: §29.2 |
-| OQ-10 | What is a "material" disagreement under rule N7, and which metrics are compared under which names in each source? | Owner | SPEC-P0.2 rule N7 gives no threshold or list | **Blocks freeze** of §19.3 step 4 |
+| OQ-10 | What is a "material" disagreement under rule N7, and which metrics are compared under which names in each source? | Owner | SPEC-P0.2 rule N7 gives no threshold or list | **Blocks freeze** of §19.3 step 4. **Deferred to P2.5 by O-15; does not block this spec's freeze** |
 | OQ-11 | Replace `[A-1]` and `[A-2]` with measured or decided values | Measurement; Owner | §21 | Not blocking |
 | OQ-12 | Who emits `RUN_STARTED` and `RUN_FINISHED` for an ingest run before P6.4 exists? | Owner, **with condition 9** | `EVENT_REGISTRY`: producer `P6.4_ORCHESTRATOR` | P2.1 code that writes an audit event |
 | OQ-13 | What does `DATA_RECEIVED`'s trigger mean when P2.2 runs after storage; what event records a P2.1 rejection or a provider failure; what does `CORPORATE_ACTION_APPLIED` mean under rule N9? | Owner, **with condition 9** | `src/audit/events.py` lines 322–334; SPEC-P1.4 §3 | P2.1 code that writes an audit event |
@@ -2942,10 +2967,10 @@ open. Nothing here is answered by this document.
 
 **Known deviations, declared.** (1) This is the specification half of the P2.1 deliverable; the
 implementation and tests are blocked by STAGE-1-FREEZE §9.2. (2) The spec cannot be frozen whole
-while OQ-1, OQ-9, OQ-10, OQ-22 to OQ-25 and OQ-35 are open; it could be frozen for the Massive and Alpaca
+while OQ-9, OQ-22 to OQ-25 and OQ-35 are open (OQ-1 and OQ-10 were taken out of the freeze by O-15); it could be frozen for the Massive and Alpaca
 paths alone if the Owner chose to split it. (3) `[DEFAULT-13]` is approved conditionally: no code
 may rely on it until `[A-10]` is verified against one documented ticker-rename case.
 
 ---
 
-# SPEC-P2.1-INGEST v0.8 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
+# SPEC-P2.1-INGEST v0.9 — DRAFT. NOT FROZEN. NOT IMPLEMENTABLE.
