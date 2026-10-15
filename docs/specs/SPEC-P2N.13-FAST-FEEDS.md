@@ -1,0 +1,274 @@
+---
+id: SPEC-P2N.13-FAST-FEEDS
+version: 0.1
+status: DRAFT
+phase: P2N.13 — Licensed low-latency feeds
+depends_on: [SPEC-P0.2-PROVIDERS v1.x (FROZEN), SPEC-P0.3-BUDGET (FROZEN), SPEC-P0.1-DECISIONS ADR-04/ADR-13/ADR-14 (FROZEN), SPEC-P2.1-INGEST v0.10 (DRAFT)]
+produces: [LATENCY-LADDER-P2N13, FAST-FEED-REGISTRY, COVERAGE-VS-LATENCY-SPLIT, FLEET-DESCOPE-RECOMMENDATION, VENDOR-FACTS-P2N13]
+---
+
+# SPEC-P2N.13 — Licensed low-latency feeds
+
+Evidence discipline follows `SPEC-P0.2-PROVIDERS`: every factual claim is `[V]` with a primary
+source, or `[U]` with the exact page to check. No rate limit, price or latency figure is guessed.
+
+Research performed 2026-10-16. Arithmetic in §3 and §6 is derived from the frozen ADR-13/ADR-14
+parameters and is reproducible from the figures stated.
+
+---
+
+## 1. Blocking questions and the defaults used
+
+| # | Question | Default used | Breaks if wrong |
+|---|---|---|---|
+| 1 | Is the universe for this analysis ADR-14's 1,500 US / 500 IN? | Yes `[DEFAULT-1]` | A wider universe increases the crawl's incremental coverage |
+| 2 | Is the relevant latency target the exit path (P0.3 §565, ≤5 s) rather than entry? | Yes `[DEFAULT-2]` — ADR-13 permits intraday exits only | If entries become event-driven the ladder is unchanged but the budget case changes |
+| 3 | Does "news" include regulatory filings? | Yes — they are the highest-value class `[DEFAULT-3]` | — |
+| 4 | Is paper-trading use of a vendor feed permitted? | **Assumed NO for TrueData** — see F-3, a blocker-class finding | The validation pipeline cannot use that feed |
+
+---
+
+## 2. Vendor facts
+
+### 2.1 United States
+
+**Benzinga direct — Stock Market Newswire** `[V]` <https://www.benzinga.com/apis/cloud-product/stock-news-api/> (retrieved 2026-10-16)
+
+| Attribute | Value | Ev |
+|---|---|---|
+| Volume | **130–160 full-length articles/day**, plus **600–900 real-time headlines/day** marketed for "day trading and algorithmic trading" | `[V]` |
+| Delivery | **REST (pull), TCP (push), RSS** — "delivered by API (pull) or TCP (push)" | `[V]` |
+| Latency | "not delayed and is offered via different delivery mechanisms to ensure minimal latency" — **no figure published** | `[V]` claim / `[U]` number |
+| History | **from 2010** | `[V]` |
+| Coverage | US equities and macro; "the Wilshire 5000, the TSX, and 1000 other popular tickers" | `[V]` |
+| Format | XML, JSON; timezone EST | `[V]` |
+| Price | **not published** | `[U]` — contact sales; a non-primary forum mention of ~$300/mo is not evidence |
+| Docs | <https://docs.benzinga.io/benzinga/newsfeed-v2.html> | `[V]` |
+
+> **F-1 — a correction to `SPEC-P0.2`.** P0.2 §355 records Alpaca's bundled Benzinga feed as
+> "130+ news articles per day", back to 2015. Benzinga's own page states **from 2010** and, more
+> importantly, **600–900 real-time headlines/day in addition to the 130–160 articles**. The
+> headline feed is roughly **5× the article count** and is the product Benzinga markets to
+> algorithmic users. Whether Alpaca's bundle includes the headline stream or only the articles is
+> **not established** — `[U]`, and it materially changes the coverage case in §4.
+
+**RTPR — real-time press releases** `[V as vendor claim]` <https://rtpr.io/rtpr-vs-benzinga-pro>
+
+| Attribute | Value | Ev |
+|---|---|---|
+| Latency | **sub-500 ms** from the source wire release — vendor's own claim | `[V]` claim |
+| Delivery | REST **and WebSocket**, plus keyword/ticker alerts | `[V]` |
+| Price | **$139/month**, 1-week trial | `[V]` |
+| Scope | source wire press releases | `[V]` |
+| Licence for machine use | **not established** | `[U]` |
+
+**SEC EDGAR** — carried forward from `SPEC-P0.2` Q5, unchanged: **10 requests/second**, declared
+User-Agent required `[V]`; dissemination cutoffs 17:30 ET and 22:00 ET for Forms 3/4/5 `[V]`;
+**propagation latency after acceptance is not published** `[U]`; full/quarterly indexes rebuilt
+weekly early Saturday `[V]`.
+
+### 2.2 India — the significant finding
+
+**TrueData — Corporate Announcements API** `[V]` <https://www.truedata.in/products/marketdataapi>
+(retrieved 2026-10-16)
+
+| Attribute | Value | Ev |
+|---|---|---|
+| Scope | **Real-time exchange filings from NSE & BSE**, parsed and structured | `[V]` |
+| **Latency** | **< 200 ms** — stated on the product page as `LATENCY < 200MS` | `[V]` **published figure** |
+| Delivery | **REST polling and WebSocket** | `[V]` |
+| Positioning | "corporate disclosures in real-time the instant they hit the stock exchange terminals" | `[V]` |
+| Categories | Financial results (with the **original exchange-filed PDF URL**); board meetings, dividends, bonus, splits; orders, contracts, JVs, MoUs; **SAST disclosures, promoter pledge changes, insider filings** | `[V]` |
+| Payload | `id`, `trade_date`, `scrip_code`, `symbol_nse`, `symbol_bse`, `company_name`, `news_headline`, `news_body`, `announcement_type`, `meeting_type`, **`critical`** flag | `[V]` |
+| Price | **not published on this page** | `[U]` — <https://www.truedata.in/price> |
+
+**TrueData — Live Market News API** (marked NEW) `[V]`: WebSockets/webhooks, "delivered in
+**sub-second JSON packets for event-driven algorithmic trading**", ticker-tagged to NSE/BSE
+symbols, sector classification, ML sentiment, sourced from "verified financial media sources, wire
+services, and macroeconomic press releases" `[V]`. Price `[U]`.
+
+**Bonus finding relevant to OPT.2 (#59):** the same vendor publishes a **Live Option Chain API**
+and a **Realtime Option Greeks API** (IV, delta, theta, vega, gamma "+16 matrices") for NSE F&O
+`[V]`. That is a direct input to #59 and should be carried there.
+
+**Other India candidates, unverified:** MarketMaker.in (named on Zerodha's own forum as offering a
+realtime NSE+BSE corporate announcement API over websocket and REST) `[U]`; stockinsights.ai
+announcements tagged feed `[U]`; NSE's own paid real-time data subscription, which the page
+describes as **CSV at specified intervals** — i.e. likely not a low-latency push product for
+announcements `[U]`.
+
+### 2.3 F-3 — BLOCKER-CLASS LICENCE FINDING
+
+TrueData's published terms `[V]`, verbatim on the same page:
+
+- "Data is licensed solely for **Personal / Proprietary Algo Trading**, Charting, and Analysis use
+  of a single Subscriber." — **our use case is explicitly permitted.** Good.
+- "TrueData **does not provide market data for any kind of Gaming / Virtual trading / Simulation
+  usage**, as per NSE & SEBI guidelines." — **this collides with the validation pipeline.**
+- Redistribution, commercial display or enterprise-wide access requires prior exchange approval.
+- "The Subscriber must ensure that the information provided **terminates at his / her end**."
+
+The simulation clause is not a detail. `master-research-summary.md` §12 and issue #35 require a
+**7-stage pipeline: backtest → walk-forward → 3–6 months paper trading → shadow mode** before live
+capital. Paper trading and shadow mode are, on a plain reading, "virtual trading / simulation".
+If that reading is correct, this feed **cannot lawfully be used for the paper and shadow stages**,
+which is where it would otherwise be proven. Escalated as OQ-3; it needs a written answer from the
+vendor before any commitment, and the same question must be put to every India vendor.
+
+---
+
+## 3. The latency ladder
+
+The deliverable of this phase. Ranked by time from event to our possession.
+
+| # | Path | Mechanism | To our possession | Evidence |
+|---|---|---|---|---|
+| 1 | **TrueData corporate announcements (IN)** | WebSocket push | **< 200 ms** | `[V]` vendor published |
+| 2 | **RTPR press releases (US)** | WebSocket push | **< 500 ms** claimed | `[V]` vendor claim |
+| 3 | **TrueData news API (IN)** | WebSocket / webhook | "sub-second" claimed | `[V]` vendor claim |
+| 4 | **Benzinga direct (US)** | **TCP push** | "not delayed"; no figure | `[V]` mechanism / `[U]` number |
+| 5 | Alpaca bundled Benzinga (US) | REST poll, **max 50/page** | poll interval + vendor hop | `[V]` mechanism / `[U]` number |
+| 6 | SEC EDGAR | REST poll ≤10 req/s | propagation unpublished | `[V]` limit / `[U]` latency |
+| 7 | Publisher RSS, conditional GET | poll | poll interval, minutes | structural |
+| 8 | **Open-web crawl (#46–#52)** | poll 10,000 domains | **~7 s detect, ~13 s body** | derived, §3.1 |
+
+### 3.1 The crawl's real detection latency — computed fairly
+
+Earlier framing on #37 implied the crawl would be "minutes to hours". **That was wrong and is
+corrected here.** Done properly — half the fetch budget on listing-page discovery, half on
+article bodies, politeness capped at 0.3 req/s per domain:
+
+| Domains | req/s available per domain | Politeness-bound? | Discovery interval | Detect + fetch |
+|---|---|---|---|---|
+| 1,000 | 3.00 | **yes, capped to 0.3** | 6.7 s | 13.3 s |
+| 10,000 | 0.30 | no — exactly at the cap | 6.7 s | 13.3 s |
+| 30,000 | 0.10 | no | 20.0 s | 40.0 s |
+
+So a well-engineered 10,000-domain fleet detects a new article in **~7 s** and holds its body in
+**~13 s**. That is genuinely usable at a swing horizon. It is also:
+
+- **66× slower** than TrueData's published 200 ms
+- **27× slower** than RTPR's claimed 500 ms
+- **13× slower** than TrueData's sub-second news claim
+
+And the budget is **exclusive**: below ~10,000 domains the politeness cap means the fleet cannot
+reach 3,000 req/s at all (1,000 domains × 0.3 = 300 req/s maximum). Narrow-and-fast and
+broad-and-slow are the same budget spent differently.
+
+---
+
+## 4. Coverage versus latency
+
+| Event class | Covered by a licensed feed? | Needs the crawl? |
+|---|---|---|
+| Indian exchange filings — results, board meetings, dividends, splits, orders, SAST, pledge | **Yes, authoritatively** — TrueData, direct from exchange terminals, with the filed PDF | No |
+| US regulatory filings | **Yes** — EDGAR is the authority | No |
+| US wire press releases | **Yes** — RTPR / Benzinga | No |
+| US market-moving news on Wilshire 5000 + TSX + 1,000 tickers | **Yes** — Benzinga, in-house originated | No |
+| Macro releases, both markets | **Yes** — Benzinga macro, TrueData economic calendar | No |
+| Small/micro-cap local or regional-language press not carried by a wire | No | **Yes** |
+| Trade and sector publications | Partial | **Yes** |
+| Company IR pages not on a wire | No | **Yes** |
+
+**Against ADR-14's actual universe — 1,500 US and 500 IN names, all of them liquid enough to pass
+a $500M market-cap and $1M ADDV screen — the licensed feeds have essentially complete coverage of
+every market-moving event class.** Benzinga's stated coverage (Wilshire 5000 + TSX + 1,000
+tickers) is a superset of the US universe. TrueData covers NSE and BSE filings at source.
+
+The crawl's genuine incremental coverage is the **long tail below the liquidity screen** — which
+ADR-14 has already excluded from the tradeable universe. **A crawl cannot generate an actionable
+signal about a name the system is not permitted to trade.**
+
+Benzinga's own page makes the structural argument unprompted `[V]`: *"Aggregators scrape the web
+for second-hand content making them slower and prone to a massive amount of repetition and
+noise."* That is a vendor marketing its own product, and it is also correct about the mechanism.
+
+---
+
+## 5. The comparison the owner asked for
+
+Per-month cost against seconds saved on a position-relevant event. Prices marked `[U]` are not
+verified and must be confirmed before commitment.
+
+| Option | Monthly | Latency achieved | Coverage of ADR-14 universe |
+|---|---|---|---|
+| **Already owned** — Alpaca bundled Benzinga | **$0 incremental** (inside the $129–228/mo ADR-13 Option B stack) | path 5 | US universe, articles; headline stream `[U]` |
+| TrueData corporate announcements (IN) | `[U]` | **< 200 ms** `[V]` | India filings, authoritative |
+| RTPR (US) | **$139** `[V]` | **< 500 ms** claimed | US wire press releases |
+| Benzinga direct TCP push (US) | `[U]` | push, unpublished | US, + the 600–900 headline stream |
+| **Crawl fleet #46–#52** | **$3,000–8,000** self-hosted; $195k+ via proxy | ~7 s detect / ~13 s body | the tail **below** the tradeable universe |
+
+Even taking only the verified prices, a **three-figure monthly spend buys 13–66× better latency
+and authoritative coverage of every event class the system can act on**, versus a four-to-five
+figure monthly spend for coverage of names ADR-14 excludes.
+
+---
+
+## 6. Recommendation
+
+**R-1. Buy the push tier. Descope the crawl fleet.**
+
+1. **Wire the feed already paid for.** Alpaca's bundled Benzinga feed is inside the existing
+   $129–228/mo stack. It needs no new money — only the trigger path (#55) to use it. This is the
+   highest return action in the programme.
+2. **Add TrueData corporate announcements for India**, subject to OQ-3 (the simulation clause) and
+   its price. At a published <200 ms from the exchange terminal, with the filed PDF as a primary
+   source for corroboration (#57), it is the single best latency buy identified and it fills the
+   genuine India gap in `SPEC-P0.2`.
+3. **Evaluate RTPR at $139/mo** for US wire press releases, pending its machine-use licence.
+4. **Resolve `[U]` on whether Alpaca's bundle carries the 600–900/day headline stream** or only the
+   130–160 articles. If only the articles, Benzinga direct becomes worth pricing.
+5. **Descope #46–#52** from a 3,000 fetch/s fleet to a **bounded breadth tier**: the existing
+   #43 RSS/conditional-GET design over a curated registry, plus #44 on-demand scraping for IR
+   pages and the sub-screen tail. Keep the architecture; drop the 10,000-domain, 388 TB/month
+   target until a measured coverage gap justifies it.
+
+**R-2. The fleet's own justification must come from #53, not from this phase.** This phase
+establishes that the fleet is 13–66× slower and far more expensive for the universe the system can
+actually trade. Whether that remains worth building is the edge question, and #53 answers it.
+
+---
+
+## DECISIONS MADE
+
+| # | Decision | Rationale | Reversible? | Blast radius if wrong |
+|---|---|---|---|---|
+| 1 | Rank paths by evidence-backed latency, not by vendor adjectives | Four of eight paths publish no figure; an unranked ladder would be fiction | Yes | Low |
+| 2 | Correct the earlier "minutes to hours" crawl estimate to ~7 s / ~13 s | The fair calculation splits the budget between discovery and fetch; the earlier figure overstated the case against the crawl | Yes | Medium — it strengthens the crawl's case, and the recommendation survives anyway |
+| 3 | Recommend descoping the fleet rather than cancelling it | #43/#44 breadth has real value for the sub-screen tail; the 3,000/s target does not | Yes | Medium |
+| 4 | Treat TrueData's simulation clause as blocking until answered | A plain reading forbids the paper and shadow stages, which is where the feed would be proven | Yes | **High** — if correct, the India push tier cannot be validated before live |
+
+## ASSUMPTIONS
+
+| # | Assumption | Why | How to verify | Impact if false |
+|---|---|---|---|---|
+| 1 | 0.3 req/s/domain is a defensible politeness ceiling | No universal standard exists; it is ~1 fetch per 3.3 s per host | Per-domain robots.txt `Crawl-delay` survey | Changes every figure in §3.1 proportionally |
+| 2 | Half the crawl budget on discovery, half on bodies | A reasonable split; the optimum depends on articles per domain | Measure in #43 | §3.1 latencies move by ~2× either way |
+| 3 | A 50 KB wire response and the §3.1 model represent real publisher pages | From the #41 sizing | Measure | §3.1 only |
+| 4 | Alpaca's bundle is the same Benzinga content P0.2 recorded | P0.2 §355 states Alpaca news *is* Benzinga | Alpaca entitlement docs | If the headline stream is excluded, §4 coverage weakens |
+| 5 | Vendor latency claims are honest | Unverifiable without a trial | Measure in a paid trial, both markets | The ladder's top four rows reorder |
+
+## OPEN QUESTIONS
+
+| # | Question | Answered by | Exact query | Blocks |
+|---|---|---|---|---|
+| OQ-1 | TrueData pricing for the announcements and news APIs | Vendor | <https://www.truedata.in/price>, or sales | R-1 item 2 |
+| OQ-2 | Benzinga direct pricing and the published latency of the TCP push | Vendor | <https://www.benzinga.com/apis/> contact sales | R-1 item 4 |
+| **OQ-3** | **Does TrueData's "no Gaming / Virtual trading / Simulation" clause forbid use in paper trading and shadow mode?** | Vendor, in writing | The terms block on <https://www.truedata.in/products/marketdataapi> | **#35 go-live pipeline; R-1 item 2** |
+| OQ-4 | Does Alpaca's bundled feed include the 600–900/day headline stream? | Alpaca entitlement docs | Alpaca market-data docs | §4 coverage, R-1 item 4 |
+| OQ-5 | RTPR machine-use and storage licence | Vendor | <https://rtpr.io> terms | R-1 item 3 |
+| OQ-6 | EDGAR propagation latency after acceptance | Measurement | Measure in paper trading | Ladder row 6 |
+| OQ-7 | MarketMaker.in and stockinsights.ai — real products, terms, prices? | Vendors | marketmaker.in; docs.stockinsights.ai | India redundancy |
+| OQ-8 | Do any India vendors permit a point-in-time news archive? | Vendors | — | #26 backtest; P0.2 M-5 already flags this as the gap threatening P5.1 |
+
+## CONTRACTS EXPORTED
+
+| Name | Kind | Schema / signature | Consumers |
+|---|---|---|---|
+| `LATENCY-LADDER-P2N13` | table | §3, 8 ranked paths with evidence grade | #53, #46, #55 |
+| `FAST-FEED-REGISTRY` | document | §2 vendor facts | #42 push tier |
+| `COVERAGE-VS-LATENCY-SPLIT` | table | §4 by event class | #53, #45, #47 |
+| `FLEET-DESCOPE-RECOMMENDATION` | decision | §6 R-1 item 5 | #46–#52 |
+| `F-1` | correction | Benzinga volume and history vs `SPEC-P0.2` §355 | `SPEC-P0.2` amendment |
+| `F-3` / OQ-3 | blocker | simulation-clause licence risk | #35, #33 |
+| `OPTION-GREEKS-SOURCE-IN` | finding | TrueData option chain + Greeks for NSE F&O `[V]` | **#59 (OPT.2)** |
