@@ -272,3 +272,97 @@ actually trade. Whether that remains worth building is the edge question, and #5
 | `F-1` | correction | Benzinga volume and history vs `SPEC-P0.2` §355 | `SPEC-P0.2` amendment |
 | `F-3` / OQ-3 | blocker | simulation-clause licence risk | #35, #33 |
 | `OPTION-GREEKS-SOURCE-IN` | finding | TrueData option chain + Greeks for NSE F&O `[V]` | **#59 (OPT.2)** |
+
+---
+
+# AMENDMENT v0.2 — the zero-cost tier
+
+Added 2026-10-16 on owner instruction: the descope is **accepted**, and a free alternative is
+required alongside the paid tier. Research performed against primary sources with the same
+`[V]` / `[U]` discipline.
+
+## 7. Free and already-paid sources
+
+| Source | Cost | Authoritative for | Mechanism | Latency | Ev |
+|---|---|---|---|---|---|
+| **SEC EDGAR** | **free** | **all US filings — it IS the event** | REST poll + Atom (`action=getcurrent`), full-index, full-text search | 10 req/s cap; propagation unpublished | `[V]` cap, `[U]` latency |
+| **Alpaca bundled Benzinga** | **already paid** (inside the $129–228/mo ADR-13 Option B stack) | US market-moving news, Wilshire 5000 + TSX + 1,000 tickers | REST poll, max 50/page | poll + vendor hop | `[V]` mech, `[U]` number |
+| **GDELT 2.0** | **free** | global breadth, 65 languages, archives to 1979 | DOC 2.0 API / 15-min files | **15-minute cadence** | `[V]` <https://gdeltproject.org/data.html> |
+| **FRED** | **free** | US macro | REST | daily/monthly | `[V]` P0.2 |
+| **Company IR RSS/Atom** | **free** | the press release at origin | conditional GET | publisher-dependent | structural |
+| **NSE / BSE announcement endpoints** | **free** | **India exchange filings** | JSON endpoints behind the public announcement pages | poll | `[U]` — **undocumented, and ToS for automated access unverified** |
+| **SEBI / RBI press pages** | **free** | India regulatory | poll | poll interval | `[U]` |
+| Finnhub free tier | free tier | company news | REST | `[U]` | `[U]` |
+
+## 8. The $0-incremental configuration
+
+A viable news capability that adds **nothing** to the current monthly spend:
+
+| Class | Source | Cost |
+|---|---|---|
+| US filings | EDGAR | free |
+| US news | Alpaca/Benzinga | already paid |
+| India filings | NSE/BSE endpoints — **subject to OQ-9** | free |
+| India regulatory | SEBI, RBI | free |
+| Press releases at origin | company IR RSS | free |
+| Breadth / research | GDELT | free |
+| Macro | FRED | free |
+
+**This covers every authoritative event class in `SPEC-P2N.13` §4.** What the free tier does **not**
+buy is latency: nothing free matches TrueData's published 200 ms or RTPR's claimed 500 ms. The free
+tier polls; the paid tier is pushed to.
+
+### 8.1 What that costs in time-to-signal
+
+| Tier | India filings | US filings | US news |
+|---|---|---|---|
+| **Free** | poll interval (seconds–minutes), ToS-limited | EDGAR poll ≤10 req/s | Alpaca poll interval |
+| **Paid** | **< 200 ms** | EDGAR unchanged — already the authority | Benzinga TCP push |
+
+Against §5's valuation of a news trigger at ~52 bps of NAV/year, and the capital ladder running
+from $1,000 to $10,000, **the free tier is the correct starting configuration.** It captures the
+coverage, which is what makes a thesis-invalidation trigger possible at all. Latency is the
+refinement to buy once NAV makes 52 bps worth more than the subscription.
+
+## 9. Recommendation R-2 — staged, matched to the capital ladder
+
+| Stage | NAV | Configuration | Incremental cost |
+|---|---|---|---|
+| Backtest → paper → shadow | — | free tier + the already-paid Alpaca feed | **$0** |
+| Small capital | $1,000 | unchanged | **$0** |
+| Controlled live | $10,000 | add **RTPR $139/mo** if its machine-use licence permits (OQ-5) | $139 |
+| Scale-up | $100,000+ | add **TrueData announcements** for India, subject to OQ-3 and price | `[U]` |
+| — | > $7 M | revisit the crawl fleet; below that it cannot break even (§5.1 of the EDGE-ADR) | — |
+
+**The free tier is not a compromise at this capital.** It is the configuration whose cost is
+proportionate to the measured value of the signal.
+
+## 10. The risk the free tier carries, stated plainly
+
+The India half rests on **undocumented endpoints whose terms for automated access are unverified**
+(OQ-9). That is the free tier's weak point and it is a real one:
+
+- the endpoints can change without notice — there is no contract and no deprecation policy;
+- automated access may breach the site terms, with blocking as the mild outcome;
+- no SLA, no support, and no entitlement to the data.
+
+A production system should not have an authoritative class resting on an unverified endpoint
+indefinitely. The free tier is right **now**; the India paid feed is the thing to buy first as
+capital grows, and OQ-9 must be answered before the free path is relied on in live trading.
+
+## OPEN QUESTIONS — amendment
+
+| # | Question | Answered by | Exact query | Blocks |
+|---|---|---|---|---|
+| OQ-9 | **Do NSE and BSE permit automated access to their announcement endpoints, and at what rate?** | NSE / BSE terms of use, and their robots.txt | nseindia.com and bseindia.com terms-of-use pages | the entire free India path |
+| OQ-10 | Does GDELT's licence permit use in a commercial trading decision? | GDELT terms | <https://gdeltproject.org> terms | the free breadth tier |
+| OQ-11 | Is EDGAR's `action=getcurrent` Atom feed low-latency enough to be the US filing trigger? | Measurement | measure against the daily index in paper trading | #42 push tier |
+| OQ-12 | Finnhub free-tier limits, coverage and licence | Vendor | finnhub.io/pricing and terms | free-tier redundancy |
+
+## CONTRACTS EXPORTED — amendment
+
+| Name | Kind | Schema / signature | Consumers |
+|---|---|---|---|
+| `FREE-TIER-CONFIG` | decision | §8 — the $0-incremental source set | #42, #43, #55 |
+| `STAGED-FEED-LADDER` | decision | §9 — what to buy at which NAV | #35 go-live gates, #46 |
+| `FREE-TIER-RISK` | risk | §10 — undocumented India endpoints | #33 compliance, #47 |
