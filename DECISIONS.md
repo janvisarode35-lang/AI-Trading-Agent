@@ -169,7 +169,7 @@ spec's `OPEN QUESTIONS` table and in STAGE-0-FREEZE §6.
 
 ## Owner rulings — X5 conditions 3, 12, 13, 14
 
-**Date:** 2026-10-16 · **Status:** RULED, awaiting owner signature · **Full text:** issue #16 comment
+**Date:** 2026-10-16 · **Status:** **RATIFIED by Owner, 2026-10-16** · **Full text:** issue #16 comment
 
 | Condition | Ruling, in one line | Implemented in |
 |---|---|---|
@@ -185,5 +185,12 @@ the consecutive-breach counter must survive a restart (storage, not memory); `SE
 `BLACKOUT-001` are new rules; the `exposure_reducing` classifier is a new pure function needing
 boundary tests including the sell-that-opens-a-short case.
 
-**Condition 14 is a risk-appetite call, not an engineering fact.** The alternative is `action: KILL`
-on both loss rules, accepting manual two-person resets in volatile weeks.
+**Condition 14 was a risk-appetite call, not an engineering fact.** The Owner was presented with both
+options and **ratified the three-tier ruling on 2026-10-16**. The declined alternative was
+`action: KILL` on `LOSS-001` and `LOSS-002`, which would have meant manual two-person kill-switch
+resets in volatile weeks. Recorded here because a future reader will otherwise assume the strict
+reading of `master-research-summary.md` §11 was simply overlooked — it was considered and declined.
+
+**All four conditions are now closed.** No owner decision blocks waves 0 to 3. The only owner item
+still open in the programme is `EDGE-ADR` E-4 — whether 15 news-triggered exits per year that beat
+the ATR stop is the right falsification threshold — and that gates #35, not any current work.
