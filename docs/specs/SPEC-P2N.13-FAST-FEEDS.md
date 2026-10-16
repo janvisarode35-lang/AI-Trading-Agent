@@ -1,6 +1,6 @@
 ---
 id: SPEC-P2N.13-FAST-FEEDS
-version: 0.1
+version: 0.3
 status: DRAFT
 phase: P2N.13 — Licensed low-latency feeds
 depends_on: [SPEC-P0.2-PROVIDERS v1.x (FROZEN), SPEC-P0.3-BUDGET (FROZEN), SPEC-P0.1-DECISIONS ADR-04/ADR-13/ADR-14 (FROZEN), SPEC-P2.1-INGEST v0.10 (DRAFT)]
