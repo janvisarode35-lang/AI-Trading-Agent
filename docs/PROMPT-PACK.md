@@ -1554,3 +1554,67 @@ questions appended to Block C. The pack is designed so that depth is requested e
 **Keep a DECISIONS.md at the repo root** — the running list of every ADR and every assumption
 that has since been verified or falsified. It is the file that stops the same argument
 happening three times.
+
+---
+
+# APPENDIX B — Working practices
+
+Derived from auditing the first two months of execution. Written as rules because each one has a
+failure behind it, and one success worth copying.
+
+## The pattern that worked — copy it everywhere
+
+`SPEC-P2.1-INGEST` was built the right way: `v0.1 DRAFT` committed, then a vendor-evidence pass to
+`v0.5`, then Owner decisions O-12 to O-16 each recorded with a version bump, reaching `v0.10`. Small
+increments, each one landed, each decision attributable.
+
+The same intern, in the same period, produced roughly 3.4 MB of specification and implementation
+across issues #9 to #20 that **never left the issue comments**. One method produced a repository;
+the other produced transcripts.
+
+## The six rules
+
+**1. Commit before you continue.** A phase is not finished when the model stops writing. It is
+finished when the deliverable is a file on `main`. If it lives in a comment, it does not exist —
+nothing downstream can cite it, no gate can check it, and no reviewer can diff it.
+
+**2. One phase, one conversation, one deliverable, then stop.** Output labelled "Batch 9 of 14" or
+"Complete Phase Delivery (Batch 1 of 6)" means the conversation was asked for more than it could
+hold. Three such issues contain at least two full rewrites each, with no record of which version
+supersedes which. Ask for one phase. Land it. Open a new conversation.
+
+**3. Check that a dependency exists before citing it.** `ls docs/specs/` takes one second. Eighteen
+`SPEC-` ids were cited across Stage 2 that exist in no file, four of them colliding with the pack's
+own numbering — so both the real and the invented name looked valid. `scripts/check-spec-refs.py`
+automates this, but the habit is what matters.
+
+**4. Read your own gap audit before starting the next phase.** `STAGE-1-GAP-AUDIT.md` §10 lists
+conditions 3, 4, 12, 13 and 14 as BLOCKERS on specific phases. The P2.9 draft mentions none of its
+four; the P2.10 draft mentions none of its one. The information was already written, by the same
+author, and not consulted. This is the cheapest failure on the list to prevent.
+
+**5. Only a stage freeze record freezes a spec.** Two drafts carried `status: FROZEN` with no freeze
+record behind them. `DRAFT` until X3 merge and X5 gap audit have run and the freeze is recorded.
+A false `FROZEN` invites downstream work onto ground that has not been checked.
+
+**6. Never paste from a browser.** Several comments carry raw `<html>`, `StartFragment` and
+`style="box-sizing"` residue, which makes them unusable as specification text. Write the file,
+commit the file.
+
+## Phase-exit checklist
+
+Six questions. If any answer is no, the phase is not done.
+
+- [ ] Deliverable committed to the path the issue names
+- [ ] All four Block B tables present and non-empty
+- [ ] Zero `SPEC-` references that do not resolve to a file
+- [ ] Every blocking condition from `STAGE-1-GAP-AUDIT.md` §10 for this phase either closed or explicitly carried, in writing
+- [ ] X2 review run in a separate conversation, BLOCKER findings cleared
+- [ ] Every "tested" claim backed by a test that fails when the code is broken, with zero bare `assert`
+
+## Where to run
+
+Run these phases in Claude Code with the repository cloned, not in a web chat. The prompts require
+the upstream specs in full, and those are now large — `SPEC-P2.1-INGEST` is 2,978 lines,
+`SPEC-P1.2-STORAGE` 2,397. Pasted input gets truncated silently, and truncated input is how a phase
+ends up specified against a dependency nobody read.
