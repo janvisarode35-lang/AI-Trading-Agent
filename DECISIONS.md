@@ -226,3 +226,39 @@ frozen P5.2 gate and the ADR-13 revisit triggers.
 
 **New open items:** E-5 (who runs the event study — new issue, or part of #45?) and E-6 (what
 fraction of historical news timestamps can be corroborated — the study error bar).
+
+---
+
+## Owner decision — data providers: Upstox + Fyers (both), Moneycontrol in the news registry
+
+**Date:** 2026-10-17 · **Status:** **RATIFIED by Owner** · **Full text:** issue #68 comment
+
+| Provider | Role | Verified coverage |
+|---|---|---|
+| **Upstox** | daily history, the backtest spine | **daily from January 2000**, 1 decade per request `[V]` |
+| **Fyers** | intraday history, the event window | **intraday from 3 July 2017**, 100 days per request, unlimited symbols/day `[V]` |
+
+Both free, both verified from the brokers' own API documentation. Complementary rather than
+redundant: Upstox is the only documented ≥10-year **daily** source; Fyers is the only documented
+multi-year free **intraday** source. P2.1 already separates `DailyBarProvider` from
+`IntradayBarProvider`, so two providers is a configuration of the frozen design, not a change to it.
+
+**Groww rejected** on a 3-month historical limit. **Angel One unranked** — archive depth absent from
+its docs; one API call with an old `fromdate` settles it.
+
+**Closes OQ-14.** `SPEC-P2N.13` v0.3 §18 claimed free intraday history was unavailable from any
+verifiable source. That was wrong — Fyers documents it from 2017. #67 can therefore measure Delta at
+minute resolution instead of falling back to daily.
+
+### Explicitly NOT settled by this decision
+
+| # | Open item | Owner |
+|---|---|---|
+| 1 | **Which broker executes orders** — data and execution are different roles; the criterion is SEBI/NSE algo onboarding, not data depth | #68 |
+| 2 | `[U]` **Does a data-only account get API access?** Two providers means two accounts; if either requires funding or minimum activity, "both, free" is not free | #68, before #8 builds adapters |
+| 3 | **Two static IP registrations** — the NSE requirement is per API app | #33, #34 |
+| 4 | `[U]` **Daily auth flow per broker** — Zerodha's daily login is known; Upstox and Fyers unverified. Two brokers could mean two daily steps | #64 |
+| 5 | **Delisted symbols** — neither documents coverage. A broker API serves tradeable instruments, so assume absent. Both feeds are survivorship-biased until proven otherwise | **#62 — not closed by this** |
+
+Item 5 is the one that can still invalidate the backtest. Finding free price data does not close
+#62.
