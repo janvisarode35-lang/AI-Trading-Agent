@@ -164,3 +164,26 @@ spec's `OPEN QUESTIONS` table and in STAGE-0-FREEZE §6.
 - Add a row when a record gains a decision. Add the record first.
 - Move a row out of §7 only when the record that closes it exists, and cite that record.
 - Do not copy the text of a decision into this file.
+
+---
+
+## Owner rulings — X5 conditions 3, 12, 13, 14
+
+**Date:** 2026-10-16 · **Status:** RULED, awaiting owner signature · **Full text:** issue #16 comment
+
+| Condition | Ruling, in one line | Implemented in |
+|---|---|---|
+| **3** | US settlement is **T+1** `[V]` Rule 15c6-1(a), compliance date 2024-05-28. `SETTLE-001`: a BUY is DENIED when `notional > settled_cash`, absolute — **freeriding trips on a single occurrence**, so there is no error budget. Kill-switch liquidation exempt. | #16, P1.1 Q-P1.1-1 |
+| **12** | Pin all five rule attributes. Loosening = widening the permitted set; direction of a threshold change depends on `comparison`; `enforce`→`monitor` always loosens; any `comparison` change is **UNDECIDABLE and fails closed to LOOSENS**. | #6, #16 |
+| **13a** | **A-14 ratified.** `[CONST-6]` DENY governs exposure-**increasing** actions only; reducing actions escalate to CRITICAL and fall back to the broker-side stop. *Exposure-reducing is computed from portfolio state, never taken from the caller.* | #16 |
+| **13b** | `MODIFY` never reaches `RiskVerdict`. It is emitted as **DENY + `max_permissible_quantity`**; P2.8 may re-request **once**. `RiskVerdict` stays frozen and binary — P1.1 Decision 11 intact. | #16 |
+| **13c** | `BLACKOUT-001`: 2 sessions before to 1 after; DENY increasing, ALLOW reducing; unknown date fails closed; **blocks entry, never holding**; no override. | #39 |
+| **14** | **Third tier.** `LOSS-001`/`LOSS-002` → **`HALT_ENTRIES`**, auto-expiring at the period boundary, no human reset, exits always permitted. `LOSS-003`/`LOSS-004` → `KILL` unchanged. **Escalation:** 3 consecutive daily breaches or 2 consecutive weekly breaches trips the kill switch. | #17 |
+
+**Consequential work:** `HALT_ENTRIES` is a new action in the policy DSL between `MODIFY` and `DENY`;
+the consecutive-breach counter must survive a restart (storage, not memory); `SETTLE-001` and
+`BLACKOUT-001` are new rules; the `exposure_reducing` classifier is a new pure function needing
+boundary tests including the sell-that-opens-a-short case.
+
+**Condition 14 is a risk-appetite call, not an engineering fact.** The alternative is `action: KILL`
+on both loss rules, accepting manual two-person resets in volatile weeks.
