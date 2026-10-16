@@ -1,6 +1,6 @@
 ---
 id: SPEC-EDGE-ADR
-version: 0.1
+version: 0.2
 status: DRAFT
 phase: EDGE-ADR — what this system competes on
 depends_on: [SPEC-P0.1-DECISIONS ADR-05/ADR-13/ADR-14 (FROZEN), SPEC-P0.3-BUDGET (FROZEN), SPEC-P2N.13-FAST-FEEDS v0.1, master-research-summary.md]
@@ -299,3 +299,121 @@ equities, because adding a leveraged instrument class to an unproven edge compou
 | `CADENCE-END-STATE` | decision | §6 — (b), with the §6.2 amendment list | #54, #55, #46–#52 |
 | `EDGE-SUCCESS-CRITERIA` | table | §7 + the §7.1 falsification test | #27, #35, #36 |
 | `OPTIONS-GATING` | decision | §8 — behind the falsification test | #58 |
+
+---
+
+# AMENDMENT v0.2 — E-4 ruled, and §7.1 corrected
+
+Owner ruling requested 2026-10-16. Answering E-4 required correcting an error in v0.1.
+
+## 11. The error in v0.1 §7.1
+
+§7 set the falsification threshold at **"≥ 15 news-triggered exits per year that beat the ATR
+stop"**. The base case in §5 produces:
+
+```
+qualifying events/yr = E × f_intraday × f_not_already_stopped
+                     = 25 × 0.35 × 0.50
+                     = 4.4
+```
+
+**The bar was 3.4× the base case.** The hypothesis would have been falsified even if the model were
+exactly right. The 52.5 bps/yr figure and the 15/yr figure describe the same model and contradict
+each other; 4.4 is the one consistent with §5.
+
+**Worse than the arithmetic: a count test cannot work here at all.** Twelve months of shadow mode at
+the base case yields **n ≈ 4**. Nothing is falsifiable at n = 4 — a year with 2 qualifying events and
+a year with 8 are statistically indistinguishable, so the test would return noise and the programme
+would act on it.
+
+**The "≥ 15/yr" row in §7 and the first bullet of §7.1 are withdrawn.**
+
+## 12. RULING on E-4 — test the parameters, not the count
+
+The claim under test is narrow: *a news trigger on the exit path is worth ~52 bps of NAV/yr.* It
+decomposes into four parameters, and **all four are measurable from historical data without running
+the system, without shadow mode, and before #55 is built**:
+
+| Parameter | What it is | How it is measured | Needs trading? |
+|---|---|---|---|
+| **E** | HIGH-tier news events/yr on a held-size book | count them on a simulated 20-slot book over history | no |
+| **f_intraday** | fraction published inside session hours | publication timestamp vs exchange calendar | no |
+| **f_not_stopped** | fraction where the ATR stop had not already fired | price path vs `entry − 2.5 × ATR(14)` at news time | no |
+| **Δ** | avoidable adverse move | move from news time to the next session exit point, versus the stop fill | no |
+
+So the test is an **event study**, not a 12-month wait. It can run now.
+
+### 12.1 The kill condition, graded
+
+Expressed as modelled annual value rather than a count, because that is the quantity the decision
+actually turns on:
+
+| Measured annual value | Ruling | What gets built |
+|---|---|---|
+| **< 10 bps/yr** | **Hypothesis falsified.** Noise against the 4.2 %/yr cost drag ADR-13 already budgets, and not worth the complexity or the injection surface | Abandon the intraday paths. #55 is cancelled |
+| **10 – 25 bps/yr** | **Partially supported** | Build the cheap half only: #42 + #45 + #57 feeding the *existing* exit path. **Skip the #55 event loop** |
+| **> 25 bps/yr** | **Supported** | Build #55 in full, scoped to paths A and E |
+
+25 bps/yr is half of one US round trip (ADR-13 Chain F: ~25 bps) recovered every year, for a feed
+already paid for. 10 bps/yr is under a quarter of a round trip — below the noise floor of the cost
+model itself.
+
+### 12.2 The carve-out that proceeds regardless
+
+**Path D — suppressing a pending entry on adverse news — is exempt from E-4 and proceeds whatever
+the event study finds.**
+
+It needs no intraday infrastructure, no latency, and no event loop. Adverse news published overnight
+is already in the nightly batch; the 09:45–10:15 placement window simply does not place that entry.
+The #54 ruling already permits suppression, and the ADR-14 §70 objection does not apply —
+suppressing a pending order is not re-deriving a signal.
+
+This is worth stating plainly because it inverts the intuition the whole news programme started
+from: **the single most valuable news feature in the system requires no real-time anything.** §2
+rated "avoiding a bad entry" as high value, and it is reachable today at zero infrastructure cost.
+
+### 12.3 Scope of E-4
+
+E-4 governs **only** the news-trigger claim. The broader edge hypothesis of §2 — discipline, risk
+control, patience — is already tested by the frozen P5.2 gate (Sharpe > 1.0, max DD < 15 %,
+OOS > 70 % of IS) and by the ADR-13 revisit triggers (realised median hold outside 8–25 days,
+measured round-trip cost > 40 bps US). Nothing here weakens those.
+
+### 12.4 One honest caveat on the event study
+
+It needs historical news with trustworthy timestamps. `SPEC-P0.2` M-5 records that **no vendor in
+scope documents archive integrity**, which is the #62 problem.
+
+But this study is **more robust to that problem than a backtest is**: it measures publication
+timestamps and price moves, not as-reported fundamentals. A restated fundamental corrupts a
+backtest; it does not change when an article was published or where price went afterwards. Dating
+errors would still matter, so the study must report the fraction of items whose timestamp it could
+not corroborate, and treat that fraction as its error bar.
+
+### 12.5 Corrected §7 row and §7.1
+
+| Metric | Target |
+|---|---|
+| ~~News-triggered exits that beat the ATR stop~~ | ~~≥ 15/yr~~ **— withdrawn** |
+| **Modelled annual value of the news trigger, from the §12 event study** | **≥ 25 bps/yr to build #55 in full; ≥ 10 bps/yr to build the cheap half; below 10 bps/yr falsifies** |
+
+**Corrected §7.1 falsification test.** The news-trigger hypothesis dies if the event study returns a
+modelled annual value **below 10 bps of NAV**. The remaining three conditions of v0.1 §7.1 —
+round-trip cost > 40 bps US, realised median hold outside 8–25 days, gross alpha per trade
+< 50 bps US — stand unchanged, and are tests of the *edge*, not of the trigger.
+
+## DECISIONS MADE — amendment
+
+| # | Decision | Rationale | Reversible? | Blast radius if wrong |
+|---|---|---|---|---|
+| 7 | Withdraw the 15/yr count threshold | Inconsistent with the §5 base case by 3.4×, and unfalsifiable at n ≈ 4 | Yes | Low — it was never run |
+| 8 | Test the four parameters by event study instead | All four are measurable from history, so the test runs before #55 is built rather than after 12 months of shadow | Yes | Medium — a bad study kills or builds the wrong thing |
+| 9 | Graded thresholds at 10 and 25 bps/yr | 25 bps is half a US round trip recovered yearly; 10 bps is below the noise floor of the cost model | Yes | Medium |
+| 10 | Path D proceeds regardless of E-4 | It needs no intraday infrastructure at all — the nightly batch already holds the news | Yes | Low |
+
+## OPEN QUESTIONS — amendment
+
+| # | Question | Answered by | Blocks |
+|---|---|---|---|
+| E-5 | Who runs the §12 event study — a new issue, or part of #45? | Owner | the E-4 verdict, hence #55 |
+| E-6 | What fraction of historical news timestamps can be corroborated? | the study itself | the study error bar |

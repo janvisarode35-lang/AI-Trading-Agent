@@ -194,3 +194,35 @@ reading of `master-research-summary.md` §11 was simply overlooked — it was co
 **All four conditions are now closed.** No owner decision blocks waves 0 to 3. The only owner item
 still open in the programme is `EDGE-ADR` E-4 — whether 15 news-triggered exits per year that beat
 the ATR stop is the right falsification threshold — and that gates #35, not any current work.
+
+---
+
+## Owner ruling — EDGE-ADR E-4 (news-trigger falsification test)
+
+**Date:** 2026-10-16 · **Status:** **RATIFIED by Owner, 2026-10-16** · **Full text:** `SPEC-EDGE-ADR` v0.2 §11–§12
+
+**The v0.1 threshold was wrong and is withdrawn.** §7 demanded "≥ 15 news-triggered exits/yr that
+beat the ATR stop"; the §5 base case produces **4.4** (25 × 0.35 × 0.50). The bar was 3.4× the base
+case, so the hypothesis would have failed even if the model were exactly right. And at n ≈ 4, a
+count test over 12 months is unfalsifiable wherever the bar sits.
+
+**Ruling: test the four parameters by event study, not the count.** E, f_intraday,
+f_not_already_stopped and Δ are all measurable from historical data — no shadow mode, no trading,
+and **before #55 is built**.
+
+| Measured annual value | Ruling | Build |
+|---|---|---|
+| < 10 bps/yr | **falsified** — below the noise floor of a 4.2 %/yr cost drag | #55 cancelled |
+| 10–25 bps/yr | partially supported | #42 + #45 + #57 into the existing exit path; **skip #55** |
+| > 25 bps/yr | supported | #55 in full, paths A and E |
+
+**Carve-out: path D proceeds regardless.** Suppressing a pending entry on adverse overnight news
+needs no intraday infrastructure — the nightly batch already holds the news, and the 09:45 window
+simply does not place that order. The most valuable news feature in the system requires no real-time
+anything.
+
+**Scope:** E-4 governs the news-trigger claim only. The broader edge hypothesis stays tested by the
+frozen P5.2 gate and the ADR-13 revisit triggers.
+
+**New open items:** E-5 (who runs the event study — new issue, or part of #45?) and E-6 (what
+fraction of historical news timestamps can be corroborated — the study error bar).
