@@ -366,3 +366,152 @@ capital grows, and OQ-9 must be answered before the free path is relied on in li
 | `FREE-TIER-CONFIG` | decision | §8 — the $0-incremental source set | #42, #43, #55 |
 | `STAGED-FEED-LADDER` | decision | §9 — what to buy at which NAV | #35 go-live gates, #46 |
 | `FREE-TIER-RISK` | risk | §10 — undocumented India endpoints | #33 compliance, #47 |
+
+---
+
+# AMENDMENT v0.3 — subscription-free architecture
+
+Owner instruction, 2026-10-16: **no subscriptions, at all.** RSS is to be the mechanism, not a
+supplement. This amendment supersedes §9's staged ladder, which assumed paid upgrades.
+
+## 13. Correcting the v0.2 framing
+
+v0.2 §8 built a "$0-incremental" configuration, but it rested on the **already-paid**
+Alpaca/Benzinga feed and §9 presented paid tiers as the upgrade path. #43 treated RSS as the
+*breadth* tier beneath a paid push tier.
+
+That was the wrong shape. It inherited the paid data stack ADR-13 and P0.2 had already selected
+instead of questioning whether it was needed at all. **RSS is the backbone.** The paid options stay
+documented in §2 as declined alternatives, not as a ladder.
+
+## 14. The distinction that governs the whole redesign
+
+**RSS solves forward. It cannot solve backward.** A feed serves the last N items — typically 10 to
+100 — and carries no archive. So:
+
+| Need | Mechanism | Cost |
+|---|---|---|
+| **Going forward** — never miss news from today onward | **RSS / Atom**, conditional GET | free |
+| **Backward** — the #67 event study, #62 point-in-time, #26 backtest | **SEC EDGAR structured filings** + **GDELT** | free |
+
+These are different mechanisms and conflating them is how a plan ends up assuming a feed can be
+replayed. It cannot. **Anything historical must come from an archive, and anything forward-looking
+must come from a feed — and the forward capture has to start now, because a day not captured is
+gone.**
+
+## 15. SEC EDGAR 8-K item codes — the free structured event source
+
+Verified live against the free API, 2026-10-16, no key, declared User-Agent only:
+
+```
+GET https://data.sec.gov/submissions/CIK0000320193.json
+
+fields: acceptanceDateTime, accessionNumber, act, core_type, fileNumber, filingDate,
+        filmNumber, form, isInlineXBRL, isXBRL, isXBRLNumeric, items, primaryDocDescription,
+        primaryDocument, reportDate, size
+
+8-K  filed=2026-07-30  accepted=2026-07-31T00:30:28.000Z  items=2.02,9.01
+8-K  filed=2026-04-20  accepted=2026-04-21T01:29:51.000Z  items=5.02
+```
+
+1,002 recent filings per company plus older batches. `[V]` measured.
+
+**Why this is better than classifying news text**, and not merely cheaper:
+
+| | News keyword classifier | EDGAR 8-K item codes |
+|---|---|---|
+| Taxonomy | inferred, needs hand-labelling and a precision/recall estimate | **official and structured** |
+| Publication time | the vendor timestamp, often `[U]` | **`acceptanceDateTime`, exact** |
+| History | vendor-dependent, archive integrity `[U]` (P0.2 M-5) | **decades, public domain** |
+| Licence | redistribution `[U]` (P0.2 M-8) | **US government public domain** |
+| Determinism | keyword tuning is a judgement call | **a code is a code** |
+
+### 15.1 The item codes that are thesis-breaking events
+
+| Item | Meaning | Why it matters |
+|---|---|---|
+| **4.02** | Non-reliance on previously issued financials | **the strongest red flag in the taxonomy** — a restatement |
+| **4.01** | Change in auditor | resignation is a major signal |
+| **3.01** | Delisting notice / failure to satisfy a listing rule | |
+| **2.04** | Triggering event accelerating debt | |
+| **2.06** | Material impairment | |
+| **2.02** | Results of operations | the earnings event |
+| **1.01 / 1.02** | Material agreement entered / terminated | M&A and contract loss |
+| **5.02** | Officer or director departure | |
+| **8.01** | Other material events | catch-all, needs text |
+
+This replaces the hand-labelled keyword classifier in #67 and removes the precision/recall
+estimation step entirely for every class except 8.01.
+
+## 16. The subscription-free architecture
+
+| Layer | Source | Mechanism | Cost |
+|---|---|---|---|
+| **US material events, forward** | EDGAR `action=getcurrent` Atom | conditional GET | free |
+| **US material events, history** | EDGAR submissions API, 8-K `items` | REST, ≤10 req/s | free |
+| **US company announcements, forward** | company IR RSS/Atom | conditional GET | free |
+| **India announcements** | NSE / BSE announcement endpoints — **OQ-9** | poll | free |
+| **India regulatory** | SEBI, RBI | poll | free |
+| **Press releases at origin** | wire-service and IR feeds | conditional GET | free |
+| **Breadth / global** | GDELT 2.0, 15-min cadence `[V]` | REST | free |
+| **Macro** | FRED | REST | free |
+
+No subscription anywhere. No licence that forbids simulation use. No redistribution question on the
+US side, because EDGAR is public domain.
+
+## 17. What this costs, stated honestly
+
+Three things the paid tier bought that this does not:
+
+1. **Latency.** TrueData publishes <200 ms; EDGAR is a poll at ≤10 req/s and company IR feeds are
+   whatever the publisher offers. Realistic detection: **seconds to a few minutes**, not
+   sub-second. Against the EDGE-ADR's ~52 bps/yr trigger value on a 15-day swing horizon, that is
+   very likely immaterial — and #67 is the thing that measures whether it is.
+2. **Pre-digested breadth.** Benzinga writes 600–900 headlines/day across a curated universe. RSS
+   plus EDGAR gives raw material and no editorial layer, so #45's symbol linkage and #57's
+   corroboration carry more weight than they would have.
+3. **A support contract.** A free endpoint has no SLA and can change without notice. That is the
+   real operational risk and it is why **OQ-9 must be answered** before the India path is relied on
+   in live trading.
+
+## 18. The one genuinely hard free item — and a question for the Owner
+
+**Intraday price history is the gap.** The #67 study measures Δ, the avoidable adverse move, which
+wants intraday bars. Free *daily* OHLC is widely available; free *intraday history* at 200 names ×
+2 years is not, from any source I can verify.
+
+**This is less damaging than it looks**, because ADR-13 already decided the backtest simulates stops
+on **daily OHLC with a conservative intrabar assumption** — fill at `min(stop, Open)` less slippage.
+So a daily-resolution Δ is *consistent with the frozen backtest methodology* rather than a
+compromise against it. `f_intraday` is unaffected: EDGAR's `acceptanceDateTime` measures it exactly.
+
+**OQ-13, for the Owner:** "no subscriptions" needs one clarification. The system still needs price
+data and a broker to place orders. A **brokerage account** is not a data subscription, and Alpaca
+offers a free IEX-only data tier with a funded account. Three readings:
+
+| Reading | Consequence |
+|---|---|
+| (a) No paid *data* subscription; a broker account with its free tier is fine | Workable. Free tier is IEX-only, thinner than the SIP consolidated tape — P0.2 already flags Alpaca data-quality concerns, and this makes them sharper |
+| (b) No paid anything, including the broker | Then there is no execution venue, and the system is research-only. ADR-11 and ADR-12 both need reopening |
+| (c) No subscription for **news**; price data and broker as already decided | The smallest change. This amendment stands as written and ADR-04 is amended, nothing else |
+
+**(c) is what this amendment assumes.** If you mean (a) or (b), say so — (b) in particular changes
+the programme fundamentally and is not a news question at all.
+
+## OPEN QUESTIONS — amendment
+
+| # | Question | Answered by | Blocks |
+|---|---|---|---|
+| **OQ-13** | Which reading of "no subscriptions" — (a), (b) or (c) in §18? | **Owner** | ADR-04, ADR-11, ADR-12, and #67's price source |
+| OQ-14 | Free intraday price history at 200 names × 2 years — does any source permit it? | research | #67's Δ resolution; daily is the fallback and is methodologically consistent |
+| OQ-15 | Does EDGAR `action=getcurrent` Atom give acceptable forward latency? | measurement | #42 |
+| OQ-9 | NSE/BSE automated-access terms — still open, and now load-bearing | exchange terms | the whole free India path |
+
+## CONTRACTS EXPORTED — amendment
+
+| Name | Kind | Consumers |
+|---|---|---|
+| `SUBSCRIPTION-FREE-ARCHITECTURE` | decision | #42, #43, #44, #45 |
+| `EDGAR-8K-EVENT-TAXONOMY` | classifier | **#67** — replaces the keyword classifier |
+| `FORWARD-VS-BACKWARD-RULE` | principle | #62, #67, #26 — a feed cannot be replayed |
+| `OQ-13` | question | ADR-04, ADR-11, ADR-12 |
