@@ -46,7 +46,7 @@ Resolved under the Owner's delegation of 2026-10-14 in `STAGE-0-OWNER-DECISIONS.
 |----------|---------|--------|
 | OWD-1 | Residency; serves other people in India and the US (Owner, 2026-10-14) | PROVISIONAL; legal review pending |
 | Scope | Multi-user service, India and US (`SCOPE-MULTI-USER.md` v0.4) | DRAFT |
-| CR-1 | US day-trading and cash-account rules verified at primary sources (`SPEC-CR1-US-DAY-TRADING.md` v0.1) | DRAFT |
+| CR-1 | US day-trading and cash-account rules verified at primary sources (`SPEC-CR1-US-DAY-TRADING.md` v0.2) | DRAFT |
 | Model B | Signals only for v1; no order routing, no broker integration, no user funds (`MODEL-B-DECISION.md` v0.3); roadmap `ROADMAP-V1.md` v0.3 | Owner decision 2026-10-14 |
 | OWD-2 | Audit or data unavailable | PROVISIONAL |
 | OWD-3 | The 15 ADRs (ADR-11 changed) | PROVISIONAL |

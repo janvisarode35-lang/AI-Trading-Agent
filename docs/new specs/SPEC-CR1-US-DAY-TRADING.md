@@ -1,6 +1,6 @@
 ---
 id: SPEC-CR1-US-DAY-TRADING
-version: 0.1
+version: 0.2
 status: DRAFT
 phase: CR-1 Compliance research (US day trading, cash-account settlement); feeds P6.3 (Adapted) and the deferred P3.2
 depends_on: [SPEC-A-CONSTITUTION v0.3, MODEL-B-DECISION v0.3, ROADMAP-V1 v0.3, SPEC-P0.1-DECISIONS v0.1, SPEC-P0.2-PROVIDERS v0.1, STAGE-0-OWNER-DECISIONS v0.2]
@@ -9,7 +9,9 @@ produces: [CR1-F-1..CR1-F-12, CR1-R-1..CR1-R-14, UsDayTradingRules, BrokerDayTra
 
 # CR-1: US day-trading and cash-account rules, verified at primary sources
 
-Date: 2026-10-18. Researcher role: compliance. Nothing here is legal advice; it records what the
+Date: 2026-10-18. Researcher role: compliance. Version history: 0.1 (2026-10-18) first record.
+0.2 (2026-10-18) after the claude.ai cross-check: CR1-R-10 also needs a human acknowledgement;
+OQ-CR1-6 added; section 13 extended. No fact or pinned value changed. Nothing here is legal advice; it records what the
 primary texts say on the date read, and what the system does with that.
 
 Inputs read for this phase: `docs/specs/SPEC-P0.2-PROVIDERS.md`, `docs/specs/STAGE-0-FREEZE.md` §6,
@@ -107,7 +109,7 @@ Values are verified as the legacy values (CR1-F-4); they are not current FINRA r
 | CR1-R-8 | Window: the current session and the four previous NYSE business days (five business days, rolling). | A market holiday. | Not a business day; the window reaches back further in calendar days. |
 | CR1-R-8 | (same) | An early-close day. | A full business day. |
 | CR1-R-9 | Kill-switch liquidation is exempt from the count (historical ADR-13 Chain D, carried as the design rule). | The liquidation makes the account a pattern day trader at the broker. | Accepted and alerted: a 90-day restriction is recoverable, an unmanaged loss is not. |
-| CR1-R-10 | When the broker flags the account: no opening buy is sent until the broker's account status no longer shows the flag; exits and stops continue. How a broker removes a flag is that broker's policy and is read from its status field, never assumed. | The broker's status cannot be read. | Treated as flagged (INV-6). |
+| CR1-R-10 | When the broker flags or restricts the account: no opening buy is sent until the broker's account status no longer shows the flag **and** a human has acknowledged the clearance (as INV-7 does for the kill switch); exits and stops continue. How a broker removes a flag is that broker's policy and is read from its status field, never assumed. | The broker's status cannot be read. | Treated as flagged (INV-6). |
 
 ## 6. Cash accounts: Regulation T (12 CFR 220.8) and good-faith violations
 
@@ -350,6 +352,13 @@ not fetch primary sources, and its register diff dates the phase-in end as 2026-
 day trades exceed 6% of the account's trades in the window, which it attributes to investor.gov and
 which was not verified for this spec. [DEFAULT-57] ignores that condition, which can only over-count.
 
+The same prompt was also run in a new claude.ai chat (Opus 5.5) on 2026-10-18 (files:
+`paste-ready/outputs/claude-chat/CR1/`; comparison:
+`docs/new specs/reviews/CR1-CLAUDE-CHAT-COMPARISON.md`). It reached the same finding with the same
+SEC release. Two of its points are adopted: the human acknowledgement in CR1-R-10, and OQ-CR1-6 on
+the wording of INV-9. Its lint test, run against the real `config/policy.yaml`, fails on line 174
+`pdt_equity_floor_usd: 25000`, which is the divergence recorded in section 7 and OQ-CR1-4.
+
 ## DECISIONS MADE
 
 | # | Decision | Rationale | Reversible? | Blast radius if wrong |
@@ -377,6 +386,7 @@ which was not verified for this spec. [DEFAULT-57] ignores that condition, which
 | OQ-CR1-2 | Alpaca's policy on good faith violations in cash accounts and on its own house day-trading rules | Alpaca | `docs.alpaca.markets`, search "good faith violation", "cash account", "intraday margin" | Deferred P3.2 (#19); historical condition 3 |
 | OQ-CR1-3 | India: does any Indian rule or broker policy restrict same-day buy and sell in the cash segment for the follower, and what is India's settlement cycle? | NSE, SEBI, Zerodha | NSE and SEBI circulars on the settlement cycle; Zerodha support pages | P6.3 India disclosures |
 | OQ-CR1-5 | Did the legacy pattern-day-trader definition also require day trades to exceed 6% of the account's total trades in the five-day window? Matters only for a broker still applying the legacy rule | SEC investor education; FINRA | investor.gov glossary entry "Pattern Day Trader"; Federal Register 91 FR 1580, section on the current requirements | Deferred P3.2 (#19), legacy mode only |
+| OQ-CR1-6 | When an execution phase returns (MB-8), INV-9's words "US PDT" name a repealed rule. Replace them with the Regulation T cash-account rules and, for a margin account, FINRA Rule 4210(d)(2)? | Owner (a constitutional amendment) | Constitution INV-9; `MODEL-B-DECISION.md` BA-1; this spec section 4 | The future execution phase only |
 | OQ-CR1-4 | Will the Owner apply the section 7 patch to the historical `STAGE-0-FREEZE.md`, and correct `CASH-002` and SPEC-P1.1 §9.4? | Owner | Section 7; `docs/new specs/reviews/CR1-STAGE-0-FREEZE-register.patch` | Historical run only |
 
 ## CONTRACTS EXPORTED
