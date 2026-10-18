@@ -164,3 +164,101 @@ spec's `OPEN QUESTIONS` table and in STAGE-0-FREEZE §6.
 - Add a row when a record gains a decision. Add the record first.
 - Move a row out of §7 only when the record that closes it exists, and cite that record.
 - Do not copy the text of a decision into this file.
+
+---
+
+## Owner rulings — X5 conditions 3, 12, 13, 14
+
+**Date:** 2026-10-16 · **Status:** **RATIFIED by Owner, 2026-10-16** · **Full text:** issue #16 comment
+
+| Condition | Ruling, in one line | Implemented in |
+|---|---|---|
+| **3** | US settlement is **T+1** `[V]` Rule 15c6-1(a), compliance date 2024-05-28. `SETTLE-001`: a BUY is DENIED when `notional > settled_cash`, absolute — **freeriding trips on a single occurrence**, so there is no error budget. Kill-switch liquidation exempt. | #16, P1.1 Q-P1.1-1 |
+| **12** | Pin all five rule attributes. Loosening = widening the permitted set; direction of a threshold change depends on `comparison`; `enforce`→`monitor` always loosens; any `comparison` change is **UNDECIDABLE and fails closed to LOOSENS**. | #6, #16 |
+| **13a** | **A-14 ratified.** `[CONST-6]` DENY governs exposure-**increasing** actions only; reducing actions escalate to CRITICAL and fall back to the broker-side stop. *Exposure-reducing is computed from portfolio state, never taken from the caller.* | #16 |
+| **13b** | `MODIFY` never reaches `RiskVerdict`. It is emitted as **DENY + `max_permissible_quantity`**; P2.8 may re-request **once**. `RiskVerdict` stays frozen and binary — P1.1 Decision 11 intact. | #16 |
+| **13c** | `BLACKOUT-001`: 2 sessions before to 1 after; DENY increasing, ALLOW reducing; unknown date fails closed; **blocks entry, never holding**; no override. | #39 |
+| **14** | **Third tier.** `LOSS-001`/`LOSS-002` → **`HALT_ENTRIES`**, auto-expiring at the period boundary, no human reset, exits always permitted. `LOSS-003`/`LOSS-004` → `KILL` unchanged. **Escalation:** 3 consecutive daily breaches or 2 consecutive weekly breaches trips the kill switch. | #17 |
+
+**Consequential work:** `HALT_ENTRIES` is a new action in the policy DSL between `MODIFY` and `DENY`;
+the consecutive-breach counter must survive a restart (storage, not memory); `SETTLE-001` and
+`BLACKOUT-001` are new rules; the `exposure_reducing` classifier is a new pure function needing
+boundary tests including the sell-that-opens-a-short case.
+
+**Condition 14 was a risk-appetite call, not an engineering fact.** The Owner was presented with both
+options and **ratified the three-tier ruling on 2026-10-16**. The declined alternative was
+`action: KILL` on `LOSS-001` and `LOSS-002`, which would have meant manual two-person kill-switch
+resets in volatile weeks. Recorded here because a future reader will otherwise assume the strict
+reading of `master-research-summary.md` §11 was simply overlooked — it was considered and declined.
+
+**All four conditions are now closed.** No owner decision blocks waves 0 to 3. The only owner item
+still open in the programme is `EDGE-ADR` E-4 — whether 15 news-triggered exits per year that beat
+the ATR stop is the right falsification threshold — and that gates #35, not any current work.
+
+---
+
+## Owner ruling — EDGE-ADR E-4 (news-trigger falsification test)
+
+**Date:** 2026-10-16 · **Status:** **RATIFIED by Owner, 2026-10-16** · **Full text:** `SPEC-EDGE-ADR` v0.2 §11–§12
+
+**The v0.1 threshold was wrong and is withdrawn.** §7 demanded "≥ 15 news-triggered exits/yr that
+beat the ATR stop"; the §5 base case produces **4.4** (25 × 0.35 × 0.50). The bar was 3.4× the base
+case, so the hypothesis would have failed even if the model were exactly right. And at n ≈ 4, a
+count test over 12 months is unfalsifiable wherever the bar sits.
+
+**Ruling: test the four parameters by event study, not the count.** E, f_intraday,
+f_not_already_stopped and Δ are all measurable from historical data — no shadow mode, no trading,
+and **before #55 is built**.
+
+| Measured annual value | Ruling | Build |
+|---|---|---|
+| < 10 bps/yr | **falsified** — below the noise floor of a 4.2 %/yr cost drag | #55 cancelled |
+| 10–25 bps/yr | partially supported | #42 + #45 + #57 into the existing exit path; **skip #55** |
+| > 25 bps/yr | supported | #55 in full, paths A and E |
+
+**Carve-out: path D proceeds regardless.** Suppressing a pending entry on adverse overnight news
+needs no intraday infrastructure — the nightly batch already holds the news, and the 09:45 window
+simply does not place that order. The most valuable news feature in the system requires no real-time
+anything.
+
+**Scope:** E-4 governs the news-trigger claim only. The broader edge hypothesis stays tested by the
+frozen P5.2 gate and the ADR-13 revisit triggers.
+
+**New open items:** E-5 (who runs the event study — new issue, or part of #45?) and E-6 (what
+fraction of historical news timestamps can be corroborated — the study error bar).
+
+---
+
+## Owner decision — data providers: Upstox + Fyers (both), Moneycontrol in the news registry
+
+**Date:** 2026-10-17 · **Status:** **RATIFIED by Owner** · **Full text:** issue #68 comment
+
+| Provider | Role | Verified coverage |
+|---|---|---|
+| **Upstox** | daily history, the backtest spine | **daily from January 2000**, 1 decade per request `[V]` |
+| **Fyers** | intraday history, the event window | **intraday from 3 July 2017**, 100 days per request, unlimited symbols/day `[V]` |
+
+Both free, both verified from the brokers' own API documentation. Complementary rather than
+redundant: Upstox is the only documented ≥10-year **daily** source; Fyers is the only documented
+multi-year free **intraday** source. P2.1 already separates `DailyBarProvider` from
+`IntradayBarProvider`, so two providers is a configuration of the frozen design, not a change to it.
+
+**Groww rejected** on a 3-month historical limit. **Angel One unranked** — archive depth absent from
+its docs; one API call with an old `fromdate` settles it.
+
+**Closes OQ-14.** `SPEC-P2N.13` v0.3 §18 claimed free intraday history was unavailable from any
+verifiable source. That was wrong — Fyers documents it from 2017. #67 can therefore measure Delta at
+minute resolution instead of falling back to daily.
+
+### Explicitly NOT settled by this decision
+
+| # | Open item | Owner |
+|---|---|---|
+| 1 | **Which broker executes orders** — data and execution are different roles; the criterion is SEBI/NSE algo onboarding, not data depth | #68 |
+| 2 | `[U]` **Does a data-only account get API access?** Two providers means two accounts; if either requires funding or minimum activity, "both, free" is not free | #68, before #8 builds adapters |
+| 3 | **Two static IP registrations** — the NSE requirement is per API app | #33, #34 |
+| 4 | `[U]` **Daily auth flow per broker** — Zerodha's daily login is known; Upstox and Fyers unverified. Two brokers could mean two daily steps | #64 |
+| 5 | **Delisted symbols** — neither documents coverage. A broker API serves tradeable instruments, so assume absent. Both feeds are survivorship-biased until proven otherwise | **#62 — not closed by this** |
+
+Item 5 is the one that can still invalidate the backtest. Finding free price data does not close
+#62.
