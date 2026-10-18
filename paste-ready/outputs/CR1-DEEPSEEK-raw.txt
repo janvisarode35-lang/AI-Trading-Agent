@@ -1,0 +1,380 @@
+DeepSeek web chat (chat.deepseek.com), Search enabled, DeepThink off. Sent 2026-10-18 from the
+Claude desktop browser pane. Input: paste-ready/CR1-PDT-PASTE.txt (187,956 characters,
+SHA-256 a34d24557f3a86a406b5255672c8f42c10a5b267eaf21ed2c3c718e5e0022950), rebuilt in the page from
+commit 1ef1777 and checked against that hash before sending. Chat:
+https://chat.deepseek.com/a/chat/s/c2e47f76-4a56-4e8d-9800-537ef3420f50
+Text below is DeepSeek's answer as rendered (innerText); the "-\n1\n-\n8" fragments are its
+citation markers flattened by the page.
+==========================================================================================
+
+I cannot browse the web. Every regulatory statement below is either (a) quoted from the search results returned to me, which I did not fetch independently, or (b) marked as unverified from memory. I have not verified any primary source by retrieval. The central finding is that the premise of the question is now false: the $25,000 PDT equity threshold is no longer operative as of the current date (2026-10-18). This changes the deliverable from "verify and pin the number" to "verify the number is dead and pin the replacement regime."
+
+BLOCKING QUESTIONS — answered by the search results, not deferred
+#	Question	Options	Recommended default	What breaks if wrong
+1	Is the $25,000 PDT floor still the operative rule?	(a) yes, FINRA 4210(f)(8)(B) unchanged; (b) no, replaced by intraday margin standards	(b) no. FINRA Regulatory Notice 26-10, effective June 4, 2026, replaces the day-trading margin provisions with intraday margin standards; phase-in through October 20, 2027 . Investor.gov, FINRA's own investor education site, carries the replacement notice at the top of its PDT glossary entry .-
+1
+-
+5
+-
+8
+	The entire PDT rule-spec below is obsolete. A system built to gate on 4-trades-in-5-days and $25,000 would reject trades that are no longer restricted, and would fail to implement the actual live constraint: intraday margin deficit management.
+2	Does the old PDT rule still apply to any account during the phase-in?	(a) no; (b) brokers may continue old rules until Oct 20, 2027	(b). "Your brokerage firm might continue operating under the old day trading margin requirements during the transition, or they might choose to migrate to the new intraday margin standards sooner" . Alpaca's own docs state the PDT designation has been abolished and trade rejections from PDT protection will no longer occur .-
+5
+-
+18
+	If Alpaca has migrated (its docs say it has), then PDT gating in our adapter is dead code that rejects valid orders. If a backup broker has not migrated, the same adapter must not assume PDT is dead for that broker.
+3	What is the replacement minimum equity?	(a) none; (b) $2,000 margin minimum under Rule 4210(b)(4)	(b) $2,000, unchanged and pre-existing . This is the floor to trade on margin at all, not a day-trading-specific number.-
+9
+-
+12
+-
+15
+	Our account is a long-only cash account under ADR-12. The $2,000 margin minimum does not apply to a cash account. The correct control for us is good-faith/free-riding, not PDT equity.
+4	Does PDT apply to cash accounts?	(a) yes; (b) no	(b) no. PDT was a margin-account rule. A cash account's constraint is settled funds and good-faith violations .-
+4
+-
+6
+-
+19
+	If we build PDT gating into a cash-account system, we implement a control for a regime that never applied to us and miss the one that does.
+5	What replaces the 90-day PDT freeze?	(a) nothing; (b) a 90-day restriction on creating/increasing short positions or debit balances after repeated failure to satisfy intraday margin deficits by the 5th business day, with a de minimis threshold of lesser of 5% equity or $1,000	(b). FINRA Notice 26-10 .-
+1
+-
+8
+	Our system is long-only cash, no shorting, no debit balances. The replacement freeze is structurally inapplicable. The only live constraint remains settlement.
+NON-BLOCKING DETAILS — resolved
+Area	Resolution	State
+Effective date of the replacement	June 4, 2026, 45 days after publication of Regulatory Notice 26-10 .-
+1
+-
+8
+	Retrieved via search result, not primary fetch.
+Phase-in end	October 20, 2027 .-
+1
+-
+5
+	Same.
+Old rule's historical effective date	September 28, 2001 .-
+15
+	Search result; not independently fetched.
+The old day-trade definition	"buying and selling the same security on the same day" ; four or more day trades within five business days, provided they exceed 6% of total trades in the margin account for that period .-
+5
+-
+15
+	Investor.gov text.
+Alpaca's migration status	Alpaca docs: "The 'pattern day trader' designation has been abolished. Brokers are no longer required to monitor or flag accounts that execute four or more day trades within a five-business-day window" .-
+18
+	Vendor doc retrieved via search. This is the operative fact for our primary US broker.
+Whether the old rule ever bound our account	ADR-12 is long-only cash. PDT was a margin-account rule . It never applied.-
+4
+	Derived.
+Timezone for the old five-business-day window	The old rule's day boundary was the broker's business day, in practice the exchange trading day in America/New_York. Moot under the replacement.	Recorded for the register so the historical number is not orphaned.
+Rounding of the $25,000	Whole dollars; no fractional equity threshold. Moot.	—
+1. Verification of the $25,000 figure against FINRA Rule 4210(f)(8)(B)
+
+It cannot be verified as an operative rule, because it is not one. The figure was the pattern day trader minimum equity requirement under FINRA Rule 4210(f)(8)(B). It was replaced by intraday margin standards effective June 4, 2026, per FINRA Regulatory Notice 26-10 . The SEC's Investor.gov glossary entry for "Pattern Day Trader" now leads with the replacement and states the old requirements as historical context: "Under FINRA rules, customers designated 'pattern day traders' by their brokerage firms must have at least $25,000 in their accounts" — but the same page's first sentence is that FINRA has adopted new intraday margin requirements that replace the current day trading margin requirements, effective June 4, 2026 .-
+1
+-
+5
+-
+8
+
+Operative text of the replacement (as reported, not primary-fetched): FINRA Notice 26-10 states the amendments replace the day-trading margin provisions with intraday margin standards, effective June 4, 2026, with a phase-in to October 20, 2027 . The 90-day freeze survives in altered form: it applies to failing to satisfy an intraday margin deficit by the close of business on the fifth business day after it occurs, not to exceeding a day-trade count .-
+1
+-
+8
+
+Primary-source citation status: I did not retrieve the FINRA rule text or the SEC approval order. The search results include FINRA's own Regulatory Notice 26-10 pages , Investor.gov , and broker summaries . A regulator auditing this should be given the FINRA Notice number and the SEC release number, which I do not have from a primary fetch. Mark every regulatory statement above as VERIFIED-VIA-SEARCH-RESULT, not VERIFIED-VIA-PRIMARY-SOURCE.-
+1
+-
+5
+-
+
+The answer to G-2 is therefore: the figure 25,000 was correct until 2026-06-04 and is now obsolete. Registering it as a live control would be a defect.
+
+2. Specification — replaced by what, precisely enough to implement
+
+Do not implement PDT day-trade counting, rolling five-business-day windows, or a $25,000 equity gate. Implement the following, which is what actually constrains our account.
+
+2.1 Account type determines the applicable regime
+Account type	PDT applicable?	Operative constraint	Fail-closed behaviour
+Cash (ADR-12: ours)	No -
+4
+-
+6
+	Settled funds, good-faith/free-riding under Reg T	A buy whose cost exceeds settled cash is DENIED. A sell of unsettled shares is DENIED. No imputation of unsettled proceeds.
+Margin	No (PDT abolished)	Intraday margin deficit vs broker's house requirement -
+1
+-
+18
+	Not applicable to us. If the account type is ever misconfigured as margin, the adapter DENIES all orders and raises CRITICAL, because our risk model does not price intraday margin.
+
+Edge case: Alpaca paper accounts. Paper is a plumbing test (rule N11 / F-13). Alpaca's docs say PDT protections no longer reject orders . Our paper harness must not contain a PDT gate either, because a gate that exists only in paper is a gate that has never been tested against the live path.-
+18
+
+2.2 What counts as a "day trade" — moot for us, recorded for the register
+
+Under the old rule, a day trade was the purchase and sale of the same security on the same day in a margin account. Partial fills: an order that fills in multiple executions on the same day and is closed the same day is one day trade, counted per round trip, not per fill. Multiple entries and exits in one symbol on one day: each opening transaction paired with a closing transaction is a separate day trade; the old rule's counting was per round trip, with Interpretation /02 providing an alternative calculation method for multiple purchases and sales of the same security on the same day .-
+4
+
+Under the replacement, day trades are not counted at all. FINRA's own explanation: "We avoid defining a 'day' in the rule because we don't know how things are going to change. We wanted to make the rule as future-proof as possible" . This is the strongest possible statement that no implementable day-trade-counting logic should exist in our codebase.-
+14
+
+2.3 The rolling window and timezone — moot
+
+The old five-business-day window used the broker's business day, which for US equities is the exchange trading day in America/New_York, inclusive of the current day, with half-days counting as full business days for the count. None of this is implemented. It is recorded in the register so that a future reader does not reintroduce it.
+
+2.4 Equity check before or after the fourth trade — moot
+
+The old rule checked equity at the end of the session on which the fourth day trade in the window occurred, against the account's equity in the margin account. Not implemented. The replacement checks intraday margin deficits in real time or at end of day, per the member's choice . We have no margin account, so neither check is implemented.-
+1
+-
+18
+
+2.5 Flagging and clearing — moot
+
+The PDT designation no longer exists. Existing PDT flags "should be reset" per broker summaries ; Alpaca confirms it no longer flags . We do not model a flag.-
+15
+-
+18
+
+2.6 Cash-account rules and the good-faith interaction (Q-P1.1-1 condition 3, blocking #16)
+
+This is the only live constraint, and it is not PDT.
+
+Settlement: US equities settle T+1 under current SEC rules. Sale proceeds are not usable to fund a purchase until settled, unless the broker's display of buying power says otherwise .-
+6
+-
+19
+
+Good-faith violation: buying with unsettled proceeds and then selling the new security before the prior sale settles. Free-riding: paying for a purchase with the proceeds of that same security's sale. Reg T authorises a 90-day freeze requiring full payment on trade date after a free-riding violation .-
+19
+
+Three good-faith violations in 12 months commonly triggers a 90-day settled-funds-only restriction, per broker policy . This is a broker-level policy, not a single FINRA number in the text I retrieved.-
+6
+
+Fail-closed implementation: the order gate must read settled cash from the broker, not "buying power." If the field is absent or stale, DENY. If a sell would precede settlement of the purchase, DENY. No netting of unsettled proceeds. This is the Q-P1.1-1 condition 3 answer: the condition is not a PDT equity gate; it is a settled-funds gate.
+
+Edge case: a partial fill on a buy, with the filled portion sold the same day while the remainder settles. The sold portion's proceeds are unsettled until T+1. Any use of those proceeds before settlement is a potential good-faith violation. The gate denies the reuse.
+
+Edge case: an overnight gap that pushes a position above 5% NAV. This is an exposure-rule question, not a PDT question. The exposure rule (EXP-001) handles it.
+
+3. Register diff — STAGE-0-FREEZE §6
+
+The carried-forward register currently has no PDT entry. The gap audit's item 4 is correct that the number floats unregistered inside a frozen spec. The diff below does not register 25,000 as a live control. It registers the fact that the number is dead and records the replacement regime.
+
+Insert into STAGE-0-FREEZE §6.2 (OPEN — carried, not gating):
+
+text
+Copy
+Download
+| **PDT-1** | The $25,000 PDT equity floor and the 4-trades-in-5-business-days designation | **RESOLVED 2026-10-18 — the figure is OBSOLETE, not merely unverified.** FINRA Regulatory Notice 26-10 replaced the day-trading margin provisions of Rule 4210 with intraday margin standards effective **2026-06-04**, with a member phase-in to **2026-10-20**. Sources: FINRA Notice 26-10; Investor.gov PDT glossary. **Primary source not independently fetched — marked VERIFIED-VIA-SEARCH-RESULT.** The old figure is retained in this register only so that no reader reintroduces it. **ADR-12 (long-only cash) means PDT never applied to this account at any point.** The live constraint is Reg T settled funds and good-faith/free-riding, which is specified in SPEC-P2.9 and Q-P1.1-1 condition 3. **No value is guessed; no live control depends on 25,000.** | P3.2, P6.3 — **unblocked for PDT.** P2.9 settlement gate remains the binding control. |
+
+Insert into STAGE-0-FREEZE §6.4 (MEASUREMENT-BY-DESIGN): none. This is a fact change, not a measurement.
+
+Amendment to STAGE-1-GAP-AUDIT §4 row 4: change "Risk if false: A regulatory number, unverified, inside a FROZEN spec" to "RESOLVED 2026-10-18: the number is obsolete as of 2026-06-04. It was never applicable to a cash account. Register entry PDT-1."
+
+4. The pinning test
+
+The pattern to follow is tests/verify_p13_config.py: a test that fails if the value changes silently. Here the value that must not drift is the effective date of the replacement and the fact that 25,000 is not a live threshold.
+
+python
+Copy
+Download
+"""SPEC-P2.9-PDT verification. Pins the regulatory regime, not a magic number.
+
+The constitutional numbers are pinned in tests/verify_p13_config.py. This file pins
+the REGULATORY regime that replaced the PDT floor, because a frozen spec carried
+the number 25,000 without a register entry (STAGE-1-GAP-AUDIT §4 item 4).
+
+A failure here means one of:
+  (a) someone reintroduced a $25,000 equity gate into the policy;
+  (b) someone changed the replacement effective date without a register update;
+  (c) the register entry PDT-1 was deleted.
+
+None of those may happen silently.
+"""
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+
+def require(cond, msg=""):
+    if not cond:
+        raise AssertionError(msg)
+
+
+PASS, FAIL = [], []
+
+
+def check(name, fn):
+    try:
+        fn()
+        PASS.append(name)
+    except Exception as e:  # noqa: BLE001
+        FAIL.append(f"{name}: {type(e).__name__}: {e}")
+
+
+# ---- the regime constants ---------------------------------------------------
+# These are the pinned facts. A change here requires a new register entry and an
+# Owner-signed amendment, because it changes which regulatory control is live.
+PDT_REPLACEMENT_EFFECTIVE_DATE = "2026-06-04"   # FINRA Notice 26-10
+PDT_REPLACEMENT_PHASE_IN_END  = "2027-10-20"    # end of 18-month phase-in
+PDT_LEGACY_THRESHOLD_USD      = 25000           # HISTORICAL ONLY. Never a gate.
+PDT_STATUS                    = "REPLACED"      # not "ACTIVE", not "UNVERIFIED"
+
+
+def t_pdt_is_not_an_active_control():
+    """The single load-bearing assertion: 25,000 must not appear as an active
+    threshold anywhere in the policy document."""
+    from config import loader as L
+    cfg = L.PolicyLoader(ROOT / "config").load(require_signature=False)
+    for r in cfg.document.rules:
+        # A rule with threshold 25000 and a pdt-ish id would be a regression.
+        tid = (r.id or "").lower()
+        desc = (r.description or "").lower()
+        if "pdt" in tid or "pattern day" in desc or "day trade" in desc:
+            require(
+                r.threshold != PDT_LEGACY_THRESHOLD_USD,
+                f"rule {r.id} reintroduces the obsolete PDT threshold",
+            )
+            # Stronger: no rule may gate on day-trade count at all.
+            require(
+                "day_trade_count" not in (r.inputs or []),
+                f"rule {r.id} gates on day-trade count, which no longer exists",
+            )
+
+
+def t_register_entry_pdt_1_exists_and_is_marked_resolved():
+    """The register entry is the audit trail. It must not be deleted or reopened."""
+    freeze = (ROOT / "docs" / "specs" / "STAGE-0-FREEZE.md").read_text(encoding="utf-8")
+    require("PDT-1" in freeze, "register entry PDT-1 is missing from STAGE-0-FREEZE §6")
+    require(
+        "OBSOLETE" in freeze or "obsolete" in freeze,
+        "PDT-1 must state the figure is obsolete, not merely unverified",
+    )
+    require(
+        PDT_REPLACEMENT_EFFECTIVE_DATE in freeze,
+        "the replacement effective date must appear in the register entry",
+    )
+    # And the legacy number must be labelled historical, not live.
+    require(
+        "never a live control" in freeze.lower() or "historical only" in freeze.lower(),
+        "the 25,000 figure must be labelled historical, not live",
+    )
+
+
+def t_phase_in_date_is_pinned():
+    """The phase-in end date is the last date a broker may still apply the old rule.
+    After this date, any PDT gate in any adapter is a defect."""
+    require(PDT_REPLACEMENT_PHASE_IN_END == "2027-10-20", PDT_REPLACEMENT_PHASE_IN_END)
+    # An adapter that reads a per-broker migration flag must default to NEW.
+    from provider.enums import ProviderId  # noqa: F401
+    # If a migration flag exists, its default must be the new regime.
+    # (If no flag exists, the replacement is assumed adopted; this assertion is
+    #  a tripwire for the day someone adds one with the wrong default.)
+    try:
+        from provider.spec import ProviderSpec
+        import inspect
+        src = inspect.getsource(ProviderSpec)
+        if "pdt_migrated" in src:
+            require(
+                "pdt_migrated: bool = True" in src,
+                "a per-broker PDT migration flag exists and does not default to the new regime",
+            )
+    except ImportError:
+        pass  # no provider spec yet in this phase
+
+
+def t_alpaca_docs_claim_is_recorded():
+    """Alpaca's own docs say PDT protection no longer rejects orders. If that
+    changes, the adapter must not assume it."""
+    # This is a documentary assertion, not a runtime one: the fact is recorded
+    # in the spec's §10.4 limits table as a verified statement. If the spec is
+    # edited to remove it, this fails.
+    spec = (ROOT / "docs" / "specs" / "SPEC-P0.2-PROVIDERS.md").read_text(encoding="utf-8")
+    require(
+        "PDT" in spec or "pattern day" in spec.lower(),
+        "SPEC-P0.2 must record Alpaca's PDT abolition; it is the primary US broker",
+    )
+
+
+def t_cash_account_constraint_is_not_pdt():
+    """The live control is settled funds, not PDT. This asserts the correct control
+    is present in the policy, so that deleting PDT did not delete the real gate."""
+    from config import loader as L
+    cfg = L.PolicyLoader(ROOT / "config").load(require_signature=False)
+    ids = {r.id for r in cfg.document.rules}
+    # CASH-001 is the settlement/good-faith rule used by verify_p13_config.py
+    require(
+        "CASH-001" in ids,
+        "CASH-001 (settled funds) is missing; removing PDT must not remove the live control",
+    )
+
+
+for _n, _f in sorted((n, f) for n, f in list(globals().items()) if n.startswith("t_")):
+    check(_n, _f)
+
+print(f"PASSED {len(PASS)}")
+for f in FAIL:
+    print("FAILED", f)
+sys.exit(1 if FAIL else 0)
+
+Why this test shape and not assert threshold == 25000: pinning 25,000 as a live value would be the defect. The test pins the regime transition and asserts the absence of a gate on the obsolete number. The tripwire on pdt_migrated: bool = True catches the most likely future regression: someone adds a per-broker flag during the phase-in and defaults it to the old rule.
+
+5. Which of #19 and #33 are unblocked
+
+The question does not define #19 and #33. From context in the supplied material:
+
+#33 (G-2, "Is the PDT floor 25,000 verified? It is unregistered in STAGE-0-FREEZE §6"): UNBLOCKED. The number is not merely unverified; it is obsolete as of 2026-06-04. Registering it as a live control would have been wrong. The register diff above closes it as PDT-1. Blocks P3.2 and P6.3 are cleared.
+
+#19: The supplied material does not identify what #19 is. The nearest candidates in the input are Q-P1.1-1 condition 3 (cash-account good-faith interaction) and the "blocking #16" reference in the role statement. Q-P1.1-1 condition 3 is UNBLOCKED by the same analysis: the condition is not a PDT equity gate, it is a settled-funds gate, and the specification above states it. If #19 is something else, I cannot answer without the definition, and I will not guess.
+
+DECISIONS MADE
+#	Decision	Rationale	Reversible?	Blast radius if wrong
+1	Do not implement PDT day-trade counting, a rolling five-business-day window, or a $25,000 equity gate	The rule was replaced effective 2026-06-04 ; Alpaca confirms PDT protection no longer rejects orders ; ADR-12 is a cash account, to which PDT never applied -
+1
+-
+4
+-
+	Yes, but reverting would require a new register entry and Owner signature	Low today; High if a broker under the phase-in still applies the old rule and the adapter assumes otherwise — mitigated by the pdt_migrated tripwire in the test
+2	Register PDT-1 as RESOLVED-OBSOLETE, not as an unverified value	The gap audit's concern was that an unverified regulatory number sat unregistered in a frozen spec. The correct resolution is to record that the number is dead, not to verify it as live	Yes	Low — a register entry is reversible with an amendment; leaving the number unregistered is not
+3	The live control for Q-P1.1-1 condition 3 is the settled-funds gate, not PDT	Reg T good-faith/free-riding is the actual cash-account constraint ; PDT is a margin rule -
+4
+-
+6
+-
+19
+	No — this is the correct control	High if wrong — a system that gates on the wrong constraint permits free-riding, which triggers a 90-day freeze
+4	Pin the regime transition, not the number 25,000	A test asserting threshold == 25000 would lock in an obsolete value. The test must fail if someone reintroduces the gate	Yes	Low
+ASSUMPTIONS
+#	Assumption	Why I had to assume it	How to verify	Impact if false
+1	Alpaca has migrated to the new regime	Alpaca's docs state the PDT designation is abolished and trade rejections from PDT protection will no longer occur -
+18
+	Confirm with Alpaca support that no PDT gate exists on the live API as of 2026-10-18	If Alpaca has not migrated, an order that trips an old-style PDT count could be rejected; the adapter must surface the reject as opaque text (rule N12/M-1) and fail closed, not retry
+2	Our account is a cash account under ADR-12	Stated in SPEC-P0.2 §1 and the project invariants	Account agreement; Alpaca account configuration	If the account is ever margin, the adapter must DENY all orders and raise CRITICAL (decision 1 edge case)
+3	FINRA Notice 26-10 is the operative replacement	Search results from FINRA, Investor.gov, and multiple brokers all cite it -
+1
+-
+5
+-
+8
+	Fetch the primary FINRA notice PDF and the SEC approval order	If the notice number or effective date is wrong, the register entry PDT-1 carries an incorrect date; the control (no PDT gate) is unchanged
+4	The legacy 25,000 is not required for any audit trail	The project invariants require an audit trail of decisions, not of obsolete regulations. The register entry records the history	Compliance review	Low — the number is recorded as historical in PDT-1 regardless
+OPEN QUESTIONS
+#	Question	Who/what answers it	Exact query or doc to check	Blocks which phase
+1	Has Alpaca fully migrated off the old PDT gate on the live API, or is there a residual check on any endpoint?	Alpaca support	"As of October 2026, does Alpaca's live trading API apply any pattern-day-trader day-trade count or equity check, or is the PDT gate fully removed per FINRA Notice 26-10?"	P3.2
+2	Does IBKR (US backup, ADR-10/A-9) still apply the old PDT rule during the phase-in?	IBKR support	"Has IBKR migrated to FINRA's intraday margin standards under Notice 26-10, or does it still apply the legacy PDT designation during the phase-in to October 2027?"	[RS §12] stage 6
+3	What is the SEC release number approving SR-FINRA-2025-017?	SEC.gov	Fetch the SEC approval order for SR-FINRA-2025-017	P6.3 (audit trail citation)
+4	Is the three-good-faith-violations-in-12-months rule a FINRA rule or a broker policy?	FINRA / Alpaca	FINRA Rule 4210 text; Alpaca account agreement	P2.9
+CONTRACTS EXPORTED
+Name	Kind (type/table/event/endpoint/config key)	Signature or schema	Consumers
+PDT-1	Register entry (STAGE-0-FREEZE §6.2)	Status RESOLVED-OBSOLETE; replacement effective 2026-06-04; phase-in end 2027-10-20; legacy 25,000 labelled historical-only; primary source status VERIFIED-VIA-SEARCH-RESULT	P3.2, P6.3, compliance audit
+pdt_regime	Config key	Enum: REPLACED (current), LEGACY (phase-in, per-broker only). Default REPLACED.	Broker adapters (P3.1–P3.4)
+pdt_migrated	Config key (per ProviderId)	bool = True. If False, the adapter is running under the legacy regime and must log a WARN and consult the broker's day-trade counter — not implement its own.	Broker adapters
+PDT_REPLACEMENT_EFFECTIVE_DATE	Constant	"2026-06-04"	tests/verify_pdt_regime.py
+PDT_REPLACEMENT_PHASE_IN_END	Constant	"2027-10-20"	tests/verify_pdt_regime.py
+CASH-001	Policy rule (existing)	Settled-funds / good-faith gate; on_missing_input = DENY	tests/verify_p13_config.py, P2.9
+tests/verify_pdt_regime.py	Test file	Five t_* functions; fails on reintroduction of a 25,000 gate, deletion of PDT-1, wrong migration default, or removal of CASH-001	CI
