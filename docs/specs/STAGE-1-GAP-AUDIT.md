@@ -335,8 +335,8 @@ ticks or one, 2 are contradictions, 1 has none. The full matrix is in the re-run
 
 **Block A numbers.** All present with the right value; none stated two ways inside `rules`;
 ten are duplicated in non-rule config (SPEC-P1.3.1 F-2). The value is pinned
-by a test for 12 rule ids. A rule's `action`, `mode`, `comparison` and `scope` were not pinned (now pinned by
-SPEC-P1.3.1, condition 12, CLOSED):
+by a test for 12 rule ids. A rule's `action`, `mode`, `comparison` and `scope` are not yet pinned
+as Ruling 12 requires (condition 12, OPEN — see §10):
 `EXP-002` to `ALLOW`, `LOSS-001` to `monitor`, `LOSS-004` to 20%, `EXEC-001` allowing `MARKET`,
 and `STOP-001` to `lte` each load and pass every suite.
 
@@ -387,27 +387,38 @@ By phase. Conditions 1 to 8 keep their numbers.
 | **9** | Decide `Q-P1.2-7` / X3R-M1, widened to `reproducibility`, and name the owner of the audit writer | P2.1 code that writes an audit event; P2.3, P2.5, P2.6, P2.7, P2.9 | **BLOCKER** | OPEN |
 | **10** | Decide X3R-M2 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | **BLOCKER** for that run | OPEN |
 | **11** | Tests for the types P2.1 constructs (X5R-G1) | P2.1 code drop | HIGH | OPEN |
-| **12** | Pin `action`, `mode`, `comparison` and `scope` of the constitutional rules; define loosening for a non-threshold change (X5R-G2) | P2.9; any policy change | HIGH | **CLOSED** 2026-10-21 by SPEC-P1.3.1-POLICY-DIFF v0.1 — see evidence below |
+| **12** | Pin `action`, `mode`, `comparison` and `scope` of the constitutional rules; define loosening for a non-threshold change (X5R-G2) | P2.9; any policy change | HIGH | **OPEN** — in progress, re-running per #6's execution sequence (see note below) |
 | **13** | Ratify `A-14`; state how a `PolicyVerdict` becomes a `RiskVerdict`; decide earnings blackout | P2.9 | BLOCKER for P2.9 | OPEN |
 | **14** | Decide whether daily and weekly loss trip the kill switch | P2.10 | BLOCKER for P2.10 | OPEN |
 | **15** | Run the suites in CI, on Python 3.12+ | all | MEDIUM | OPEN |
 | **16** | Verify the PDT floor and register it | P3.2, P6.3 | MEDIUM | OPEN |
 
-> **Condition 12 — closure evidence.** (1) `tests/verify_p13_policy_diff.py` pins 16 governed
-> fields of each of the 20 constitutional rules and pins the membership of that set; it uses
-> `require()` and passes 55/55 under both `python` and `python -O`. (2) The five X5R-G9 mutations
-> each still load and are each killed under `-O` (`tests/mutate_x5r_g9.py --must-fail
-> tests/verify_p13_policy_diff.py`, exit 0). (3) A sweep of every alternative `action`, `mode`,
-> `comparison` and `scope` across the 20 rules produced 264 loadable mutations, all killed; the
-> pre-existing suite killed 13. (4) `src/config/policy_diff.py` derives the complete change list
-> between two policy versions and classifies every `Rule` field and every config leaf as
-> LOOSENS / TIGHTENS / NEUTRAL / UNDECIDABLE; `t_every_rule_field_is_classified` makes an
-> unclassified field a CI failure. (5) SPEC-P1.3 §5.3 is amended to apply the two-person rule
-> to every LOOSENS and UNDECIDABLE change, with the approval count taken from the active version.
-> Re-run on Python 3.11 against the full repository: `verify_p13_config.py` 39/39,
-> `verify_p11_x5_conditions.py` 12/12, both unaffected.
-> **Residue carried, not closed:** F-1 to F-6 of SPEC-P1.3.1 §7 (P1.3 v0.2); Q-P1.3-1 (second
-> approver); Python 3.12+ (condition 15).
+> **Condition 12 — reopened 2026-10-21.** Commit `d8067b6` marked this condition CLOSED. That
+> was premature, for two reasons:
+>
+> 1. The work does not follow #6's execution sequence. The code landed with a DRAFT spec. There
+>    was no X2 review of the spec, no freeze, and no X2 review of the code.
+> 2. It conflicts with **Ruling 12** (`DECISIONS.md`, ratified 2026-10-16), which its spec run
+>    never saw:
+>    - It classifies some `comparison` changes as TIGHTENS. The ruling says any `comparison`
+>      change is UNDECIDABLE.
+>    - It pins `scope` and `mode` for 20 rules. The ruling requires all rules.
+>    - It does not rank `HALT_ENTRIES` (Ruling 14).
+>    - It is stricter than the ruling on `severity`, rule addition and `scope`.
+>    - It adds an exit-path overlay that no ruling covers.
+>
+> What stands as an interim result: the five X5R-G9 mutations are each detected by
+> `tests/verify_p13_policy_diff.py`, with and without `-O`. That suite is not yet accepted
+> evidence.
+>
+> **Next:**
+> 1. Spec re-run, producing SPEC-P1.3.1-POLICY-DIFF v0.2 DRAFT, conformed to Ruling 12.
+> 2. X2 review of the spec, in a separate conversation.
+> 3. Freeze, then X1 code citing only the frozen spec.
+> 4. X2 review of the code.
+> 5. Tests that fail when the code is broken.
+>
+> This row closes only when those steps are done.
 
 Finding A is open and accepted (STAGE-1-FREEZE §11.5). Remediation E is deferred. Neither is a
 Stage 2 entry condition.
