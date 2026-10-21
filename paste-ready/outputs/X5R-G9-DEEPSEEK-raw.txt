@@ -1,0 +1,1980 @@
+I'll deliver this as a spec-plus-code file set. First, the blocking questions and the constitutional-pin problem — because there is a genuine internal contradiction in what I've been asked to produce, and I am required to say so rather than work around it.
+
+## BLOCKING QUESTIONS
+
+| # | Question | Options | Recommended default | What breaks if wrong |
+|---|---|---|---|---|
+| B-1 | **The five mutations contradict the constitutional values.** `EXP-002` threshold is 20%, so `→ ALLOW` does not change its value; `LOSS-004` threshold is 10%, not 20%. Pinning "action, mode, comparison, scope" on every constitutional rule does **not** detect a **value** change to `EXP-002` (it's `DENY` already) unless the threshold is also pinned. | (a) Pin only the four named fields; (b) pin the four **plus** `threshold` where numeric. | **(b)** — `t_const_thresholds_match_the_constitution` already pins 12 thresholds; the five named mutations need `action`/`mode`/`comparison`/`scope` pinned **and** the threshold for `EXP-002`, `LOSS-004` re-pinned at their real values. | Under (a), mutating `EXP-002`'s `action`→`ALLOW` is a value change that hits at least one test only if `action` is pinned. It isn't. So (a) is insufficient. The user's phrasing "threshold -> 20%" for `LOSS-004` is a misstatement of the current value (10%); I read it as "raise the kill threshold to a value `lte 20%` would still hold at". Proceed under (b) `[DEFAULT-D1]`. |
+| B-2 | **`EXEC-001` mutation "allows MARKET".** Today's `EXEC-001` already allows `MARKET` when `allowed_values_emergency` fires and `is_emergency_exit=True`. Adding `MARKET` to `allowed_values` (the non-emergency set) is the mutation. It is **not** a threshold change. | (a) Treat `allowed_values` changes as UNDECIDABLE; (b) treat them as LOOSENS for any added value. | **(b)** — adding to an allow-set loosens; removing tightens; reordering is NEUTRAL. An absent value in a set is a real loosening. `[DEFAULT-D2]` | Under (a), a policy edit adding `MARKET` to `EXEC-001` would need no approval. That is exactly the hole the mutation exposes. |
+| B-3 | **`STOP-001` mutation `eq → lte`.** `eq` is not ordinal. `loosens_for` today returns `True` for any non-ordinal (fail-closed). But the **diff function** must classify this change, and `eq → lte` **definitely** loosens (`eq 2.5` forbids `2.4`; `lte 2.5` allows it). | (a) Leave it to the generic non-ordinal rule (always LOOSENS); (b) add a comparison-lattice for ordinal-ness. | **(b)** — add an explicit comparison lattice: `eq ⊂ {lt ⊂ lte}, {gt ⊂ gte}`, `in` and `not_in` are complements, `exists` and `multiple_of` are not comparable to anything except themselves. `eq → lte` is LOOSENS by construction, not by appeal to the non-ordinal fallback. `[DEFAULT-D3]` | Under (a), `lte → eq` (a **tightening**) would be treated as LOOSENS, forcing two-person approval for a tightening. Safe but operationally obstructive, and it would hide the direction from the auditor. |
+| B-4 | **What is "the complete change list"?** Rules can be **added** (always a loosen — a new rule with `mode=enforce` and `action=DENY` tightens, but a new `ALLOW` exempts and loosens; a new rule with `mode=monitor` is NEUTRAL by action but adds observation), **removed** (always a loosen if the removed rule was `enforce`; NEUTRAL if monitor), and **re-ordered** (no-op, per SPEC §4.2). | (a) Report rules-level diffs as a flat set; (b) group by (rule_id, field) with `before`/`after`/`classification`. | **(b)** `[DEFAULT-D4]` — the auditor needs to know which *field* of which *rule* changed, and the classification depends on the (field, old, new) triple in most cases. |
+| B-5 | **`scope` — how does a scope change classify?** Widening (`pool → global`) tightens; narrowing (`global → pool`) loosens. `pool → consolidated` is UNDECIDABLE without knowing the evaluator semantics. | (a) Hand-written table; (b) partial order on `RuleScope` + `UNDECIDABLE` for incomparable pairs. | **(b)** `[DEFAULT-D5]` — `global > pool > instrument` on the "number of orders blocked" axis; `pool` vs `consolidated` incomparable (different data, different pools, not strictly wider). |
+| B-6 | **Does `mode` `enforce → monitor` classify as LOOSENS even if the rule action is `ALLOW`?** An `ALLOW` rule in `enforce` mode grants an exemption; in `monitor` it does nothing. So `enforce → monitor` on an `ALLOW` rule is a **tightening** (exemption withdrawn). | (a) `enforce → monitor` always LOOSENS; (b) field-aware: `enforce → monitor` LOOSENS for `DENY`/`MODIFY`/`KILL`, TIGHTENS for `ALLOW`. | **(b)** `[DEFAULT-D6]` — the classification must consider the action. A `KILL-002` switched to `monitor` stops exempting, so kills that were allowed become denied: that is a **tightening**. Getting this backwards forces two-person approval on every safety improvement, which is exactly how safety improvements get abandoned. | Under (a), turning off an exemption rule would be treated as LOOSENS and blocked. Operationally safe, but wrong: an auditor would see no tightening, which is a lie. |
+| B-7 | **`action` change classification.** `ALLOW → DENY` tightens; `DENY → ALLOW` loosens; `DENY → MODIFY` is UNDECIDABLE without facts about typical over-breach sizes; `MODIFY → KILL` tightens; `KILL → DENY` loosens (DENY is less severe than KILL in the lattice); `DENY → KILL` tightens. | (a) Use `ACTION_PRECEDENCE` index as the axis: higher index = looser. (b) Hand-table plus `UNDECIDABLE` for pairs that aren't comparable (`DENY ↔ MODIFY`). | **(b)** — `ACTION_PRECEDENCE` is `(KILL, DENY, MODIFY, ALLOW)`. Note `DENY > MODIFY` and `MODIFY > ALLOW`, so DENY is "tighter" than MODIFY, but DENY → MODIFY **can** loosen in a **specific** case (if the breach would have been one where MODIFY shrinks but DENY blocks, MODIFY permits a trade DENY forbade → LOOSENS). So the lattice is not the answer. `DENY ↔ MODIFY` is UNDECIDABLE; the rest is table-driven. `[DEFAULT-D7]` | Under (a), `DENY → MODIFY` would be reported as LOOSENS (index 1 → 2). That is often right but sometimes wrong, and a wrongly-tightening classification could block safety improvements. Report UNDECIDABLE and fail closed to LOOSENS (already the rule). |
+| B-8 | **`threshold_input` / `threshold_ref` changes.** Changing `threshold_input: settled_cash → unsettled_cash` is not comparable as a number. `threshold_ref` changes are only resolvable if the referenced value is known. | (a) UNDECIDABLE for all changes to these fields; (b) resolve `threshold_ref` against the config and compare numerically. | **(a)** `[DEFAULT-D8]` — a `threshold_ref` may in principle resolve to a monotone transform (e.g. `max(x, 100)`) of the old one, so it is genuinely UNDECIDABLE without a symbolic comparison the diff function does not have. UNDECIDABLE → LOOSENS for approval (already in the code). |
+| B-9 | **Removing a rule — what if it was `monitor`?** A `monitor` rule in `enforce` mode that is deleted tightens nothing and loosens nothing observable (it never bound); it does lose the audit record. | (a) NEUTRAL; (b) LOOSENS (loss of observability is a change in ability to detect). | **(a)** `[DEFAULT-D9]` — the classification is about the **verdict**, not observability. An addendum to the `ASSERTIONS` table records the loss of observability but does not require approval. | Under (b), every cleanup would need two-person approval. The audit trail records the removal (it's a diff entry), so observability is not lost, just recorded elsewhere. |
+| B-10 | **Rule added — classification.** A new `enforce` rule with `action=DENY` tightens; a new `enforce` rule with `action=ALLOW` and `exempts=[...]` loosens the rules it exempts; a new `monitor` rule is NEUTRAL (no verdict impact). | (a) `NEUTRAL` for any added rule; (b) classify by (mode, action): `enforce` + `ALLOW` + non-empty `exempts` → LOOSENS; `enforce` + `ALLOW` + empty `exempts` → NEUTRAL (a standalone ALLOW rule does nothing in `_combine`); `enforce` + `DENY`/`KILL` → TIGHTENS; `enforce` + `MODIFY` → UNDECIDABLE (see B-7 reasoning about DENY ↔ MODIFY — the MODIFY might replace a DENY); `monitor` → NEUTRAL. | **(b)** `[DEFAULT-D10]` | Under (a), adding an `ALLOW` + `exempts` rule to bypass `EXP-001` would need no approval. That is the exact bypass the diff function exists to prevent. |
+
+I proceed with all defaults. Every place a default was used is marked `[DEFAULT-Dn]` inline and re-listed in `ASSUMPTIONS`.
+
+## NON-BLOCKING DETAILS RESOLVED
+
+| # | Detail | Resolution |
+|---|---|---|
+| N-1 | **Comparison of `Decimal` thresholds.** `0.050` vs `0.05` are the same threshold. | Compare via `Decimal(str(x)).normalize()` on both sides, never `float`. `Decimal("0.050") == Decimal("0.05")` is already `True` in Python; the edge case is `int` vs `Decimal` (`2 == Decimal("2.0")` is `True` in Python, but `str(2) == str(Decimal("2.0"))` is `False`). Normalise to `Decimal` before comparing. |
+| N-2 | **`threshold` `int` vs `Decimal`.** `RATE-001` is `20` (int); `EXP-001` is `0.050` (Decimal). | The diff always normalises to `Decimal`. A change from `int 20` to `Decimal("20.000")` is **NEUTRAL**, not a change. |
+| N-3 | **Rule `id` reuse.** `EXP-001 → EXP-001` with different fields is a change to `EXP-001`; `EXP-001 → EXP-001'` where the new one is not the same `authority` is **NOT** detectable by the diff — SPEC §2 row 1 says ids are never reused. The diff function **cannot verify** that, and returns a `RuleAdded`/`RuleRemoved` pair if ids differ. | `[DEFAULT-D11]` the diff assumes ids are stable. A change to `authority` on the same id is `UNDECIDABLE` (an authority is a *source*, not a bound). |
+| N-4 | **Half-open vs closed bounds.** `lte` at `0.050` passes at `0.050` exactly; `lt` at `0.050` fails at `0.050`. `lte → lt` **tightens** (narrows the passing set by one point). `lt → lte` loosens. | Ordinary ordinal lattice: `gt ⊂ gte`, `lt ⊂ lte`, `eq` intersects both but is `⊂ lte` and `⊂ gte`. `eq → lte` loosens; `lte → eq` tightens. |
+| N-5 | **`measurement` changes.** `point_in_time` → `session` is not comparable. | `UNDECIDABLE` for any `measurement.basis`, `measurement.window` or `measurement.timing` change. The classifier cannot rank time-windows. `[DEFAULT-D12]` |
+| N-6 | **`severity` changes.** Purely routing. | `NEUTRAL` for every `severity` change. `[DEFAULT-D13]` |
+| N-7 | **`on_missing_input` change.** `DENY → KILL` tightens; `KILL → DENY` loosens. | Direct from `ACTION_PRECEDENCE`. |
+| N-8 | **`modify.target` / `modify.to` change.** A different target is a different rule; a different `to` requires knowing the metric. | `UNDECIDABLE` for `modify.target` change; `UNDECIDABLE` for `modify.to` change (a smaller size is a tighter risk, but `max_quantity_within_risk_budget` vs `max_quantity_within_liquidity_cap` are different reductions in different scenarios). `[DEFAULT-D14]` |
+| N-9 | **`exempts` set change.** Added exemption → the ALLOW rule grants more → LOOSENS; removed → TIGHTENS. | Set-difference semantics. |
+| N-10 | **`allowed_values` order.** `[LIMIT]` vs `[LIMIT]` (different objects) → NEUTRAL. `[LIMIT, MARKET]` vs `[MARKET, LIMIT]` → NEUTRAL. `[LIMIT]` vs `[LIMIT, MARKET]` → LOOSENS. | Set comparison, normalise elements via `str`. |
+| N-11 | **`kill_scope` change.** `POOL → GLOBAL` tightens; `GLOBAL → POOL` loosens. | `KillScope` is a 2-element linear order. |
+| N-12 | **`on_missing_input` on a non-binding rule.** A `monitor` rule's `on_missing_input` cannot affect the verdict (the rule doesn't bind), so changing it is `NEUTRAL` when `mode == monitor`. | The `_classify` routine takes `mode` into account. |
+| N-13 | **The `NotImplementedError` on `LimitChange.loosens`.** It is correct and stays. The diff function uses `loosens_for(change, rule)` (which was already correct), and adds a new `classify(field, old, new, rule)` for the wider change surface. The property **must not** be changed — the X5 test pins it. | Keep the property raising `NotImplementedError`. Add `classify_rule_change`. |
+| N-14 | **The `canonical_bytes({"v": Decimal("0.050")}) == b'{"v":"0.050"}'` test.** Unchanged. | Not touched by this diff. |
+| N-15 | **`PolicyGate.evaluate` for the diff.** The diff **does not invoke the gate** — the gate evaluates one policy against facts. The diff compares two policies. No interaction. | Diff is a pure function of two `PolicyDocument`s. |
+| N-16 | **Timezone and half-days.** No wall-clock arithmetic in the diff. | N/A. |
+| N-17 | **`rule.binds` for the diff.** Uses `mode is RuleMode.ENFORCE`. Consistent with the gate. | |
+
+Now the deliverables.
+
+---
+
+```markdown
+---
+id: SPEC-P1.3-CONFIG-DIFF
+version: 0.1
+status: DRAFT
+phase: P1.3 — Configuration & Policy DSL (amendment)
+depends_on: [SPEC-P1.3-CONFIG v0.1]
+produces: [
+  fn.diff_policies,
+  fn.classify_rule_change,
+  model.PolicyDiff,
+  model.RuleChange,
+  model.RuleAddRemove,
+  enum.ChangeClass,
+  fn.assert_change_authorised_v2,
+  CONSTITUTIONAL_RULE_PINS (test-only, in tests/verify_p13_config_diff.py)
+]
+---
+
+# SPEC-P1.3-CONFIG-DIFF — the policy diff function and its amendment
+
+**Closes:** X5R-G2 (two-person rule defined for a threshold only), X5R-G9 (five mutations pass every suite).
+**Amends:** SPEC-P1.3-CONFIG §5.3 (two-person rule extended to every loosening the diff detects).
+**Does not change:** any rule in `config/policy.yaml`; any field of `Rule`, `Governance`, `Layering`, or `PolicyDocument`; `LimitChange.loosens` (still raises `NotImplementedError`); `loosens_for` (unchanged).
+
+## 1. The gap
+
+`loosens_for()` (SPEC-P1.3 §5.3, `src/config/loader.py`) answers one question:
+
+> Given a `LimitChange` on a rule's `threshold` field, does the direction of the change loosen that rule?
+
+It cannot answer:
+
+- A change to `mode` (`enforce → monitor`), which removes a rule's binding force.
+- A change to `action` (`DENY → ALLOW`, `KILL → DENY`).
+- A change to `comparison` (`lte → gte`, `eq → lte`).
+- A change to `scope`.
+- A change to `threshold_ref` or `threshold_input` (the constant is a measurement, not a literal).
+- A rule **added** or **removed**.
+- A change to `exempts`, `allowed_values`, `allowed_values_emergency`, `disallowed_values`.
+- Any non-`threshold` field change.
+
+The five mutations that the X5 audit found pass every existing suite are the proof: `EXP-002.action → ALLOW`, `LOSS-001.mode → monitor`, `LOSS-004.threshold → 20%`, `EXEC-001.allowed_values` gains `MARKET`, `STOP-001.comparison → lte`. Each of these is a loosening that `assert_change_authorised` does not require approval for, because `assert_change_authorised` only inspects `LimitChange` rows on `threshold`, and none of these five change `threshold`.
+
+## 2. The diff function
+
+`diff_policies(old, new)` returns a `PolicyDiff`. It is a **pure function** of two `PolicyDocument` values. It performs no I/O, no clock read, no evaluator call, no Vault resolution. It is deterministic: byte-identical inputs produce byte-identical `PolicyDiff` bytes, except the `PolicyDiff` carries the two `content_hash` values so its own audit identity is derivable.
+
+A `RuleChange` is emitted for every field that differs between the two rules bearing the same `id`. A `RuleAddRemove` is emitted for every rule whose `id` is present in exactly one document. The classification is a per-field decision, driven by the field name and the (old, new) values.
+
+The complete field coverage is enumerated in §3. A field not in that table produces `ChangeClass.UNDECIDABLE` and a reason — never silence. The `PolicyDiff` is therefore complete: an auditor can count `len(diff.changes) + len(diff.rules_added) + len(diff.rules_removed) + len(diff.ignored)` and get `len(old.rules) + len(new.rules)` when rules are matched by id — a test asserts this.
+
+## 3. Classification, per field
+
+The table is exhaustive for the fields on `Rule`. Fields not listed here are not fields on `Rule` and are out of scope.
+
+The four `ChangeClass` values: `LOOSENS`, `TIGHTENS`, `NEUTRAL`, `UNDECIDABLE`. `UNDECIDABLE` is treated as `LOOSENS` for approval purposes (§4).
+
+| Field | Comparison | Class | Reasoning | Edge case and resolution |
+|---|---|---|---|---|
+| `threshold` | `<` old→new for `lte`/`lt`; `>` old→new for `gte`/`gt`; equal for `eq` | existing `loosens_for()` semantics | Existing rule. Unchanged. | `int 20` vs `Decimal("20.000")` → NEUTRAL (normalise via `Decimal`). `Decimal("0.050")` vs `Decimal("0.05")` → NEUTRAL (same `Decimal`). |
+| `threshold` | `eq` rule, unequal values | `UNDECIDABLE` | Which direction narrows the passing set for an `eq` rule depends on where the rule is *around* the observed distribution. Moving a setpoint from 2.5 to 2.4 is a different change from 2.5 to 2.6 in effect, but not in any abstract sense. | `[DEFAULT-D3]` does not cover `eq`; `eq` unequal values → UNDECIDABLE. `eq → lte` (a **comparison** change, not a threshold change) is handled by the comparison row. |
+| `threshold` | any comparison, `None → not-None` or `not-None → None` | `UNDECIDABLE` | Adding a constant where there was none (or removing one) is not comparable. The rule's semantics are unprovable. | `threshold_ref`/`threshold_input` changes are handled below. |
+| `threshold` | non-ordinal comparison (`in`, `not_in`, `multiple_of`, `exists`) | existing `loosens_for()` returns `True` for any change; the diff **must** report `UNDECIDABLE` with the reason "non-ordinal comparison; cannot rank" | Fail-closed direction is the same; the diff function's output is more informative. | The reason is stored on the `RuleChange` so an auditor sees why. |
+| `comparison` | `eq → lte` or `eq → gte` | `LOOSENS` | `eq x` is the set `{x}`. `lte x` is `(-∞, x]`. `{x} ⊂ (-∞, x]`, so `lte` is wider (more permissive). Tightening direction is `lte → eq`, which narrows to one point. | This is the `STOP-001` mutation. |
+| `comparison` | `lte → lt` | `TIGHTENS` | `(-∞, x) ⊂ (-∞, x]`; removing the boundary point narrows. `lt → lte` loosens. | Exactly the `0.050` inclusive-vs-exclusive edge case from SPEC §3.2. The change excludes `0.050` from the pass set; the breach threshold moves from `> 0.050` to `>= 0.050`. |
+| `comparison` | `gte → gt` / `gt → gte` | `TIGHTENS` / `LOOSENS` | Dual of the above. | |
+| `comparison` | `lt → gt` | `UNDECIDABLE` | Reverses the direction of the bound on a different metric. There is no abstract reason `(-∞, x) → (x, ∞)` narrows or widens the pass set; it changes **which side of x** passes. | `[DEFAULT-D15]` |
+| `comparison` | `lte → gte` | `UNDECIDABLE` | Same reasoning: the bound moves to the opposite side. | `LOSS-004`'s `comparison: lte → gte` (on the same threshold) would forbid *every* low value of drawdown, which is unintelligible — but the diff cannot establish it's a loosening from first principles. `UNDECIDABLE`. |
+| `comparison` | `in → not_in` | `TIGHTENS` for the "the rule passes when the value is NOT in `disallowed_values`" reading; not applicable here because these appear in different roles. | `in` and `not_in` are used with **separate** value sets (`allowed_values` vs `disallowed_values`). A change of `comparison` from `in` to `not_in` is `UNDECIDABLE` without knowing the value sets. | If `allowed_values` and `disallowed_values` are both absent, the rule is invalid anyway. |
+| `comparison` | `→ multiple_of` | `UNDECIDABLE` | `multiple_of` is not a bound; it's a divisibility constraint. Whether a change *from* it loosens or tightens depends on the increment. | |
+| `comparison` | `→ exists` | `UNDECIDABLE` | `exists` has no order relation to any other comparison. | |
+| `mode` | `enforce → monitor`, action ∈ {`DENY`, `MODIFY`, `KILL`} | `LOOSENS` | A binding rule becomes a recording rule. The verdict can no longer be affected by this rule. `[DEFAULT-D6]` | This is the `LOSS-001` mutation. |
+| `mode` | `enforce → monitor`, action `ALLOW` | `TIGHTENS` | An `ALLOW` rule with `exempts` grants an exemption from other rules. In `monitor` mode it stops granting, so more rules bind. `[DEFAULT-D6]` | Getting this backwards would force two-person approval for every safety improvement. |
+| `mode` | `monitor → enforce`, action ∈ {`DENY`, `MODIFY`, `KILL`} | `TIGHTENS` | A previously non-binding rule now binds. | |
+| `mode` | `monitor → enforce`, action `ALLOW` | `LOOSENS` | An exemption is now granted. | |
+| `action` | `DENY → ALLOW` | `LOOSENS` | DENY blocks, ALLOW does not. | This is the `EXP-002` mutation. |
+| `action` | `ALLOW → DENY` | `TIGHTENS` | | |
+| `action` | `KILL → DENY` | `LOOSENS` | DENY halts one order; KILL halts the book. | |
+| `action` | `DENY → KILL` | `TIGHTENS` | | |
+| `action` | `KILL → MODIFY` | `LOOSENS` | A KILL stops trading; a MODIFY lets the trade proceed, smaller. | |
+| `action` | `MODIFY → KILL` | `TIGHTENS` | | |
+| `action` | `DENY ↔ MODIFY` | `UNDECIDABLE` | DENY blocks; MODIFY reduces then proceeds. Whether MODIFY is "looser" than DENY depends on whether the original breach would have shrunk to a safe size. `[DEFAULT-D7]` | DENY → MODIFY often loosens (a trade happens that was blocked). MODIFY → DENY often tightens (a trade blocked that would have happened). But not always: MODIFY → DENY on a rule whose MODIFY only ever shrank to zero is NEUTRAL. The diff cannot know. |
+| `action` | `ALLOW → MODIFY` | `TIGHTENS` | ALLOW proceeds; MODIFY requires a modification. | |
+| `action` | `MODIFY → ALLOW` | `LOOSENS` | | |
+| `scope` | `pool → global` | `TIGHTENS` | More decisions are evaluated. | |
+| `scope` | `global → pool` | `LOOSENS` | | |
+| `scope` | `pool → instrument` | `TIGHTENS` (fewer? no — instrument scope applies to a narrower set of orders, so fewer are denied — this needs care) | **Care needed.** A rule at `pool` scope evaluates every order in the pool; a rule at `instrument` scope evaluates only orders on its instrument. A `DENY` rule at `instrument` scope blocks fewer orders than the same rule at `pool` scope. Therefore `pool → instrument` **LOOSENS**. | `[DEFAULT-D5]` |
+| `scope` | `instrument → pool` | `TIGHTENS` | | |
+| `scope` | `pool ↔ consolidated` | `UNDECIDABLE` | Consolidated evaluates across pools; pool evaluates one. Neither is a superset of the other; the data is different. `[DEFAULT-D5]` | |
+| `scope` | `pool → pool_and_consolidated` | `TIGHTENS` | Superset — every order evaluated at `pool` is evaluated at both. | |
+| `scope` | `global → market` | `LOOSENS` | Global covers both markets. | |
+| `scope` | `strategy` and any other pair | `UNDECIDABLE` | Strategy scope is not rankable against pool/instrument/global without knowing the strategy→pool mapping. `[DEFAULT-D5]` | |
+| `severity` | any | `NEUTRAL` | Routing only. SPEC-P1.3 §4.2. `[DEFAULT-D13]` | |
+| `on_missing_input` | with `mode = enforce`: `DENY → KILL` | `TIGHTENS` | KILL halts the book; DENY halts one order. From `ACTION_PRECEDENCE`. | |
+| `on_missing_input` | with `mode = enforce`: `KILL → DENY` | `LOOSENS` | | |
+| `on_missing_input` | with `mode = monitor` | `NEUTRAL` | A monitor rule cannot bind, so its `on_missing_input` cannot affect the verdict. | |
+| `threshold_ref` | any change (`a → b`, `a → None`, `None → a`) | `UNDECIDABLE` | `threshold_ref` names a config path. A monotone transform (e.g. `max(x, 100)`) may be between any two refs, so `UNDECIDABLE` without symbolic comparison. `[DEFAULT-D8]` | |
+| `threshold_input` | any change | `UNDECIDABLE` | Same reasoning. The bound is a **measured** value; whether `settled_cash` or `unsettled_cash` is the looser bound depends on the trade and the market. `[DEFAULT-D8]` | |
+| `measurement.basis` / `.window` / `.timing` | any change | `UNDECIDABLE` | Time-windows cannot be ranked without semantics of the data. `[DEFAULT-D12]` | |
+| `authority` | any change | `UNDECIDABLE` | An authority is a **source** of a decision, not a bound. Changing the authority on an unchanged rule is typically a documentation correction; changing it alongside a threshold change is a different question. `[DEFAULT-D11]` | This prevents an editor from quietly re-pinning `EXP-001`'s authority to something less restrictive while keeping the threshold. |
+| `description` / `notes` | any change | `NEUTRAL` | Prose. | An editor could change a description to mislead an investigator. That is a disciplinary matter, not a policy-class matter. `notes` is for the human. |
+| `inputs` | any change (set add, remove, replace) | `UNDECIDABLE` | Removing an input loosens (fewer facts needed → rule more likely to pass); adding tightens. But `inputs` may be replaced as a set (`[a, b] → [c, d]`), where the direction is unprovable. `[DEFAULT-D16]` | |
+| `exempts` | with `action = ALLOW`: old − new non-empty (exemption removed) | `TIGHTENS` | An `ALLOW` rule with `exempts` grants an exemption. Removing one narrows the grant. | |
+| `exempts` | with `action = ALLOW`: new − old non-empty (exemption added) | `LOOSENS` | | `KILL-002` adding `EXP-001` to its exemption list would be a loosening that bypasses the 5% cap; blocked. |
+| `exempts` | with `action ≠ ALLOW` | `UNDECIDABLE` | The model forbids it (`if self.exempts and self.action is not RuleAction.ALLOW`). But `UNDECIDABLE` is safer than `NEUTRAL` if the model ever changes. `[DEFAULT-D17]` | |
+| `allowed_values` | set add | `LOOSENS` | A wider set passes more. `[DEFAULT-D2]` | |
+| `allowed_values` | set remove | `TIGHTENS` | | |
+| `allowed_values` | order-only (same set, different order) | `NEUTRAL` | A tuple's order is not semantic here. | |
+| `allowed_values_emergency` | set add / set remove / order | `LOOSENS` / `TIGHTENS` / `NEUTRAL` | `EXEC-001`'s emergency set is the mechanism by which a `MARKET` order is allowed for an emergency exit. Adding a value widens what an emergency exit may use. | This is the `EXEC-001` mutation — it changes `allowed_values`, not `allowed_values_emergency`. `allowed_values` is the non-emergency set. |
+| `disallowed_values` | set add | `TIGHTENS` | Adding a value to a `not_in` set forbids more. | |
+| `disallowed_values` | set remove | `LOOSENS` | | |
+| `allowed_values_ref` | any change | `UNDECIDABLE` | The reference target may itself change. | |
+| `kill_scope` | `POOL → GLOBAL` | `TIGHTENS` | Wider halt. | |
+| `kill_scope` | `GLOBAL → POOL` | `LOOSENS` | | |
+| `modify.target` | any change | `UNDECIDABLE` | Different targets modify different things. `[DEFAULT-D14]` | |
+| `modify.to` | any change | `UNDECIDABLE` | `[DEFAULT-D14]` | |
+| `id` | n/a — id is the identity key, not a field | n/a | The diff matches on `id`; an id change is `RuleRemoved(old_id) + RuleAdded(new_id)`. | |
+| rule added | `mode = enforce`, `action = DENY` or `KILL` | `TIGHTENS` | A new blocking rule. | |
+| rule added | `mode = enforce`, `action = MODIFY` | `UNDECIDABLE` | Same as `DENY ↔ MODIFY` reasoning: MODIFY may substitute for a DENY or a smaller ALLOW. `[DEFAULT-D10]` | |
+| rule added | `mode = enforce`, `action = ALLOW`, `exempts` non-empty | `LOOSENS` | A new grant. `[DEFAULT-D10]` | |
+| rule added | `mode = enforce`, `action = ALLOW`, `exempts` empty | `NEUTRAL` | An ALLOW rule with no exemptions does nothing in `_combine`; it only records. `[DEFAULT-D10]` | |
+| rule added | `mode = monitor` | `NEUTRAL` | `[DEFAULT-D9]` | |
+| rule removed | `mode = enforce`, `action = DENY` or `KILL` | `LOOSENS` | A blocking rule disappears. | |
+| rule removed | `mode = enforce`, `action = MODIFY` | `UNDECIDABLE` | `[DEFAULT-D10]` | |
+| rule removed | `mode = enforce`, `action = ALLOW`, `exempts` non-empty | `TIGHTENS` | The grant is withdrawn. | |
+| rule removed | `mode = enforce`, `action = ALLOW`, `exempts` empty | `NEUTRAL` | | |
+| rule removed | `mode = monitor` | `NEUTRAL` | `[DEFAULT-D9]` | |
+
+## 4. Approval rule (amendment to SPEC-P1.3 §5.3)
+
+The existing `assert_change_authorised()` is retained **unchanged**, so `tests/verify_p13_config.py::t_two_distinct_approvers_required_to_loosen` still passes. It is documented as the **narrow** entry point, valid only for `LimitChange` rows on `threshold`.
+
+A new function `assert_change_authorised_v2(diff, approver_ids, governance)` is added. It classifies any `RuleChange` with `change_class in {LOOSENS, UNDECIDABLE}` as requiring approval, and any `RuleChange` with `change_class in {TIGHTENS, NEUTRAL}` as not. `UNDECIDABLE` **is** `LOOSENS` for approval purposes: this is the whole point of `UNDECIDABLE` as a real outcome.
+
+The `assert_change_authorised()` function, the `loosens_for()` function, and the `LimitChange.loosens` `NotImplementedError` are not modified. The new function is additive.
+
+The new function emits a `PolicyGovernanceError` naming each loosening `RuleChange` and each loosening `RuleAddRemove`, with the count of distinct approvers and the required count. It does not stop at the first; an auditor sees the full list.
+
+## 5. Pydantic models and function signatures
+
+```python
+# src/config/policy_diff.py
+
+from __future__ import annotations
+
+import enum
+from decimal import Decimal
+from typing import Annotated, Final, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from config.loader import (
+    Comparison,
+    Governance,
+    KillScope,
+    PolicyDocument,
+    PolicyGovernanceError,
+    Rule,
+    RuleAction,
+    RuleMode,
+    RuleScope,
+)
+
+
+class ChangeClass(str, enum.Enum):
+    LOOSENS = "LOOSENS"
+    TIGHTENS = "TIGHTENS"
+    NEUTRAL = "NEUTRAL"
+    UNDECIDABLE = "UNDECIDABLE"
+
+
+class RuleChange(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rule_id: Annotated[str, Field(pattern=r"^[A-Z]{2,7}-\d{3}$")]
+    field: str
+    old_repr: str
+    new_repr: str
+    change_class: ChangeClass
+    reason: str
+
+
+class RuleAddRemove(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rule_id: Annotated[str, Field(pattern=r"^[A-Z]{2,7}-\d{3}$")]
+    kind: Literal["added", "removed"]
+    rule_repr: str
+    change_class: ChangeClass
+    reason: str
+
+
+class PolicyDiff(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    old_content_hash: str
+    new_content_hash: str
+    old_policy_version: str
+    new_policy_version: str
+    changes: tuple[RuleChange, ...]
+    rules_added: tuple[RuleAddRemove, ...]
+    rules_removed: tuple[RuleAddRemove, ...]
+    #: Fields that are explicitly NEUTRAL and not enumerated one-by-one, for a
+    #: compact audit record. The `changes` tuple carries every classified change
+    #: including NEUTRAL ones; `ignored` is a count of NEUTRAL fields on rules that
+    #: did not otherwise change.
+    ignored_count: int
+
+    def loosening_changes(self) -> tuple[RuleChange, ...]:
+        return tuple(c for c in self.changes
+                     if c.change_class in (ChangeClass.LOOSENS, ChangeClass.UNDECIDABLE))
+
+    def loosening_add_removes(self) -> tuple[RuleAddRemove, ...]:
+        return tuple(a for a in (*self.rules_added, *self.rules_removed)
+                     if a.change_class in (ChangeClass.LOOSENS, ChangeClass.UNDECIDABLE))
+
+    def requires_approval(self) -> bool:
+        return bool(self.loosening_changes() or self.loosening_add_removes())
+
+
+def diff_policies(old: PolicyDocument, new: PolicyDocument) -> PolicyDiff: ...
+
+
+def classify_rule_change(
+    old: Rule,
+    new: Rule,
+    field: str,
+    old_value: object,
+    new_value: object,
+) -> tuple[ChangeClass, str]:
+    """Classify a single field change on one rule.
+
+    `field` is the dotted path within the rule (e.g. "measurement.window").
+    `old_value` / `new_value` are the *normalised* Python values; for `threshold`,
+    both are `Decimal`. For `mode`, both are `RuleMode`. For `comparison`, both are
+    `Comparison`.
+    """
+    ...
+
+
+def assert_change_authorised_v2(
+    diff: PolicyDiff,
+    approver_ids: tuple[str, ...],
+    governance: Governance,
+) -> None: ...
+```
+
+`diff_policies` **must not** import `PolicyGate` or `PolicyLoader`. It compares two `PolicyDocument` values, and nothing else.
+
+## 6. Error paths
+
+| Condition | Behaviour |
+|---|---|
+| `old` and `new` are the same object (identity) | Fast path: return a `PolicyDiff` with empty change list, same `content_hash` on both sides, same version on both sides. `requires_approval() == False`. |
+| `old.content_hash == new.content_hash` but `old is not new` (structurally identical) | Same as above. The `content_hash` is the identity of a policy version; equal hashes imply equal documents (a `PolicyDocument` with a non-equal hash cannot exist). |
+| A rule is present in `old` but not `new` | `RuleAddRemove(kind="removed", ...)`, classified per §3. |
+| A rule is present in `new` but not `old` | `RuleAddRemove(kind="added", ...)`, classified per §3. |
+| A field is present on both rules with a value the classifier does not know | `ChangeClass.UNDECIDABLE`, `reason` names the field and the two values. |
+| `governance.min_approvals_to_loosen` differs between the two documents | A `PolicyDiff` on `governance` is not a field on a rule. This diff function does **not** classify governance changes. `assert_change_authorised_v2` raises `PolicyGovernanceError` unconditionally if `old.governance != new.governance` — a governance change is a constitutional amendment and cannot be approved by any count. `[DEFAULT-D18]` |
+| `new.rules` has two rules with the same `id` | The `PolicyDocument` model rejects it before we get here. No defensive code needed. |
+| `assert_change_authorised_v2` called with a `PolicyDiff` for a change the approvers do not cover | `PolicyGovernanceError` naming each unprotected loosening `RuleChange` / `RuleAddRemove`. |
+
+## 7. Amendment to SPEC-P1.3 §5.3
+
+The following text replaces SPEC-P1.3 §5.3 in its entirety. The existing text becomes a footnote reference (`†`), retained for its operational-consequence paragraph and its ADR-09-row-2 discussion.
+
+> ### 5.3 Who may change what — the two-person rule
+>
+> | Direction | Approvals | Authority |
+> |---|---|---|
+> | **Tighten** a limit | **0** — automatic | ADR-09 row 3 |
+> | **Loosen** a limit | **2 distinct identities** | This spec, §5.3, and SPEC-P1.3-CONFIG-DIFF §3 |
+> | **Override a risk DENY** | **Impossible** | ADR-09 final row, invariant I2 |
+> | **Amend governance** (`min_approvals_to_*`, `risk_deny_override_permitted`, `approver_roles`, `signature`) | **Impossible** through the diff path. A `PolicyDiff` with a changed `Governance` raises `PolicyGovernanceError` unconditionally. | This spec, §5.3, and SPEC-P1.3-CONFIG-DIFF §6 |
+>
+> **Direction is judged against the field and the rule, not the raw number** (SPEC-P1.3-CONFIG-DIFF §3). The threshold case (raising an `lte` threshold loosens; raising a `gte` threshold tightens) is one row of a table. Every field on `Rule` has a classification: `LOOSENS`, `TIGHTENS`, `NEUTRAL`, or `UNDECIDABLE`. `UNDECIDABLE` is treated as `LOOSENS` for approval purposes: a change whose direction cannot be established is a change whose risk to the two-person rule cannot be bounded.
+>
+> **Two distinct identities, not two approvals.** Two signatures from one person are one person's judgement twice; the check normalises and de-duplicates. Verified by `t_two_distinct_approvers_required_to_loosen`.
+>
+> **This is stricter than a FROZEN ADR, and that is why it is permitted.** ADR-09 row 2 authorises the Owner *alone* to increase a limit. Requiring two is a tightening of that control, and ADR-09 row 3 says tightening is always safe and needs no approval — so no constitutional amendment is required and none has been made. †
+>
+> **The diff function is the authoritative classifier.** `assert_change_authorised()` is retained for `LimitChange` rows on `threshold` only; `assert_change_authorised_v2(diff_policies(old, new), approvers, governance)` is the **required** entry point for any policy change that is not a pure `threshold` edit. The v1 entry point is a compatibility shim; a caller that uses v1 to approve a non-threshold change is a policy bug, and the lint in §7 is extended by a check that no module outside the diff module calls v1 (see §8 below).
+
+## 8. Lint extension (required for the amendment to hold)
+
+A test-only assertion, not a runtime check:
+
+- `src/config/policy_diff.py` may import `assert_change_authorised` (for the compatibility shim) but must not call it.
+- Any module under `src/` outside `config/loader.py` and `config/policy_diff.py` that calls `assert_change_authorised` directly is a **CI failure**: the diff path is mandatory.
+- `tests/verify_p13_config_diff.py::t_no_module_calls_v1_authoriser_directly` asserts this by AST-scanning `src/`.
+
+This is a **lint**, not a policy statement. A module that needs to test the v1 function may do so in a `test_` file, which is not scanned.
+
+## 9. The five mutations and their detection
+
+Each mutation is a `policy.yaml` edit applied to an in-memory dict; the test constructs two `PolicyDocument` values and asserts the `PolicyDiff` classifies the change as `LOOSENS` (or `UNDECIDABLE`).
+
+| Mutation | Field changed | Current | Mutation | Classification | Test |
+|---|---|---|---|---|---|
+| **EXP-002 action** | `EXP-002.action` | `DENY` | `ALLOW` | `LOOSENS` (§3 action row) | `t_mutation_exp002_action_allow` |
+| **LOSS-001 mode** | `LOSS-001.mode` | `enforce` | `monitor` | `LOOSENS` (§3 mode row, `action = DENY`) | `t_mutation_loss001_mode_monitor` |
+| **LOSS-004 threshold** | `LOSS-004.threshold` | `0.100` | `0.200` | `LOOSENS` (`lte`, raised) | `t_mutation_loss004_threshold_20pct` |
+| **EXEC-001 allows** | `EXEC-001.allowed_values` | `("LIMIT",)` | `("LIMIT", "MARKET")` | `LOOSENS` (§3 `allowed_values` set-add row) | `t_mutation_exec001_allows_market` |
+| **STOP-001 comparison** | `STOP-001.comparison` | `eq` | `lte` | `LOOSENS` (§3 `eq → lte` row) | `t_mutation_stop001_comparison_lte` |
+
+And, as **regression** tests (each mutation pinned additionally by a direct field assertion, so the constant is pinned in the config's own test file too):
+
+- `t_const_action_pinned_for_every_constitutional_rule`
+- `t_const_mode_pinned_for_every_constitutional_rule`
+- `t_const_comparison_pinned_for_every_constitutional_rule`
+- `t_const_scope_pinned_for_every_constitutional_rule`
+- `t_const_threshold_pinned_for_every_constitutional_rule_with_a_threshold`
+
+The pin data lives in `tests/constitutional_pins.py`, generated once from `policy.yaml` by a `--regen` flag and then hand-curated so a change is a **diff to the test file**, not a silent regeneration. This is the same pattern as a golden file, and the same reason: a golden file that regenerates itself is not a golden file.
+
+## 10. The pins (exact values)
+
+The following are pinned by `tests/verify_p13_config_diff.py::CONSTITUTIONAL_PINS`. They are the SPEC-P1.3 §10 default set, extended to the four fields named in the acceptance criteria. The pin values are the exact strings parsed from `config/policy.yaml` by `Decimal(str(rule.threshold))` or by the enum's `.value`.
+
+```
+EXP-001  action=DENY  mode=enforce  comparison=lte  scope=pool
+EXP-002  action=DENY  mode=enforce  comparison=lte  scope=pool
+EXP-003  action=DENY  mode=enforce  comparison=lte  scope=pool
+EXP-004  action=DENY  mode=enforce  comparison=lte  scope=pool
+EXP-005  action=DENY  mode=enforce  comparison=lte  scope=pool
+EXP-006  action=MODIFY mode=enforce comparison=lte  scope=pool
+LOSS-001 action=DENY  mode=enforce  comparison=lte  scope=pool_and_consolidated
+LOSS-002 action=DENY  mode=enforce  comparison=lte  scope=pool_and_consolidated
+LOSS-003 action=KILL  mode=enforce  comparison=lte  scope=pool
+LOSS-004 action=KILL  mode=enforce  comparison=lte  scope=consolidated
+SIZE-001 action=MODIFY mode=enforce comparison=lte  scope=pool
+LIQ-001  action=MODIFY mode=enforce comparison=lte  scope=instrument
+RATE-001 action=DENY  mode=enforce  comparison=lte  scope=global
+RATE-002 action=DENY  mode=enforce  comparison=lte  scope=strategy
+STOP-001 action=DENY  mode=enforce  comparison=eq   scope=instrument
+EXEC-001 action=DENY  mode=enforce  comparison=in   scope=instrument
+KILL-001 action=DENY  mode=enforce  comparison=in   scope=global
+KILL-002 action=ALLOW mode=enforce  comparison=eq   scope=global
+```
+
+Thresholds (`Decimal(str(...))`) and `kill_scope` are pinned in the same structure. The values are the values in the delivered `config/policy.yaml`. `EXP-005` is included because it is a constitutional number (§10's "Account-type gross ceiling"). `KILL-001` and `KILL-002` are included because `KILL-001` is `[CONST-7]`'s `ARMED` state and `KILL-002` is the only `ALLOW` rule — a flip of either is a loosening.
+
+## DECISIONS MADE
+
+| # | Decision | Rationale | Reversible? | Blast radius if wrong |
+|---|---|---|---|---|
+| 1 | Diff is a pure function of two `PolicyDocument`s, no I/O | Deterministic; auditable; testable without `policy.yaml` | Yes | Low — the API is the type, not the implementation |
+| 2 | `UNDECIDABLE` is a first-class value and fails closed to `LOOSENS` for approval | The existing `loosens_for` "any non-ordinal → loosening" comment is the same principle; this is its diff-function counterpart | No | Critical — an `UNDECIDABLE` treated as `TIGHTENS` would route a loosening down the no-approval path |
+| 3 | Comparison classification is a hand-written table, not a lattice over `Comparison` | A lattice over the enum is 9×9 = 81 pairs; the table is smaller, clearer, and each entry has a one-line reason | Yes | Medium — a missing pair is `UNDECIDABLE` (safe), a wrong pair is a misclassification |
+| 4 | `mode` classification depends on `action` | An `ALLOW` rule in `enforce` mode is a grant; in `monitor` it is a no-op. `enforce → monitor` on `ALLOW` is a **tightening** | No | High — getting this backwards would force two-person approval on every safety improvement |
+| 5 | `scope` classification depends on **which** comparison | `pool → instrument` LOOSENS (fewer orders are evaluated); `instrument → pool` TIGHTENS | No | High — a flip of this classifies every scope change in one direction |
+| 6 | `governance` is **not** a field on the diff; any change is a `PolicyGovernanceError` with no approval path | Governance includes the two-person rule itself. Allowing an approval path to amend it is the loophole that undoes the control | No | Critical — a governance diff that required two signatures could be used to lower `min_approvals_to_loosen` to 1 with two signatures |
+| 7 | The pin file is hand-curated, generated once from `policy.yaml` and reviewed | A golden file that regenerates itself is not a golden file | Yes | High — an unpinned constant is a silent loosening path |
+| 8 | `assert_change_authorised` (v1) is retained **unchanged**, `assert_change_authorised_v2` is new | SPEC-P1.3 §12's `t_two_distinct_approvers_required_to_loosen` pins v1; breaking it is out of scope | Yes | Low — v1 is a shim |
+| 9 | The v1-usage lint is a **test**, not a runtime import hook | A runtime import hook is a new moving part. A test fails CI with the same force and zero production risk | Yes | Low — an unmerged v1 call is caught at CI |
+| 10 | Every `Rule` field appears in the classification table or is explicitly `UNDECIDABLE` | No field is silent | Yes | High — a silent field is a bypass |
+| 11 | `threshold` changes with a non-ordinal comparison are `UNDECIDABLE` in the **diff** | Existing `loosens_for` returns `True` for any non-ordinal change; the diff's output is more informative and the approval decision is unchanged | Yes | Low |
+| 12 | `measurement` changes are `UNDECIDABLE` | No rankable order without semantics | Yes | Medium |
+| 13 | `id` reuse is assumed not to happen; a reuse shows as `RuleRemoved` + `RuleAdded` | SPEC-P1.3 §2 row 1. The diff cannot verify identity; a reuse that preserved all fields would be `NEUTRAL` for a `monitor` rule and `UNDECIDABLE` for an `enforce` rule — which is the safe default | Yes | Medium |
+| 14 | The amendment to §5.3 is a replacement, not an append | An appending amendment leaves two copies of the rule and one can drift | Yes | High |
+| 15 | `assert_change_authorised_v2` names each loosening individually | An auditor sees the full list; the v1 error named only a count | Yes | Low |
+| 16 | `PolicyDiff` carries both `content_hash` values | The audit record needs the FK to `config_version` for both sides | Yes | Medium |
+
+## ASSUMPTIONS
+
+| # | Assumption | Why I had to assume it | How to verify | Impact if false |
+|---|---|---|---|---|
+| 1 | `[DEFAULT-D1]` the five mutations are read as: `EXP-002.action → ALLOW`, `LOSS-001.mode → monitor`, `LOSS-004.threshold → 0.200` (from `0.100`), `EXEC-001.allowed_values` gains `MARKET`, `STOP-001.comparison → lte` | The prompt's "threshold → 20%" for `LOSS-004` names a value that is not `LOSS-004`'s current value (`0.100`) nor its post-mutation value if we read it as any other rule's 20%. The only coherent reading is "raise `LOSS-004.threshold` to `0.200`" | Read the mutation fixtures in `tests/verify_p13_config_diff.py` | If the mutation is `→ 0.020` (a **tightening**), the test would expect `TIGHTENS` and the diff would return `TIGHTENS`. The classification function is correct either way; the test fixture would need updating |
+| 2 | `[DEFAULT-D2]` `allowed_values` set-add is LOOSENS, set-remove is TIGHTENS | No frozen source states this, but it is the only coherent reading of an `in` comparison | Any policy review of a value-set change | If reversed, every `EXEC-001` restriction is a loosening |
+| 3 | `[DEFAULT-D3]` `eq → lte` is LOOSENS by lattice, not by the non-ordinal fallback | `eq` is not ordinal, but `{x} ⊂ (-∞, x]` is a set inclusion, which is a definition, not a judgement | Definition of `lte` and `eq` as predicates over a metric | If the fallback is used, the classification is still `LOOSENS` (fallback returns `True`), so the **classification** is unaffected; the **reason** string would be less informative |
+| 4 | `[DEFAULT-D4]` the diff reports at (rule_id, field) granularity | An auditor needs to see which field of which rule changed | Any audit of a policy version pair | If at rule granularity, an auditor cannot distinguish a threshold change from a description change within a rule |
+| 5 | `[DEFAULT-D5]` `scope` is classified by a partial order with `UNDECIDABLE` for incomparable pairs | `RuleScope` has 7 values; most pairs are incomparable without knowing the evaluator | Any change of scope | A pair not in the table is `UNDECIDABLE` (safe); a wrong pair is a misclassification |
+| 6 | `[DEFAULT-D6]` `mode` change classification depends on `action` | An `ALLOW` rule is a grant; a `DENY` rule is a restriction; `enforce → monitor` has opposite effects | Any policy review of a mode change | If the dependency is missing, a safety improvement is blocked by approval; a loosening is missed |
+| 7 | `[DEFAULT-D7]` `DENY ↔ MODIFY` is `UNDECIDABLE` | Whether MODIFY permits a trade that DENY forbade depends on the breach size | Any change between `DENY` and `MODIFY` | If `DENY → MODIFY` is treated as `TIGHTENS` (because `DENY` outranks `MODIFY` in `ACTION_PRECEDENCE`), a loosening routes through no approval |
+| 8 | `[DEFAULT-D8]` `threshold_ref` and `threshold_input` changes are `UNDECIDABLE` | Neither is a literal number the diff can compare | Any change of either field | A wrong direction misroutes the change |
+| 9 | `[DEFAULT-D9]` monitor rule add/remove is `NEUTRAL` | It never bound | Any monitor rule change | A cleanup needs no approval (correct); a new monitor rule is recorded as NEUTRAL (correct, but an auditor should notice that a monitor rule is a **stated intent** to promote to enforce) |
+| 10 | `[DEFAULT-D10]` `MODIFY` rule add/remove is `UNDECIDABLE` | `DENY ↔ MODIFY` reasoning applies | Any MODIFY rule add/remove | If treated as `LOOSENS`, every new MODIFY rule needs approval |
+| 11 | `[DEFAULT-D11]` `authority` change on the same id is `UNDECIDABLE` | An authority is a source, not a bound | Any authority change | If treated as `NEUTRAL`, an editor could re-pin `EXP-001` to a weaker authority with no approval |
+| 12 | `[DEFAULT-D12]` `measurement` change is `UNDECIDABLE` | Time-windows are not rankable | Any measurement change | |
+| 13 | `[DEFAULT-D13]` `severity` change is `NEUTRAL` | SPEC-P1.3 §4.2: severity plays no part in ordering | Any severity change | |
+| 14 | `[DEFAULT-D14]` `modify.target` / `modify.to` changes are `UNDECIDABLE` | Different targets and different "to" expressions modify different things | Any modify change | |
+| 15 | `[DEFAULT-D15]` `lt → gt` (and `lte → gte`) is `UNDECIDABLE` | The bound reverses to the opposite side, so "wider" is not meaningful without knowing the metric's distribution | Any such change | |
+| 16 | `[DEFAULT-D16]` `inputs` change is `UNDECIDABLE` | Set add/remove is loosening/tightening by the fail-closed principle, but a replace is neither | Any `inputs` change | |
+| 17 | `[DEFAULT-D17]` `exempts` on a non-`ALLOW` rule is `UNDECIDABLE` | The model forbids it; `UNDECIDABLE` is safer than `NEUTRAL` if the model ever relaxes | Any model change | |
+| 18 | `[DEFAULT-D18]` `governance` change is a `PolicyGovernanceError` with no approval path | Governance includes the two-person rule itself | A governance change | If it could be approved, the two-person rule is trivially bypassed |
+
+## OPEN QUESTIONS
+
+| # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
+|---|---|---|---|---|
+| **Q-P1.3-D1** | Is `LOSS-004.threshold → 0.200` the correct reading of the X5R-G9 mutation, or is it `LOSS-004.threshold → 0.020` (a tightening)? | The X5R author | The audit's mutation table, if it exists outside the prompt | Test fixture only |
+| **Q-P1.3-D2** | Should `scope` classification be a full partial order over all 7 values, or is the incomplete table in §3 acceptable? | This spec, `[DEFAULT-D5]` | A table-driven check of every `RuleScope` pair | The first policy change that moves a rule between `strategy` and any other scope |
+| **Q-P1.3-D3** | Does `PolicyGate` treat two rules with the same `binding_rule_id` (from a reused id) the same? Not applicable if `id` is never reused, but a defensive check would catch it | A future test of the gate | `PolicyDocument.rule(id)` on a document with a reused id — the model rejects it | Not blocking; the model rejects duplicate ids |
+| **Q-P1.3-D4** | Should the lint that forbids `assert_change_authorised` (v1) in `src/` also forbid it in `tests/`? | This spec: no, tests may use v1 for the compatibility shim test | CI, at the first policy change | Not blocking |
+
+## CONTRACTS EXPORTED
+
+| Name | Kind | Signature or schema | Consumers |
+|---|---|---|---|
+| `src/config/policy_diff.py` | module | new file, imports only from `config.loader` and stdlib | P6.2, P6.4, CI |
+| `ChangeClass` | enum | `LOOSENS, TIGHTENS, NEUTRAL, UNDECIDABLE` | P6.2 |
+| `RuleChange` | model | `rule_id, field, old_repr, new_repr, change_class, reason` | P6.2, P1.4 |
+| `RuleAddRemove` | model | `rule_id, kind∈{added,removed}, rule_repr, change_class, reason` | P6.2, P1.4 |
+| `PolicyDiff` | model | `old_content_hash, new_content_hash, old_policy_version, new_policy_version, changes, rules_added, rules_removed, ignored_count` | P6.2, P1.4 |
+| `PolicyDiff.loosening_changes()` | method | `() -> tuple[RuleChange, ...]` | P6.2 |
+| `PolicyDiff.loosening_add_removes()` | method | `() -> tuple[RuleAddRemove, ...]` | P6.2 |
+| `PolicyDiff.requires_approval()` | method | `() -> bool` | P6.2, CI |
+| `diff_policies(old, new)` | function | `(PolicyDocument, PolicyDocument) -> PolicyDiff` | P6.2 |
+| `classify_rule_change(old, new, field, old_value, new_value)` | function | `(Rule, Rule, str, object, object) -> tuple[ChangeClass, str]` | P6.2 (for a human reading one field) |
+| `assert_change_authorised_v2(diff, approver_ids, governance)` | function | `(PolicyDiff, tuple[str, ...], Governance) -> None` — raises `PolicyGovernanceError` if any loosening/undecidable change has fewer distinct approvers than `governance.min_approvals_to_loosen` | P6.2 |
+| `CONSTITUTIONAL_PINS` | constant (test-only) | `dict[str, dict[str, object]]` — the canonical action/mode/comparison/scope/threshold/kill_scope for the 18 pinned rules | CI |
+| Amendment text | prose | SPEC-P1.3 §5.3 replacement (§7 of this spec) | STAGE-1-FREEZE re-freeze |
+| Condition 12 text | prose | §10 of this spec's `STAGE-1-GAP-AUDIT` amendment block (below) | STAGE-1-GAP-AUDIT §10 |
+```
+
+---
+
+```python
+# src/config/policy_diff.py
+"""SPEC-P1.3-CONFIG-DIFF v0.1 — the policy diff function.
+
+Pure function of two PolicyDocument values. No I/O. No clock. No evaluator.
+No Vault. Deterministic: same inputs, same outputs, byte-identical after
+serialisation.
+
+Closes X5R-G2 (two-person rule defined for a threshold only) and X5R-G9 (five
+mutations pass every suite).
+"""
+
+from __future__ import annotations
+
+import enum
+from decimal import Decimal
+from typing import Annotated, Final, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from config.loader import (
+    ACTION_PRECEDENCE,
+    Comparison,
+    Governance,
+    KillScope,
+    PolicyDocument,
+    PolicyGovernanceError,
+    Rule,
+    RuleAction,
+    RuleMode,
+    RuleScope,
+)
+
+# =============================================================================
+# 1. THE CLASSIFICATION ENUM
+# =============================================================================
+
+
+class ChangeClass(str, enum.Enum):
+    LOOSENS = "LOOSENS"
+    TIGHTENS = "TIGHTENS"
+    NEUTRAL = "NEUTRAL"
+    UNDECIDABLE = "UNDECIDABLE"
+
+
+#: Any of these, for approval purposes, is treated as LOOSENS.
+REQUIRES_APPROVAL: Final[frozenset[ChangeClass]] = frozenset(
+    {ChangeClass.LOOSENS, ChangeClass.UNDECIDABLE}
+)
+
+
+# =============================================================================
+# 2. THE MODELS
+# =============================================================================
+
+
+class RuleChange(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rule_id: Annotated[str, Field(pattern=r"^[A-Z]{2,7}-\d{3}$")]
+    field: str
+    old_repr: str
+    new_repr: str
+    change_class: ChangeClass
+    reason: str
+
+
+class RuleAddRemove(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rule_id: Annotated[str, Field(pattern=r"^[A-Z]{2,7}-\d{3}$")]
+    kind: Literal["added", "removed"]
+    rule_repr: str
+    change_class: ChangeClass
+    reason: str
+
+
+class PolicyDiff(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    old_content_hash: str
+    new_content_hash: str
+    old_policy_version: str
+    new_policy_version: str
+    changes: tuple[RuleChange, ...]
+    rules_added: tuple[RuleAddRemove, ...]
+    rules_removed: tuple[RuleAddRemove, ...]
+    ignored_count: int
+
+    def loosening_changes(self) -> tuple[RuleChange, ...]:
+        return tuple(c for c in self.changes
+                     if c.change_class in REQUIRES_APPROVAL)
+
+    def loosening_add_removes(self) -> tuple[RuleAddRemove, ...]:
+        return tuple(a for a in (*self.rules_added, *self.rules_removed)
+                     if a.change_class in REQUIRES_APPROVAL)
+
+    def requires_approval(self) -> bool:
+        return bool(self.loosening_changes() or self.loosening_add_removes())
+
+
+# =============================================================================
+# 3. NORMALISATION
+# =============================================================================
+
+
+def _normalise(value: object) -> object:
+    """Normalise a field value for comparison.
+
+    `int 20` and `Decimal('20.000')` are the same threshold. `Decimal('0.050')`
+    and `Decimal('0.05')` are the same threshold. `str` vs `str` compares by
+    string. An enum compares by `.value`.
+    """
+    if isinstance(value, Decimal):
+        return value.normalize()
+    if isinstance(value, int) and not isinstance(value, bool):
+        return Decimal(value)
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, (list, tuple)):
+        return tuple(_normalise(v) for v in value)
+    return value
+
+
+def _same(a: object, b: object) -> bool:
+    return _normalise(a) == _normalise(b)
+
+
+# =============================================================================
+# 4. THE CLASSIFIER
+# =============================================================================
+
+#: Per-field classification, when the direction depends only on the field name
+#: and the two values. A field not in this dict falls through to the per-field
+#: switch below, which for an unknown field returns UNDECIDABLE.
+_ALWAYS_NEUTRAL: Final[frozenset[str]] = frozenset(
+    {"severity", "description", "notes"}
+)
+
+_ALWAYS_UNDECIDABLE: Final[frozenset[str]] = frozenset(
+    {
+        "threshold_ref",
+        "threshold_input",
+        "measurement.basis",
+        "measurement.window",
+        "measurement.timing",
+        "authority",
+        "inputs",
+        "allowed_values_ref",
+        "modify.target",
+        "modify.to",
+    }
+)
+
+
+#: Comparison-lattice. Key is (old, new); value is (class, reason).
+#: Absent pairs are UNDECIDABLE with a synthetic reason.
+_COMPARISON_CHANGES: Final[dict[tuple[str, str], tuple[ChangeClass, str]]] = {
+    ("eq", "lte"): (
+        ChangeClass.LOOSENS,
+        "eq x passes only at x; lte x passes at every value <= x, a superset",
+    ),
+    ("eq", "gte"): (
+        ChangeClass.LOOSENS,
+        "eq x passes only at x; gte x passes at every value >= x, a superset",
+    ),
+    ("lte", "eq"): (
+        ChangeClass.TIGHTENS,
+        "lte x passes at every value <= x; eq x passes only at x, a subset",
+    ),
+    ("gte", "eq"): (
+        ChangeClass.TIGHTENS,
+        "gte x passes at every value >= x; eq x passes only at x, a subset",
+    ),
+    ("lte", "lt"): (
+        ChangeClass.TIGHTENS,
+        "lt x excludes the boundary x, which lte includes; the pass set narrows",
+    ),
+    ("lt", "lte"): (
+        ChangeClass.LOOSENS,
+        "lte x includes the boundary x, which lt excludes; the pass set widens",
+    ),
+    ("gte", "gt"): (
+        ChangeClass.TIGHTENS,
+        "gt x excludes the boundary x, which gte includes; the pass set narrows",
+    ),
+    ("gt", "gte"): (
+        ChangeClass.LOOSENS,
+        "gte x includes the boundary x, which gt excludes; the pass set widens",
+    ),
+}
+
+
+#: Scope partial order. Key is (old, new); value is (class, reason).
+#: A pair not listed (and not the equal pair) is UNDECIDABLE.
+_SCOPE_CHANGES: Final[dict[tuple[str, str], tuple[ChangeClass, str]]] = {
+    ("instrument", "pool"): (
+        ChangeClass.TIGHTENS,
+        "a rule evaluated at pool scope applies to every order in the pool; "
+        "instrument scope applies only to orders on one instrument",
+    ),
+    ("pool", "instrument"): (
+        ChangeClass.LOOSENS,
+        "a rule evaluated at instrument scope applies to fewer orders than at "
+        "pool scope",
+    ),
+    ("pool", "global"): (
+        ChangeClass.TIGHTENS,
+        "global scope applies across markets, a superset of one pool",
+    ),
+    ("global", "pool"): (
+        ChangeClass.LOOSENS,
+        "global scope applies across markets, a superset of one pool",
+    ),
+    ("market", "global"): (
+        ChangeClass.TIGHTENS,
+        "global covers every market",
+    ),
+    ("global", "market"): (
+        ChangeClass.LOOSENS,
+        "market scope applies to one market, narrower than global",
+    ),
+    ("pool", "pool_and_consolidated"): (
+        ChangeClass.TIGHTENS,
+        "pool_and_consolidated is a superset of pool",
+    ),
+    ("pool_and_consolidated", "pool"): (
+        ChangeClass.LOOSENS,
+        "pool_and_consolidated is a superset of pool",
+    ),
+    ("consolidated", "pool_and_consolidated"): (
+        ChangeClass.TIGHTENS,
+        "pool_and_consolidated adds the per-pool evaluation to consolidated",
+    ),
+    ("pool_and_consolidated", "consolidated"): (
+        ChangeClass.LOOSENS,
+        "pool_and_consolidated adds the per-pool evaluation to consolidated",
+    ),
+}
+
+
+#: Action transitions not explained by ACTION_PRECEDENCE alone.
+#: ACTION_PRECEDENCE is (KILL, DENY, MODIFY, ALLOW) — so DENY "tighter" than
+#: MODIFY in the sense of ordering, but DENY -> MODIFY can LOOSEN because MODIFY
+#: permits a trade DENY forbade. The table records the pairs the lattice alone
+#: cannot classify.
+_ACTION_CHANGES: Final[dict[tuple[str, str], tuple[ChangeClass, str]]] = {
+    ("DENY", "ALLOW"): (
+        ChangeClass.LOOSENS,
+        "DENY blocks; ALLOW passes",
+    ),
+    ("ALLOW", "DENY"): (
+        ChangeClass.TIGHTENS,
+        "DENY blocks; ALLOW passes",
+    ),
+    ("KILL", "DENY"): (
+        ChangeClass.LOOSENS,
+        "DENY blocks one order; KILL halts the book",
+    ),
+    ("DENY", "KILL"): (
+        ChangeClass.TIGHTENS,
+        "DENY blocks one order; KILL halts the book",
+    ),
+    ("KILL", "MODIFY"): (
+        ChangeClass.LOOSENS,
+        "MODIFY lets the order proceed at a reduced size; KILL halts",
+    ),
+    ("MODIFY", "KILL"): (
+        ChangeClass.TIGHTENS,
+        "MODIFY lets the order proceed at a reduced size; KILL halts",
+    ),
+    ("MODIFY", "ALLOW"): (
+        ChangeClass.LOOSENS,
+        "ALLOW passes without modification; MODIFY requires a reduction",
+    ),
+    ("ALLOW", "MODIFY"): (
+        ChangeClass.TIGHTENS,
+        "ALLOW passes without modification; MODIFY requires a reduction",
+    ),
+    ("DENY", "MODIFY"): (
+        ChangeClass.UNDECIDABLE,
+        "MODIFY may permit a trade DENY forbade (loosening) or reduce to a "
+        "size still denied by another rule (neutral); not decidable without "
+        "facts",
+    ),
+    ("MODIFY", "DENY"): (
+        ChangeClass.UNDECIDABLE,
+        "the direction depends on the size the MODIFY would have produced; "
+        "not decidable without facts",
+    ),
+}
+
+
+def classify_rule_change(
+    old: Rule,
+    new: Rule,
+    field: str,
+    old_value: object,
+    new_value: object,
+) -> tuple[ChangeClass, str]:
+    """Classify a single field change on one rule.
+
+    `field` is the dotted path within the rule. `old_value` and `new_value` are
+    the normalised Python values (use `_normalise()` before calling if in doubt).
+    """
+    if _same(old_value, new_value):
+        return ChangeClass.NEUTRAL, "no change"
+
+    # Fields that never affect the verdict.
+    if field in _ALWAYS_NEUTRAL:
+        return ChangeClass.NEUTRAL, f"{field} does not affect the verdict"
+
+    # Fields whose direction cannot be established from the value.
+    if field in _ALWAYS_UNDECIDABLE:
+        return (
+            ChangeClass.UNDECIDABLE,
+            f"{field} change cannot be ranked as loosening or tightening",
+        )
+
+    if field == "threshold":
+        return _classify_threshold(old, new, old_value, new_value)
+
+    if field == "comparison":
+        return _classify_enum(_COMPARISON_CHANGES, old_value, new_value, "comparison")
+
+    if field == "mode":
+        return _classify_mode(old_value, new_value, old.action)
+
+    if field == "action":
+        return _classify_enum(_ACTION_CHANGES, old_value, new_value, "action")
+
+    if field == "scope":
+        return _classify_enum(_SCOPE_CHANGES, old_value, new_value, "scope")
+
+    if field == "on_missing_input":
+        return _classify_on_missing(old_value, new_value, old.mode)
+
+    if field == "severity":
+        return ChangeClass.NEUTRAL, "severity is routing only (SPEC-P1.3 §4.2)"
+
+    if field == "kill_scope":
+        return _classify_enum(
+            {
+                ("POOL", "GLOBAL"): (
+                    ChangeClass.TIGHTENS,
+                    "GLOBAL halts more than POOL",
+                ),
+                ("GLOBAL", "POOL"): (
+                    ChangeClass.LOOSENS,
+                    "POOL halts less than GLOBAL",
+                ),
+            },
+            old_value,
+            new_value,
+            "kill_scope",
+        )
+
+    if field == "exempts":
+        return _classify_set(
+            old_value, new_value, old.action, "exempts",
+            add_is_loosening=old.action is RuleAction.ALLOW,
+        )
+
+    if field in ("allowed_values", "allowed_values_emergency"):
+        return _classify_set(
+            old_value, new_value, old.action, field, add_is_loosening=True
+        )
+
+    if field == "disallowed_values":
+        return _classify_set(
+            old_value, new_value, old.action, field, add_is_loosening=False
+        )
+
+    # An unknown field is never silent.
+    return (
+        ChangeClass.UNDECIDABLE,
+        f"field {field!r} is not in the classification table",
+    )
+
+
+# ---- threshold --------------------------------------------------------------
+
+
+def _classify_threshold(
+    old: Rule, new: Rule, old_value: object, new_value: object
+) -> tuple[ChangeClass, str]:
+    """A raised threshold loosens an `lte`/`lt` rule and tightens a `gte`/`gt`
+    rule. For a non-ordinal comparison the direction cannot be established.
+
+    `eq` is not ordinal: an `eq` threshold change is UNDECIDABLE.
+    """
+    try:
+        old_d = _normalise(old_value)
+        new_d = _normalise(new_value)
+    except Exception:  # noqa: BLE001 - a non-numeric threshold is a load error
+        return (
+            ChangeClass.UNDECIDABLE,
+            "threshold values could not be normalised to Decimal",
+        )
+
+    if old.comparison in (Comparison.LTE, Comparison.LT):
+        if new_d > old_d:  # type: ignore[operator]
+            return (
+                ChangeClass.LOOSENS,
+                f"threshold raised {old_value!r} -> {new_value!r} on an "
+                f"{old.comparison.value} rule",
+            )
+        if new_d < old_d:  # type: ignore[operator]
+            return (
+                ChangeClass.TIGHTENS,
+                f"threshold lowered {old_value!r} -> {new_value!r} on an "
+                f"{old.comparison.value} rule",
+            )
+        return ChangeClass.NEUTRAL, "no change"
+
+    if old.comparison in (Comparison.GTE, Comparison.GT):
+        if new_d < old_d:  # type: ignore[operator]
+            return (
+                ChangeClass.LOOSENS,
+                f"threshold lowered {old_value!r} -> {new_value!r} on a "
+                f"{old.comparison.value} rule",
+            )
+        if new_d > old_d:  # type: ignore[operator]
+            return (
+                ChangeClass.TIGHTENS,
+                f"threshold raised {old_value!r} -> {new_value!r} on a "
+                f"{old.comparison.value} rule",
+            )
+        return ChangeClass.NEUTRAL, "no change"
+
+    return (
+        ChangeClass.UNDECIDABLE,
+        f"threshold change {old_value!r} -> {new_value!r} on a "
+        f"{old.comparison.value} rule has no rankable direction",
+    )
+
+
+# ---- comparison / action / scope / kill_scope (table-driven) ----------------
+
+
+def _classify_enum(
+    table: dict[tuple[str, str], tuple[ChangeClass, str]],
+    old_value: object,
+    new_value: object,
+    field_name: str,
+) -> tuple[ChangeClass, str]:
+    a = _as_str(old_value)
+    b = _as_str(new_value)
+    if a == b:
+        return ChangeClass.NEUTRAL, "no change"
+    if (a, b) in table:
+        return table[(a, b)]
+    return (
+        ChangeClass.UNDECIDABLE,
+        f"{field_name} change {a!r} -> {b!r} is not in the classification table",
+    )
+
+
+# ---- mode -------------------------------------------------------------------
+
+
+def _classify_mode(
+    old_value: object, new_value: object, action: RuleAction
+) -> tuple[ChangeClass, str]:
+    """An `ALLOW` rule in `enforce` mode grants an exemption; in `monitor` it
+    does not. So `enforce -> monitor` on an `ALLOW` rule is a TIGHTENING, and
+    `monitor -> enforce` on an `ALLOW` rule is a LOOSENING.
+
+    On every other action, `enforce -> monitor` LOOSENS and `monitor -> enforce`
+    TIGHTENS.
+    """
+    a = _as_str(old_value)
+    b = _as_str(new_value)
+    if a == b:
+        return ChangeClass.NEUTRAL, "no change"
+    if a == "enforce" and b == "monitor":
+        if action is RuleAction.ALLOW:
+            return (
+                ChangeClass.TIGHTENS,
+                "an ALLOW rule in monitor mode no longer grants its exemptions",
+            )
+        return (
+            ChangeClass.LOOSENS,
+            f"a {action.value} rule in monitor mode no longer binds the verdict",
+        )
+    if a == "monitor" and b == "enforce":
+        if action is RuleAction.ALLOW:
+            return (
+                ChangeClass.LOOSENS,
+                "an ALLOW rule in enforce mode now grants its exemptions",
+            )
+        return (
+            ChangeClass.TIGHTENS,
+            f"a {action.value} rule in enforce mode now binds the verdict",
+        )
+    return (
+        ChangeClass.UNDECIDABLE,
+        f"mode change {a!r} -> {b!r} is not in the classification table",
+    )
+
+
+# ---- on_missing_input -------------------------------------------------------
+
+
+def _classify_on_missing(
+    old_value: object, new_value: object, mode: RuleMode
+) -> tuple[ChangeClass, str]:
+    if mode is RuleMode.MONITOR:
+        return (
+            ChangeClass.NEUTRAL,
+            "a monitor rule cannot bind; on_missing_input cannot affect the "
+            "verdict",
+        )
+    a = _as_str(old_value)
+    b = _as_str(new_value)
+    if a == b:
+        return ChangeClass.NEUTRAL, "no change"
+    idx = {a.value: i for i, a in enumerate(ACTION_PRECEDENCE)}
+    if a not in idx or b not in idx:
+        return (
+            ChangeClass.UNDECIDABLE,
+            f"on_missing_input {a!r} -> {b!r} is not in the action lattice",
+        )
+    if idx[a] > idx[b]:
+        # Lower index = more severe. Moving to a more severe action tightens.
+        return (
+            ChangeClass.TIGHTENS,
+            f"on_missing_input {a!r} -> {b!r} moves to a more severe action",
+        )
+    return (
+        ChangeClass.LOOSENS,
+        f"on_missing_input {a!r} -> {b!r} moves to a less severe action",
+    )
+
+
+# ---- value-set fields -------------------------------------------------------
+
+
+def _classify_set(
+    old_value: object,
+    new_value: object,
+    action: RuleAction,
+    field_name: str,
+    *,
+    add_is_loosening: bool,
+) -> tuple[ChangeClass, str]:
+    a = set(_normalise(v) for v in (old_value or ()))
+    b = set(_normalise(v) for v in (new_value or ()))
+    if a == b:
+        return ChangeClass.NEUTRAL, "no change (set-equal)"
+    added = b - a
+    removed = a - b
+    if added and not removed:
+        cls = ChangeClass.LOOSENS if add_is_loosening else ChangeClass.TIGHTENS
+        return (
+            cls,
+            f"{field_name}: added {sorted(map(str, added))}",
+        )
+    if removed and not added:
+        cls = ChangeClass.TIGHTENS if add_is_loosening else ChangeClass.LOOSENS
+        return (
+            cls,
+            f"{field_name}: removed {sorted(map(str, removed))}",
+        )
+    if action is not RuleAction.ALLOW and field_name == "exempts":
+        return (
+            ChangeClass.UNDECIDABLE,
+            f"{field_name} changed on a rule that is not ALLOW; the direction "
+            f"depends on the grant semantics",
+        )
+    # Both added and removed, or a swap.
+    return (
+        ChangeClass.UNDECIDABLE,
+        f"{field_name} both added and removed values; direction not provable",
+    )
+
+
+# ---- helpers ----------------------------------------------------------------
+
+
+def _as_str(value: object) -> str:
+    if isinstance(value, enum.Enum):
+        return str(value.value)
+    return str(value)
+
+
+# =============================================================================
+# 5. THE DIFF FUNCTION
+# =============================================================================
+
+
+def diff_policies(old: PolicyDocument, new: PolicyDocument) -> PolicyDiff:
+    """The complete change list between two policy documents.
+
+    Pure function. No I/O. Same inputs -> same outputs. Reports at (rule_id,
+    field) granularity: one RuleChange per field, one RuleAddRemove per rule
+    added or removed. Every field on Rule is classified (see classify_rule_change).
+    """
+    if old.governance != new.governance:
+        raise PolicyGovernanceError(
+            "governance change cannot be approved by any count. A change to "
+            "min_approvals_to_*, risk_deny_override_permitted, approver_roles "
+            "or signature is a constitutional amendment; it does not travel "
+            "through the policy diff path."
+        )
+
+    old_by_id = {r.id: r for r in old.rules}
+    new_by_id = {r.id: r for r in new.rules}
+
+    changes: list[RuleChange] = []
+    rules_added: list[RuleAddRemove] = []
+    rules_removed: list[RuleAddRemove] = []
+    ignored_count = 0
+
+    # Every field on Rule, in a stable order so the diff bytes are reproducible.
+    FIELDS: tuple[str, ...] = (
+        "action",
+        "allowed_values",
+        "allowed_values_emergency",
+        "allowed_values_ref",
+        "authority",
+        "comparison",
+        "description",
+        "disallowed_values",
+        "exempts",
+        "inputs",
+        "kill_scope",
+        "measurement.basis",
+        "measurement.window",
+        "measurement.timing",
+        "modify.target",
+        "modify.to",
+        "mode",
+        "notes",
+        "on_missing_input",
+        "scope",
+        "severity",
+        "threshold",
+        "threshold_input",
+        "threshold_ref",
+    )
+
+    for rid in sorted(set(old_by_id) | set(new_by_id)):
+        if rid in old_by_id and rid not in new_by_id:
+            r = old_by_id[rid]
+            cls, reason = _classify_add_remove(r, added=False)
+            rules_removed.append(
+                RuleAddRemove(
+                    rule_id=rid,
+                    kind="removed",
+                    rule_repr=_rule_repr(r),
+                    change_class=cls,
+                    reason=reason,
+                )
+            )
+            continue
+        if rid in new_by_id and rid not in old_by_id:
+            r = new_by_id[rid]
+            cls, reason = _classify_add_remove(r, added=True)
+            rules_added.append(
+                RuleAddRemove(
+                    rule_id=rid,
+                    kind="added",
+                    rule_repr=_rule_repr(r),
+                    change_class=cls,
+                    reason=reason,
+                )
+            )
+            continue
+
+        old_r = old_by_id[rid]
+        new_r = new_by_id[rid]
+        for field in FIELDS:
+            o = _get_field(old_r, field)
+            n = _get_field(new_r, field)
+            if _same(o, n):
+                continue
+            cls, reason = classify_rule_change(old_r, new_r, field, o, n)
+            if cls is ChangeClass.NEUTRAL:
+                ignored_count += 1
+                continue
+            changes.append(
+                RuleChange(
+                    rule_id=rid,
+                    field=field,
+                    old_repr=_repr(o),
+                    new_repr=_repr(n),
+                    change_class=cls,
+                    reason=reason,
+                )
+            )
+
+    return PolicyDiff(
+        old_content_hash=old.metadata.get("content_hash", "")
+        if isinstance(old.metadata, dict)
+        else "",
+        new_content_hash=new.metadata.get("content_hash", "")
+        if isinstance(new.metadata, dict)
+        else "",
+        old_policy_version=old.policy_version,
+        new_policy_version=new.policy_version,
+        changes=tuple(changes),
+        rules_added=tuple(rules_added),
+        rules_removed=tuple(rules_removed),
+        ignored_count=ignored_count,
+    )
+
+
+def _classify_add_remove(rule: Rule, *, added: bool) -> tuple[ChangeClass, str]:
+    """A rule added or removed. Classification per SPEC-P1.3-CONFIG-DIFF §3."""
+    if rule.mode is RuleMode.MONITOR:
+        return (
+            ChangeClass.NEUTRAL,
+            "monitor rule does not bind the verdict",
+        )
+    if rule.action in (RuleAction.DENY, RuleAction.KILL):
+        if added:
+            return (
+                ChangeClass.TIGHTENS,
+                f"new {rule.action.value} rule binds the verdict",
+            )
+        return (
+            ChangeClass.LOOSENS,
+            f"{rule.action.value} rule removed; fewer rules can block",
+        )
+    if rule.action is RuleAction.MODIFY:
+        return (
+            ChangeClass.UNDECIDABLE,
+            "a MODIFY rule may substitute for a DENY or an ALLOW; the "
+            "direction depends on facts",
+        )
+    if rule.action is RuleAction.ALLOW:
+        if rule.exempts:
+            if added:
+                return (
+                    ChangeClass.LOOSENS,
+                    f"new ALLOW rule grants exemptions {sorted(rule.exempts)}",
+                )
+            return (
+                ChangeClass.TIGHTENS,
+                f"ALLOW rule removed; exemptions {sorted(rule.exempts)} are "
+                f"withdrawn",
+            )
+        return (
+            ChangeClass.NEUTRAL,
+            "an ALLOW rule with no exemptions does not change the verdict",
+        )
+    return (
+        ChangeClass.UNDECIDABLE,
+        f"action {rule.action.value} not in the classification table",
+    )
+
+
+def _get_field(rule: Rule, field: str) -> object:
+    """Read a dotted field from a Rule without invoking pydantic's getattr twice."""
+    if "." in field:
+        head, tail = field.split(".", 1)
+        obj = getattr(rule, head, None)
+        if obj is None:
+            return None
+        return getattr(obj, tail, None)
+    return getattr(rule, field, None)
+
+
+def _repr(value: object) -> str:
+    if value is None:
+        return "None"
+    if isinstance(value, Decimal):
+        return str(value.normalize())
+    if isinstance(value, enum.Enum):
+        return str(value.value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_repr(v) for v in value) + "]"
+    return str(value)
+
+
+def _rule_repr(rule: Rule) -> str:
+    return f"{rule.id}(action={rule.action.value}, mode={rule.mode.value}, " \
+           f"comparison={rule.comparison.value}, scope={rule.scope.value})"
+
+
+# =============================================================================
+# 6. THE APPROVAL FUNCTION (v2)
+# =============================================================================
+
+
+def assert_change_authorised_v2(
+    diff: PolicyDiff,
+    approver_ids: tuple[str, ...],
+    governance: Governance,
+) -> None:
+    """The two-person rule, extended to every change the diff detects.
+
+    Distinct approver IDENTITIES, not distinct approvals: two signatures from one
+    person are one person's judgement twice.
+
+    An UNDECIDABLE change requires approval: a direction that cannot be
+    established is a change whose risk to the control cannot be bounded.
+    """
+    distinct = {a.strip().lower() for a in approver_ids if a.strip()}
+    loosening_changes = diff.loosening_changes()
+    loosening_adds = diff.loosening_add_removes()
+    total = len(loosening_changes) + len(loosening_adds)
+    if total == 0:
+        return
+    if len(distinct) < governance.min_approvals_to_loosen:
+        # Name each loosening individually so an auditor sees the full list.
+        detail_lines: list[str] = []
+        for c in loosening_changes:
+            detail_lines.append(
+                f"  {c.rule_id}.{c.field}: {c.old_repr} -> {c.new_repr} "
+                f"[{c.change_class.value}: {c.reason}]"
+            )
+        for a in loosening_adds:
+            detail_lines.append(
+                f"  {a.rule_id} ({a.kind}) [{a.change_class.value}: {a.reason}]"
+            )
+        raise PolicyGovernanceError(
+            f"{total} loosening change(s) with "
+            f"{len(distinct)} distinct approver(s); "
+            f"{governance.min_approvals_to_loosen} required. Tightening needs "
+            f"none.\n" + "\n".join(detail_lines)
+        )
+
+
+__all__ = [
+    "ChangeClass",
+    "REQUIRES_APPROVAL",
+    "RuleChange",
+    "RuleAddRemove",
+    "PolicyDiff",
+    "diff_policies",
+    "classify_rule_change",
+    "assert_change_authorised_v2",
+]
+```
+
+---
+
+```python
+# tests/verify_p13_config_diff.py
+"""SPEC-P1.3-CONFIG-DIFF v0.1 verification.
+
+Closes X5R-G2 (two-person rule defined for a threshold only) and X5R-G9
+(five mutations pass every suite).
+
+Uses the require() pattern from tests/verify_p11_x5_conditions.py:
+no bare `assert` anywhere, so the suite holds under `python -O`.
+"""
+
+import sys
+from decimal import Decimal as D
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+from config import loader as L  # noqa: E402
+from config import policy_diff as PD  # noqa: E402
+from config.loader import (  # noqa: E402
+    Comparison,
+    KillScope,
+    PolicyDocument,
+    PolicyGovernanceError,
+    RuleAction,
+    RuleMode,
+    RuleScope,
+)
+
+PASS: list[str] = []
+FAIL: list[str] = []
+
+
+def require(cond: bool, msg: str = "") -> None:
+    if not cond:
+        raise AssertionError(msg)
+
+
+def raises(exc, fn, label: str = ""):
+    try:
+        fn()
+    except exc:
+        return
+    except Exception as e:  # noqa: BLE001
+        raise AssertionError(
+            f"{label}expected {exc.__name__}, got {type(e).__name__}: {e}"
+        ) from e
+    raise AssertionError(f"{label}expected {exc.__name__}, nothing raised")
+
+
+def check(name: str, fn) -> None:
+    try:
+        fn()
+        PASS.append(name)
+    except Exception as e:  # noqa: BLE001
+        FAIL.append(f"{name}: {type(e).__name__}: {e}")
+
+
+# ===========================================================================
+# CONSTITUTIONAL PINS
+#
+# Hand-curated from config/policy.yaml. NOT regenerated automatically: a golden
+# file that regenerates itself is not a golden file. To change a pin, edit this
+# dict in the same commit as the policy change, and the reviewer sees the diff.
+#
+# Fields pinned per rule: action, mode, comparison, scope, threshold (when not
+# None), kill_scope (when set). Threshold values are Decimal(str(...)).
+# ===========================================================================
+
+CONSTITUTIONAL_PINS: dict[str, dict[str, object]] = {
+    "EXP-001": dict(action="DENY", mode="enforce",
+                    comparison="lte", scope="pool",
+                    threshold=D("0.050")),
+    "EXP-002": dict(action="DENY", mode="enforce",
+                    comparison="lte", scope="pool",
+                    threshold=D("0.200")),
+    "EXP-003": dict(action="DENY", mode="enforce",
+                    comparison="lte", scope="pool",
+                    threshold=D("2.0")),
+    "EXP-004": dict(action="DENY", mode="enforce",
+                    comparison="lte", scope="pool",
+                    threshold=D("1.0")),
+    "EXP-005": dict(action="DENY", mode="enforce",
+                    comparison="lte", scope="pool",
+                    threshold=D("1.0")),
+    "EXP-006": dict(action="MODIFY", mode="enforce",
+                    comparison="lte", scope="pool",
+                    threshold=D("0.075")),
+    "LOSS-001": dict(action="DENY", mode="enforce",
+                     comparison="lte", scope="pool_and_consolidated",
+                     threshold=D("0.020")),
+    "LOSS-002": dict(action="DENY", mode="enforce",
+                     comparison="lte", scope="pool_and_consolidated",
+                     threshold=D("0.050")),
+    "LOSS-003": dict(action="KILL", mode="enforce",
+                     comparison="lte", scope="pool",
+                     threshold=D("0.100"), kill_scope="POOL"),
+    "LOSS-004": dict(action="KILL", mode="enforce",
+                     comparison="lte", scope="consolidated",
+                     threshold=D("0.100"), kill_scope="GLOBAL"),
+    "SIZE-001": dict(action="MODIFY", mode="enforce",
+                     comparison="lte", scope="pool",
+                     threshold=D("0.010")),
+    "LIQ-001": dict(action="MODIFY", mode="enforce",
+                    comparison="lte", scope="instrument",
+                    threshold=D("0.010")),
+    "RATE-001": dict(action="DENY", mode="enforce",
+                     comparison="lte", scope="global",
+                     threshold=D("20")),
+    "RATE-002": dict(action="DENY", mode="enforce",
+                     comparison="lte", scope="strategy",
+                     threshold=D("10")),
+    "STOP-001": dict(action="DENY", mode="enforce",
+                     comparison="eq", scope="instrument",
+                     threshold=D("2.5")),
+    "EXEC-001": dict(action="DENY", mode="enforce",
+                     comparison="in", scope="instrument"),
+    "KILL-001": dict(action="DENY", mode="enforce",
+                     comparison="in", scope="global"),
+    "KILL-002": dict(action="ALLOW", mode="enforce",
+                     comparison="eq", scope="global"),
+}
+
+
+def _as_str(value: object) -> str:
+    import enum
+    if isinstance(value, enum.Enum):
+        return str(value.value)
+    return str(value)
+
+
+def _as_decimal(value: object) -> D | None:
+    if value is None:
+        return None
+    return D(str(value))
+
+
+# ===========================================================================
+# THE REAL FILE
+# ===========================================================================
+
+CFG = L.PolicyLoader(REPO_ROOT / "config").load(require_signature=False)
+DOC = CFG.document
+
+
+# ===========================================================================
+# CONSTITUTIONAL PINS — each field separately
+# ===========================================================================
+
+
+def _pin_field(rule, expected: object, field: str) -> None:
+    actual = getattr(rule, field)
+    if isinstance(expected, D) or isinstance(actual, (int, D)):
+        if _as_decimal(actual) != _as_decimal(expected):
+            raise AssertionError(
+                f"{rule.id}.{field}: pinned {expected!r}, got {actual!r}"
+            )
+        return
+    if _as_str(actual) != _as_str(expected):
+        raise AssertionError(
+            f"{rule.id}.{field}: pinned {_as_str(expected)!r}, "
+            f"got {_as_str(actual)!r}"
+        )
+
+
+def t_const_action_pinned_for_every_constitutional_rule():
+    for rid, pin in CONSTITUTIONAL_PINS.items():
+        if "action" in pin:
+            _pin_field(DOC.rule(rid), pin["action"], "action")
+
+
+def t_const_mode_pinned_for_every_constitutional_rule():
+    for rid, pin in CONSTITUTIONAL_PINS.items():
+        if "mode" in pin:
+            _pin_field(DOC.rule(rid), pin["mode"], "mode")
+
+
+def t_const_comparison_pinned_for_every_constitutional_rule():
+    for rid, pin in CONSTITUTIONAL_PINS.items():
+        if "comparison" in pin:
+            _pin_field(DOC.rule(rid), pin["comparison"], "comparison")
+
+
+def t_const_scope_pinned_for_every_constitutional_rule():
+    for rid, pin in CONSTITUTIONAL_PINS.items():
+        if "scope" in pin:
+            _pin_field(DOC.rule(rid), pin["scope"], "scope")
+
+
+def t_const_threshold_pinned_for_every_constitutional_rule_with_a_threshold():
+    for rid, pin in CONSTITUTIONAL_PINS.items():
+        if "threshold" in pin:
+            _pin_field(DOC.rule(rid), pin["threshold"], "threshold")
+
+
+def t_const_kill_scope_pinned_for_kill_rules():
+    for rid, pin in CONSTITUTIONAL_PINS.items():
+        if "kill_scope" in pin:
+            _pin_field(DOC.rule(rid), pin["kill_scope"], "kill_scope")
+
+
+# ===========================================================================
+# THE FIVE MUTATIONS — each must be detected by the diff
+# ===========================================================================
+
+
+def _mutate(rule_id: str, field: str, new_value: object) -> PD.PolicyDiff:
+    """Build a new PolicyDocument by patching a field on one rule, then diff."""
+    doc_dict = DOC.model_dump(mode="python")
+    rules = list(doc_dict["rules"])
+    for r in rules:
+        if r["id"] == rule_id:
+            if "." in field:
+                head, tail = field.split(".", 1)
+                r[head] = dict(r[head])
+                r[head][tail] = new_value
+            else:
+                r[field] = new_value
+            break
+    else:
+        raise AssertionError(f"rule {rule_id} not in document")
+    doc_dict["rules"] = rules
+    mutated = PolicyDocument.model_validate(doc_dict)
+    return PD.diff_policies(DOC, mutated)
+
+
+def t_mutation_exp002_action_allow():
+    diff = _mutate("EXP-002", "action", "ALLOW")
+    require(diff.requires_approval(),
+            "EXP-002.action -> ALLOW must require approval")
+    hits = [c for c in diff.changes
+            if c.rule_id == "EXP-002" and c.field == "action"]
+    require(hits, "EXP-002.action change not in diff.changes")
+    require(hits[0].change_class in (PD.ChangeClass.LOOSENS,
+                                    PD.ChangeClass.UNDECIDABLE),
+            f"EXP-002.action classified {hits[0].change_class.value}")
+
+
+def t_mutation_loss001_mode_monitor():
+    diff = _mutate("LOSS-001", "mode", "monitor")
+    require(diff.requires_approval(),
+            "LOSS-001.mode -> monitor must require approval")
+    hits = [c for c in diff.changes
+            if c.rule_id == "LOSS-001" and c.field == "mode"]
+    require(hits, "LOSS-001.mode change not in diff.changes")
+    require(hits[0].change_class is PD.ChangeClass.LOOSENS,
+            f"LOSS-001.mode classified {hits[0].change_class.value}")
+
+
+def t_mutation_loss004_threshold_20pct():
+    diff = _mutate("LOSS-004", "threshold", D("0.200"))
+    require(diff.requires_approval(),
+            "LOSS-004.threshold 0.100 -> 0.200 must require approval")
+    hits = [c for c in diff.changes
+            if c.rule_id == "LOSS-004" and c.field == "threshold"]
+    require(hits, "LOSS-004.threshold change not in diff.changes")
+    require(hits[0].change_class is PD.ChangeClass.LOOSENS,
+            f"LOSS-004.threshold classified {hits[0].change_class.value}")
+
+
+def t_mutation_exec001_allows_market():
+    diff = _mutate("EXEC-001", "allowed_values", ("LIMIT", "MARKET"))
+    require(diff.requires_approval(),
+            "EXEC-001.allowed_values +MARKET must require approval")
+    hits = [c for c in diff.changes
+            if c.rule_id == "EXEC-001" and c.field == "allowed_values"]
+    require(hits, "EXEC-001.allowed_values change not in diff.changes")
+    require(hits[0].change_class is PD.ChangeClass.LOOSENS,
+            f"EXEC-001.allowed_values classified {hits[0].change_class.value}")
+
+
+def t_mutation_stop001_comparison_lte():
+    diff = _mutate("STOP-001", "comparison", "lte")
+    require(diff.requires_approval(),
+            "STOP-001.comparison eq -> lte must require approval")
+    hits = [c for c in diff.changes
+            if c.rule_id == "STOP-001" and c.field == "comparison"]
+    require(hits, "STOP-001.comparison change not in diff.changes")
+    require(hits[0].change_class is PD.ChangeClass.LOOSENS,
+            f"STOP-001.comparison classified {hits[0].change_class.value}")
+
+
+# ===========================================================================
+# DIRECTIONAL CLASSIFICATION — both directions, both cases
+# ===========================================================================
+
+
+def t_raised_lte_threshold_loosens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-001"), DOC.rule("EXP-001"),
+        "threshold", D("0.050"), D("0.060"),
+    )
+    require(cls is PD.ChangeClass.LOOSENS, cls.value)
+
+
+def t_raised_gte_threshold_tightens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("PORT-001"), DOC.rule("PORT-001"),
+        "threshold", D("0.20"), D("0.25"),
+    )
+    require(cls is PD.ChangeClass.TIGHTENS, cls.value)
+
+
+def t_lowered_gte_threshold_loosens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("PORT-001"), DOC.rule("PORT-001"),
+        "threshold", D("0.20"), D("0.15"),
+    )
+    require(cls is PD.ChangeClass.LOOSENS, cls.value)
+
+
+def t_lowered_lte_threshold_tightens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-001"), DOC.rule("EXP-001"),
+        "threshold", D("0.050"), D("0.040"),
+    )
+    require(cls is PD.ChangeClass.TIGHTENS, cls.value)
+
+
+def t_threshold_int_vs_decimal_is_neutral():
+    """RATE-001 is int 20; Decimal('20.000') is the same threshold."""
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("RATE-001"), DOC.rule("RATE-001"),
+        "threshold", 20, D("20.000"),
+    )
+    require(cls is PD.ChangeClass.NEUTRAL, cls.value)
+
+
+def t_comparison_eq_to_lte_loosens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("STOP-001"), DOC.rule("STOP-001"),
+        "comparison", Comparison.EQ, Comparison.LTE,
+    )
+    require(cls is PD.ChangeClass.LOOSENS, cls.value)
+
+
+def t_comparison_lte_to_eq_tightens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("STOP-001"), DOC.rule("STOP-001"),
+        "comparison", Comparison.LTE, Comparison.EQ,
+    )
+    require(cls is PD.ChangeClass.TIGHTENS, cls.value)
+
+
+def t_comparison_lt_to_gt_is_undecidable():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("STOP-001"), DOC.rule("STOP-001"),
+        "comparison", Comparison.LT, Comparison.GT,
+    )
+    require(cls is PD.ChangeClass.UNDECIDABLE, cls.value)
+
+
+def t_mode_enforce_to_monitor_deny_loosens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("LOSS-001"), DOC.rule("LOSS-001"),
+        "mode", RuleMode.ENFORCE, RuleMode.MONITOR,
+    )
+    require(cls is PD.ChangeClass.LOOSENS, cls.value)
+
+
+def t_mode_enforce_to_monitor_allow_tightens():
+    """An ALLOW rule in enforce mode grants; in monitor mode it does not."""
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("KILL-002"), DOC.rule("KILL-002"),
+        "mode", RuleMode.ENFORCE, RuleMode.MONITOR,
+    )
+    require(cls is PD.ChangeClass.TIGHTENS, cls.value)
+
+
+def t_mode_monitor_to_enforce_deny_tightens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("PORT-002"), DOC.rule("PORT-002"),
+        "mode", RuleMode.MONITOR, RuleMode.ENFORCE,
+    )
+    require(cls is PD.ChangeClass.TIGHTENS, cls.value)
+
+
+def t_action_deny_to_allow_loosens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-002"), DOC.rule("EXP-002"),
+        "action", RuleAction.DENY, RuleAction.ALLOW,
+    )
+    require(cls is PD.ChangeClass.LOOSENS, cls.value)
+
+
+def t_action_deny_to_modify_is_undecidable():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-002"), DOC.rule("EXP-002"),
+        "action", RuleAction.DENY, RuleAction.MODIFY,
+    )
+    require(cls is PD.ChangeClass.UNDECIDABLE, cls.value)
+
+
+def t_action_kill_to_deny_loosens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("LOSS-003"), DOC.rule("LOSS-003"),
+        "action", RuleAction.KILL, RuleAction.DENY,
+    )
+    require(cls is PD.ChangeClass.LOOSENS, cls.value)
+
+
+def t_scope_pool_to_global_tightens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-001"), DOC.rule("EXP-001"),
+        "scope", RuleScope.POOL, RuleScope.GLOBAL,
+    )
+    require(cls is PD.ChangeClass.TIGHTENS, cls.value)
+
+
+def t_scope_pool_to_instrument_loosens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-001"), DOC.rule("EXP-001"),
+        "scope", RuleScope.POOL, RuleScope.INSTRUMENT,
+    )
+    require(cls is PD.ChangeClass.LOOSENS, cls.value)
+
+
+def t_scope_pool_to_consolidated_is_undecidable():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-001"), DOC.rule("EXP-001"),
+        "scope", RuleScope.POOL, RuleScope.CONSOLIDATED,
+    )
+    require(cls is PD.ChangeClass.UNDECIDABLE, cls.value)
+
+
+def t_kill_scope_pool_to_global_tightens():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("LOSS-003"), DOC.rule("LOSS-003"),
+        "kill_scope", KillScope.POOL, KillScope.GLOBAL,
+    )
+    require(cls is PD.ChangeClass.TIGHTENS, cls.value)
+
+
+def t_severity_change_is_neutral():
+    cls, _ = PD.classify_rule_change(
+        DOC.rule("EXP-001"), DOC.rule("EXP-001"),
+        "severity", "CRITICAL", "HIGH",
+    )
+    require(cls is PD.ChangeClass.NEUTRAL, cls.value)
+
+
+def t_unknown_field_is_undecidable():
+    cls, reason = PD.classify_rule_change(
+        DOC.rule("EXP-001"), DOC.rule("EXP-001"),
+        "some_new_field", "a", "b",
+    )
+    require(cls is PD.ChangeClass.UNDECIDABLE, cls.value)
+    require("not in the classification table" in reason, reason)
+
+
+# ===========================================================================
+# ADD / REMOVE
+# ===========================================================================
+
+
+def t_removing_a_deny_rule_loosens():
+    doc_dict = DOC.model_dump(mode="python")
+    doc_dict["rules"] = [r for r in doc_dict["rules"] if r["id"] != "EXP-001"]
+    mutated = PolicyDocument.model_validate(doc_dict)
+    diff = PD.diff_policies(DOC, mutated)
+    require(diff.requires_approval(),
+            "removing EXP-001 must require approval")
+    require(any(a.rule_id == "EXP-001" and a.kind == "removed"
+                for a in diff.rules_removed), diff.rules_removed)
+
+
+def t_adding_a_deny_rule_tightens():
+    doc_dict = DOC.model_dump(mode="python")
+    extra = {
+        "id": "XXX-001",
+        "description": "A new deny rule added for the test",
+        "authority": "test",
+        "scope": "pool",
+        "mode": "enforce",
+        "severity": "LOW",
+        "threshold": D("1"),
+        "comparison": "lte",
+        "measurement": {"basis": "x", "window": "point_in_time",
+                         "timing": "pre_trade"},
+        "inputs": ["x"],
+        "action": "DENY",
+        "on_missing_input": "DENY",
+    }
+    doc_dict["rules"] = list(doc_dict["rules"]) + [extra]
+    mutated = PolicyDocument.model_validate(doc_dict)
+    diff = PD.diff_policies(DOC, mutated)
+    require(not diff.requires_approval(),
+            "adding a DENY rule must not require approval")
+    require(any(a.rule_id == "XXX-001" and a.kind == "added"
+                for a in diff.rules_added), diff.rules_added)
+    added = [a for a in diff.rules_added if a.rule_id == "XXX-001"][0]
+    require(added.change_class is PD.ChangeClass.TIGHTENS,
+            added.change_class.value)
+
+
+def t_removing_an_allow_rule_with_exempts_tightens():
+    doc_dict = DOC.model_dump(mode="python")
+    doc_dict["rules"] = [r for r in doc_dict["rules"] if r["id"] != "KILL-002"]
+    mutated = PolicyDocument.model_validate(doc_dict)
+    diff = PD.diff_policies(DOC, mutated)
+    removed = [a for a in diff.rules_removed if a.rule_id == "KILL-002"]
+    require(removed, removed)
+    require(removed[0].change_class is PD.ChangeClass.TIGHTENS,
+            removed[0].change_class.value)
+    require(not diff.requires_approval(),
+            "removing an ALLOW rule tightens, must not require approval")
+
+
+def t_removing_a_monitor_rule_is_neutral():
+    doc_dict = DOC.model_dump(mode="python")
+    doc_dict["rules"] = [r for r in doc_dict["rules"]
+                         if r["id"] not in ("PORT-002", "CASH-002")]
+    mutated = PolicyDocument.model_validate(doc_dict)
+    diff = PD.diff_policies(DOC, mutated)
+    removed = [a for a in diff.rules_removed
+               if a.rule_id in ("PORT-002", "CASH-002")]
+    require(len(removed) == 2, removed)
+    for a in removed:
+        require(a.change_class is PD.ChangeClass.NEUTRAL, a.change_class.value)
+
+
+# ===========================================================================
+# APPROVAL FUNCTION
+# ===========================================================================
+
+
+def t_two_person_rule_applies_to_every_loosening():
+    diff = _mutate("EXP-002", "action", "ALLOW")
+    raises(PolicyGovernanceError,
+           lambda: PD.assert_change_authorised_v2(diff, ("js",), DOC.governance),
+           "one approver: ")
+    raises(PolicyGovernanceError,
+           lambda: PD.assert_change_authorised_v2(diff, ("js", "JS "), DOC.governance),
+           "same person twice: ")
+    PD.assert_change_authorised_v2(diff, ("js", "second-owner"), DOC.governance)
+
+
+def t_tightening_needs_no_approval():
+    diff = _mutate("EXP-001", "threshold", D("0.040"))
+    require(not diff.requires_approval(), diff.changes)
+    PD.assert_change_authorised_v2(diff, (), DOC.governance)
+
+
+def t_undecidable_requires_approval():
+    diff = _mutate("EXP-002", "action", "MODIFY")
+    require(diff.requires_approval(),
+            "UNDECIDABLE must require approval")
+    raises(PolicyGovernanceError,
+           lambda: PD.assert_change_authorised_v2(diff, ("js",), DOC.governance),
+           "one approver on UNDECIDABLE: ")
+    PD.assert_change_authorised_v2(diff, ("js", "second-owner"), DOC.governance)
+
+
+def t_governance_change_is_unconditionally_refused():
+    doc_dict = DOC.model_dump(mode="python")
+    doc_dict["governance"] = dict(doc_dict["governance"])
+    # min_approvals_to_loosen 2 -> 1 would be rejected by the model, so we
+    # only need to prove that *any* governance change is refused by the diff
+    # path. Use a change the model permits: approver_roles.
+    doc_dict["governance"]["approver_roles"] = ["OWNER", "SECOND_OWNER"]
+    mutated = PolicyDocument.model_validate(doc_dict)
+    raises(PolicyGovernanceError,
+           lambda: PD.diff_policies(DOC, mutated),
+           "governance change: ")
+
+
+# ===========================================================================
+# THE DIFF IS COMPLETE
+# ===========================================================================
+
+
+def t_diff_is_complete_when_nothing_changed():
+    diff = PD.diff_policies(DOC, DOC)
+    require(len(diff.changes) == 0, diff.changes)
+    require(len(diff.rules_added) == 0, diff.rules_added)
+    require(len(diff.rules_removed) == 0, diff.rules_removed)
+    require(not diff.requires_approval(), "identity diff requires approval")
+
+
+def t_diff_is_repeatable():
+    diff1 = _mutate("EXP-002", "action", "ALLOW")
+    diff2 = _mutate("EXP-002", "action", "ALLOW")
+    require(diff1 == diff2, "the diff must be deterministic")
+
+
+# ===========================================================================
+# THE V1-COMPATIBILITY SHIM IS NOT USED OUTSIDE THE DIFF MODULE
+# ===========================================================================
+
+
+def t_no_module_calls_v1_authoriser_directly():
+    """Only config/policy_diff.py may call assert_change_authorised directly.
+
+    A direct call bypasses the field-by-field classification. tests/ is exempt
+    because the v1 function is what one of the existing suites tests.
+    """
+    import ast
+
+    violations: list[str] = []
+    for path in (REPO_ROOT / "src").rglob("*.py"):
+        if path.name in ("loader.py", "policy_diff.py"):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "assert_change_authorised":
+                    violations.append(f"{path}:{node.lineno}")
+    require(not violations, "\n".join(violations))
+
+
+# ===========================================================================
+# RUNNER
+# ===========================================================================
+
+
+for _n, _f in sorted((n, f) for n, f in list(globals().items())
+                     if n.startswith("t_") and callable(f)):
+    check(_n, _f)
+
+print(f"PASSED {len(PASS)}")
+for _msg in FAIL:
+    print("FAILED", _msg)
+sys.exit(1 if FAIL else 0)
+```
+
+---
+
+```markdown
+# STAGE-1-GAP-AUDIT.md — amendment to §10, condition 12
+
+## §10, condition 12 — replacement row
+
+| # | Condition | Gates | Severity | State |
+|---|---|---|---|---|
+| **12** | ~~Pin `action`, `mode`, `comparison` and `scope` of the constitutional rules; define loosening for a non-threshold change (X5R-G2)~~ **CLOSED.** Pins: `tests/verify_p13_config_diff.py::CONSTITUTIONAL_PINS` (18 rules × up to 6 fields). Diff function: `src/config/policy_diff.py::diff_policies` classifies every field on `Rule` per SPEC-P1.3-CONFIG-DIFF §3. Amendment: SPEC-P1.3-CONFIG-DIFF §7 replaces SPEC-P1.3 §5.3. **CLOSED 2026-XX-XX by the P1.3 diff amendment.** | P2.9; any policy change | HIGH | **CLOSED** |
+
+### Evidence
+
+| # | Acceptance criterion | Evidence | Test |
+|---|---|---|---|
+| 12.a | The five mutations are detected | `EXP-002.action → ALLOW`, `LOSS-001.mode → monitor`, `LOSS-004.threshold 0.100 → 0.200`, `EXEC-001.allowed_values += MARKET`, `STOP-001.comparison eq → lte` all produce a `RuleChange` with `change_class ∈ {LOOSENS, UNDECIDABLE}` and `diff.requires_approval() == True` | `t_mutation_exp002_action_allow`, `t_mutation_loss001_mode_monitor`, `t_mutation_loss004_threshold_20pct`, `t_mutation_exec001_allows_market`, `t_mutation_stop001_comparison_lte` |
+| 12.b | `action`, `mode`, `comparison`, `scope` pinned for every constitutional rule | `CONSTITUTIONAL_PINS` | `t_const_action_pinned_for_every_constitutional_rule`, `t_const_mode_pinned_for_every_constitutional_rule`, `t_const_comparison_pinned_for_every_constitutional_rule`, `t_const_scope_pinned_for_every_constitutional_rule` |
+| 12.c | `threshold` and `kill_scope` pinned additionally | `CONSTITUTIONAL_PINS["threshold"]`, `CONSTITUTIONAL_PINS["kill_scope"]` | `t_const_threshold_pinned_for_every_constitutional_rule_with_a_threshold`, `t_const_kill_scope_pinned_for_kill_rules` |
+| 12.d | The diff classifies every field | `_get_field` and the field list in `diff_policies`; `classify_rule_change` handles all 24 fields | `t_unknown_field_is_undecidable`, `t_diff_is_complete_when_nothing_changed` |
+| 12.e | Non-threshold loosening is defined | SPEC-P1.3-CONFIG-DIFF §3 — one row per field, one `ChangeClass` and one reason per row | Every `t_*` classification test in §3 |
+| 12.f | Two-person rule extends to every loosening | `assert_change_authorised_v2` | `t_two_person_rule_applies_to_every_loosening`, `t_undecidable_requires_approval` |
+| 12.g | The `require()` pattern is used, so the suite holds under `python -O` | `tests/verify_p13_config_diff.py` defines `require()` and uses no bare `assert` | Any CI run; `python -O tests/verify_p13_config_diff.py` |
+| 12.h | No module bypasses the diff by calling v1 directly | Test-only lint over `src/` | `t_no_module_calls_v1_authoriser_directly` |
+
+### SPEC-P1.3 §5.3 amendment — move to the frozen text
+
+The replacement text is SPEC-P1.3-CONFIG-DIFF §7. `STAGE-1-FREEZE` re-freeze must incorporate it verbatim, and note in the freeze that `assert_change_authorised()` remains as a compatibility shim.
+
+### X5R-G2 — CLOSED
+
+The two-person rule is defined for every field on `Rule`, not only `threshold`. The definition lives in `classify_rule_change()`, not in `assert_change_authorised()`. `UNDECIDABLE` is a first-class outcome and requires approval.
+
+### X5R-G9 — CLOSED
+
+Five mutations that previously passed every suite are now detected by `t_mutation_*`. Each is also pinned by a direct field assertion (`t_const_*_pinned_*`), so a change to `config/policy.yaml` that loosens any of the pinned fields fails CI at the diff, not only at the diff function's own test.
+```
+
+---
+
+## CONTINUE: tests/constitutional_pins.py (not required — the pins live inline in `tests/verify_p13_config_diff.py`)
+
+I stopped at a clean file boundary. The pins are inline in the test file deliberately: extracting them to a separate module would put the pin data outside the file whose name an auditor greps for, and the file is already the right size.
+
+Three things I want to flag explicitly before you say "continue":
+
+1. **The `LOSS-004` mutation is stated as "threshold → 20%" in the prompt, but `LOSS-004` is 10% today.** I read it as `0.100 → 0.200` — a loosening on an `lte` rule. If the intended mutation was `0.100 → 0.020`, that is a **tightening** and the test must assert `TIGHTENS`, and `diff.requires_approval()` would be `False`. I have flagged this as `[DEFAULT-D1]` and `Q-P1.3-D1`. The classifier is correct either way; the fixture reading is the only variable.
+
+2. **The `EXEC-001` mutation is not a threshold change.** It adds `MARKET` to `allowed_values` (the non-emergency set). Today's `allowed_values_emergency` already contains `MARKET`. If you meant "`allowed_values_emergency` gains a non-`MARKET` value", the classification would still be `LOOSENS` under `[DEFAULT-D2]`. If you meant "`EXEC-001` action changes from `DENY` to `ALLOW`", that is a completely different mutation and would be `t_mutation_exec001_action_allow`. The prompt's phrase "allows MARKET" reads most naturally as the `allowed_values` change, and I have implemented that.
+
+3. **The `governance` diff path is a hard refusal, not an approval.** A change to `min_approvals_to_loosen` cannot be approved by any number of signatures — otherwise two signatures could lower the requirement to one. This is `[DEFAULT-D18]` and it is the only way the control survives its own amendment path. If you intend governance changes to be approvable, that requires a separate constitutional amendment (and ADR-09 is the wrong vehicle; it authorises the Owner alone, which would then authorise the Owner alone to lower the two-person rule).
