@@ -208,18 +208,35 @@ built entirely on that statement.
 |---|---|---|
 | **Tighten** a limit | **0** — automatic | ADR-09 row 3: "tightening is always safe" |
 | **Loosen** a limit | **2 distinct identities** | This spec, §5.3 |
+| **Undecidable** — the diff cannot prove the direction | **2 distinct identities** | SPEC-P1.3.1 §3, `[CONST-6]` |
 | **Override a risk DENY** | **Impossible. No approver, no code path** | ADR-09 final row, invariant I2 |
 
-**Direction is judged against the rule's comparison, not the raw number.** Raising a threshold
-loosens an `lte` rule and *tightens* a `gte` rule; `PORT-001` (`cash_pct >= 0.20`) is loosened by
-*lowering* it. Getting this backwards would let a limit be relaxed down the tightening path, which
-needs no approval at all. `loosens_for()` implements it; `t_loosening_direction_respects_comparison`
-tests both directions. For a non-ordinal comparison any change is treated as loosening — we cannot
-prove it is a tightening, and `[CONST-6]` resolves the ambiguity conservatively.
+**The change list is derived, never declared.** `assert_policy_change_authorised(old, new,
+approvers)` computes the change list itself with `diff_policies()` over the two **effective**
+(merged) documents, for every (market, environment) combination that will be loaded
+(SPEC-P1.3.1). A caller cannot omit a change by not mentioning it. `assert_change_authorised()`
+and `LimitChange` are superseded for authorisation and must not be called on the approval path.
 
-**Two distinct *identities*, not two approvals.** Two signatures from one person are one person's
-judgement twice; the check normalises and de-duplicates. Verified by
-`t_two_distinct_approvers_required_to_loosen`, which asserts that `["js", "JS "]` is refused.
+**Every field is classified** LOOSENS, TIGHTENS, NEUTRAL or UNDECIDABLE by the rules in
+SPEC-P1.3.1 §3: comparison and threshold judged jointly on the pass set; `action` on the
+KILL > DENY > MODIFY > ALLOW lattice; `mode` enforce → monitor is a loosening; `scope` by
+coverage; removing a rule is a loosening; and every leaf outside `rules` by
+`CONFIG_KEY_DIRECTIONS`.
+
+**The two-person rule applies to every LOOSENS and every UNDECIDABLE change.** UNDECIDABLE is
+treated as a loosening because a change that cannot be proven to tighten does not get the
+tightening path ([CONST-6]).
+
+**A smaller pass set is not a tightening on a rule that can block an exit.** On an
+exemption-granting rule, a `pre_exit` rule, or a rule in `LIQUIDATION_PATH_RULES`, a change
+that would otherwise tighten is UNDECIDABLE. "Tightening is always safe" (ADR-09 row 3) holds
+only for rules that cannot stand between the book and a risk-reducing exit.
+
+**The approval count is the active version's.** `min_approvals_to_loosen` is read from the
+version being replaced, never from the version being approved.
+
+**Two distinct *identities*, not two approvals.** Unchanged from v0.1: normalised and
+de-duplicated; `["js", "JS "]` is one person.
 
 **This is stricter than a FROZEN ADR, and that is why it is permitted.** ADR-09 row 2 authorises
 the Owner *alone* to increase a limit. Requiring two is a tightening of that control, and ADR-09
