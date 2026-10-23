@@ -1,335 +1,1118 @@
 ---
 id: SPEC-P1.3.1-POLICY-DIFF
-version: 0.1
+version: 0.3
 status: DRAFT
-phase: P1.3.1 — Policy diff and the two-person rule over every field (closes X5R-G2, X5R-G9)
-depends_on: [SPEC-P1.3-CONFIG v0.1, STAGE-1-GAP-AUDIT §9 (X5R-G2, X5R-G9), STAGE-1-GAP-AUDIT §10 (condition 12), tests/verify_p11_x5_conditions.py (require() pattern)]
-produces: [src/config/policy_diff.py, fn.diff_policies, fn.assert_policy_change_authorised, fn.key_direction, class.PolicyDiff, class.PolicyChange, class.PolicyDiffError, enum.Direction, enum.ChangeKind, enum.KeyDirection, const.CONFIG_KEY_DIRECTIONS, const.RULE_FIELDS, const.LIQUIDATION_PATH_RULES, tests/verify_p13_policy_diff.py, tests/mutate_x5r_g9.py, AMENDMENT SPEC-P1.3 §5.3]
+phase: P1.3.1 — Policy diff and the two-person rule over every field (issue #6; STAGE-1-GAP-AUDIT condition 12; X5R-G2, X5R-G9). Step 1 of #6's execution sequence (spec run), revised after the step-2 X2 review
+depends_on: [SPEC-P1.1-DOMAIN v0.3, SPEC-P1.2-STORAGE v0.5, SPEC-P1.3-CONFIG v0.1 (§5.3 as amended by d8067b6), SPEC-P1.4-AUDIT v0.1 (event catalogue and jcs-nonum-1 only), SPEC-P0.1-DECISIONS v0.3 (ADR-09), STAGE-1-GAP-AUDIT §9 and §10 (at 4397c4f), DECISIONS.md "Owner rulings — X5 conditions 3, 12, 13, 14" (ratified 2026-10-16)]
+produces: [src/config/policy_diff.py, fn.diff_policies, fn.derive_combinations, fn.diff_policy_dirs, fn.authorisation_digest, fn.assert_policy_change_authorised, fn.assert_authorisation_current, fn.action_direction, fn.scope_direction, fn.key_direction, class.PolicyDiff, class.PolicyChange, class.ApprovalSignature, class.PolicyAuthorisation, class.PolicyDiffError, class.StaleAuthorisationError, enum.Direction, enum.ChangeKind, enum.KeyDirection, const.MARKETS, const.ACTION_LADDER, const.ACTION_UNORDERED_PAIRS, const.SCOPE_NARROWER_THAN, const.CONFIG_KEY_DIRECTIONS, const.RULE_FIELDS, const.CLASSIFICATION_BASES, tests/verify_p13_policy_diff.py, tests/mutate_x5r_g9.py, tests/mutate_policy_diff_code.py, AMENDMENT SPEC-P1.3 §5.3]
+supersedes: SPEC-P1.3.1-POLICY-DIFF v0.2 DRAFT (uncommitted, reviewed in step 2); v0.1 DRAFT (commit d8067b6)
 ---
 
 # SPEC-P1.3.1 — Policy diff, and the two-person rule over every field
 
-> **In one line:** the change list is derived from the two documents, never supplied by the
-> person asking for approval, and anything the diff cannot prove is a tightening needs two people.
+> **In one line:** the change list and the set of configurations it covers are derived from the
+> policy files, never supplied by the person asking for approval; every change is classified by
+> Owner Ruling 12; anything the diff cannot classify needs two people; and an approval is valid
+> only for the exact version it was diffed against.
 
-## 0. What this closes, and the premise it corrects
+**This is a DRAFT.** Nothing here may be implemented until it is frozen (#6 execution sequence,
+step 3). v0.2 was reviewed by X2 in a separate session: FIX-THEN-SHIP, 1 BLOCKER, 4 HIGH, 7
+MEDIUM, 5 LOW. This version addresses all of them (§0.4). The reviewer asked for a delta
+re-review before freezing. The code and tests committed in d8067b6 implement v0.1, not this
+version.
 
-**X5R-G2.** SPEC-P1.3 §5.3 classes a change by `loosens_for(LimitChange, Rule)`. That function
-sees one field (a numeric threshold), and only when the caller builds the `LimitChange`. A changed
-`action`, `mode`, `comparison` or `scope`, a deleted rule, or a lowered config key that a rule
-reads were invisible to governance and fell to the zero-approval tightening path.
+---
 
-**X5R-G9.** Five single-field mutations loaded and passed every suite. They are now killed, and so
-are all 264 loadable governed-field mutations of the 20 constitutional rules (§8).
+## 0. Governing material
 
-**The premise this phase corrects.** ADR-09 row 3 says "tightening is always safe". It is false
-for any rule that can stand between the book and an *exit*. Narrowing KILL-002's exemption list,
-removing `MARKET` from EXEC-001's emergency set, raising HOLD-001's minimum hold, or cutting
-RATE-001 to 1 order/min all make a rule act *more* often — and all can trap a position during a
-kill-switch liquidation. Under §5.3 as frozen, a single operator could do any of them with zero
-approvals. This phase classifies them UNDECIDABLE (§3.4). ADR-09 is not amended; §5.3 is narrowed,
-which ADR-09 row 3 itself permits because a stricter control is a tightening of governance.
+### 0.1 What binds this phase
+
+| Requirement | Source | Discharged in |
+|---|---|---|
+| A change loosens if it widens the permitted set | Ruling 12 (DECISIONS.md; full text #16 comment 6221092946) | §3.1 |
+| Threshold direction depends on `comparison` | Ruling 12, `threshold` row | §3.5 C-01 to C-07 |
+| Moving down the action ladder loosens; `HALT_ENTRIES` must be ranked | Ruling 12 `action` row; Ruling 14; #6 comments 6221094775 and 6222485680 | §3.2, [DEFAULT-B2] |
+| `enforce` → `monitor` always loosens | Ruling 12, `mode` row | §3.5 C-11 |
+| Any `comparison` change is UNDECIDABLE and fails closed to LOOSENS | Ruling 12, `comparison` row | §3.5 C-08 |
+| Narrowing `scope` loosens, widening tightens | Ruling 12, `scope` row | §3.3, [DEFAULT-B4] |
+| Rule removal always loosens; rule addition never loosens | Ruling 12, removal and addition rows | §3.6 |
+| `severity` never loosens on its own; judged on any accompanying action change | Ruling 12, `severity` row | §3.5 C-14, C-15 |
+| UNDECIDABLE is a real fourth outcome and is never passed as neutral | Ruling 12 | §3.1, §5 |
+| Pin `threshold`, `action`, `mode`, `comparison`, `scope` of every constitutional rule | Ruling 12, "Required tests" | §7.2 |
+| Pin `scope` and `mode` for all 47 rules | Ruling 12, "Required tests" | §7.2 |
+| The five X5R-G9 mutations must each make a test fail | Ruling 12; STAGE-1-GAP-AUDIT §9 | §7.3 |
+| `require()` only, no bare `assert`; suites hold under `python -O` | #6 prompt; `tests/verify_p11_x5_conditions.py` | §7.1 |
+| A test counts only if it fails when the thing it tests is broken | #6 PO/BA pass, step 5 | §7.1, §7.3, §7.5, §7.7 |
+| An exposure-reducing action is never blocked by a missing, stale or ambiguous input; "reducing" is computed by the risk engine | Ruling 13a (A-14) | §1 B1, §9 F-5 |
+| Within one action, the binding rule is the lowest id | SPEC-P1.3 §4.2 (FROZEN); loader.py `_combine` | §1 B5, §3.6 C-40, §9 F-14 |
+| Tightening needs no approval | ADR-09 row 3 (SPEC-P0.1 §3) | §3.1, §6 |
+| Adding or removing an `InstrumentType` needs Owner approval | ADR-09 row 7 | §3.7, DECISION 21 |
+| `min_approvals_to_loosen ≥ 2`, `min_approvals_to_tighten = 0` | SPEC-P1.3 §5.3, `Governance` validator | §5 |
+| An approval is attributable to one individual (Ed25519, not a shared MAC) | SPEC-P1.3 §5.2, DECISION 6 | §5.2 |
+| A live change never reaches an in-flight decision | SPEC-P1.3 §5.4 | §5.5 |
+| Every decision is written to the audit trail before it takes effect; payloads are `jcs-nonum-1` (no JSON numbers) | `[CONST-5]`; SPEC-P1.4 §6.2 | §5.4 |
+
+### 0.2 What this phase is not
+
+- **Not code.** This step produces a DRAFT spec. `src/config/policy_diff.py` and the tests will be
+  regenerated by X1 from the frozen version.
+- **Not the loader.** Defects in `src/config/loader.py` (§9) belong to SPEC-P1.3 v0.2. This spec
+  states what the diff assumes about them, and where a loader defect makes a ruling row unsound, it
+  closes the hole in the diff with a fail-closed derived record (B3, B5) until the loader is fixed.
+- **Not the gate.** Which rules bind against an exposure-reducing order is P2.9's question
+  (Ruling 13a). This spec governs who may change a rule, not how the gate applies it.
+- **Not the HALT_ENTRIES action itself.** Ruling 14 adds it to the DSL in #17. This spec only ranks
+  it (§3.2).
+- **Not key enrolment.** Who the second approver is, and how their key reaches Vault, is
+  Q-P1.3.1-1 / P6.2. This spec states how an enrolled key is checked (§5.2).
+
+### 0.3 What changed from v0.1, and why
+
+v0.1 was written by a run that never saw Ruling 12. Where it conflicts with the ruling, the ruling
+wins. The full list, each tied to the ruling line, is in the step-1 change note in
+`AI-Trading-Agent-stage1-fresh-reviews/X5R-G9/` (outside the repository).
+
+| # | Ruling 12 says | v0.1 / d8067b6 did | v0.2 and v0.3 do |
+|---|---|---|---|
+| a | **Any** `comparison` change is UNDECIDABLE | Judged comparison and threshold as one interval: `lte→lt` and `lte→eq` were TIGHTENS (zero approvals); `eq→lte` was LOOSENS | Any comparison change is UNDECIDABLE, and so is every other predicate field changed with it (C-08) |
+| b | Pin `scope` and `mode` for **all 47 rules** | Pinned 20 rules only (v0.1 DECISION 8) | All 47 pinned for `scope` and `mode`; 20 pinned for all five attributes (§7.2) |
+| c | The action ladder ranks `HALT_ENTRIES` | Ladder `KILL > DENY > MODIFY > ALLOW` | Ladder includes `HALT_ENTRIES`; its position against `DENY` is BLOCKING question B2 |
+| d | `severity` never loosens on its own | Severity downgrade was LOOSENS | NEUTRAL alone; takes the direction of an accompanying action change (C-14, C-15) |
+| e | Rule addition never loosens | Addition of an exemption-granting rule was LOOSENS; a `pre_exit` addition was UNDECIDABLE | An addition is TIGHTENS or NEUTRAL. Effects on *other* rules are derived records: exemptions (C-36, B3) and kill-scope displacement (C-40, B5) |
+| f | Narrowing scope loosens, widening tightens | Pool family only; every other pair UNDECIDABLE without a reason | A defined narrowness order, and a stated reason for each of the 19 pairs it cannot order (§3.3, B4) |
+| g | Threshold direction depends on comparison only | Exit-path overlay on a hand-kept rule set | No overlay in the body; the overlay is BLOCKING question B1 |
+| — | Rule removal always loosens | Removal of KILL-002 was UNDECIDABLE | LOOSENS (C-33) |
+| — | `enforce→monitor` always loosens | On an exemption-granting rule it was UNDECIDABLE | LOOSENS (C-11) |
+
+### 0.4 What changed from v0.2, and why (step-2 X2 review)
+
+Review: `AI-Trading-Agent-stage1-fresh-reviews/X5R-G9/STEP2-X2-SPEC-REVIEW.md`. Every Ruling 12 row
+is unchanged. Each fail-open path the review measured is closed without changing a ruled row's
+output, by a derived record or a precondition.
+
+| Finding | Sev | v0.3 change | Where |
+|---|---|---|---|
+| X2S-1 | BLOCKER | A change that lets a rule take a KILL ahead of an existing GLOBAL kill now emits a derived UNDECIDABLE record (C-40), so it is two-person. New BLOCKING question B5 with that fail-closed default; root fix recommended for SPEC-P1.3 v0.2. §7.4's C-09, C-12, C-16 cases corrected; new cases and code mutation M-13. §6 amendment qualifies "adding a rule never loosens". New F-14, F-15 | §1 B5, §3.6, §6, §7.4, §7.7, §9 |
+| X2S-2 | HIGH | The combination set is derived from the two policy directories (`derive_combinations`), never supplied. An unknown market layer fails closed | §5.1, §5.3 |
+| X2S-3 | HIGH | An authorisation is applied only if, at the moment the `config_version` row is written, every combination's in-force hash still equals the diffed `old_content_hash` and the candidate still hashes to `new_content_hash` (`assert_authorisation_current`, a compare-and-swap) | §5.3, §8 |
+| X2S-4 | HIGH | A mutation counts as killed only if a *named* pin fails with a message naming the mutated rule and field, in both modes. A negative control (pins stubbed) must report every mutation SURVIVED | §7.3, §7.5, §7.7, §10 |
+| X2S-5 | HIGH | B1's "What breaks" restated: TURN-002 and its config key, `holding.min_sessions`, and added DENY rules can block a protective exit at **zero** approvals; 13a does not cover a threshold breach. New carried requirement for P2.9 (Q-P1.3.1-11) | §1 B1, DECISION 7, ASSUMPTION 1 |
+| X2S-6 | MEDIUM | `required_approvals` is a decimal-integer string; a test canonicalises a real authorisation through P1.4's `canonical_json` | §4, §7.4 |
+| X2S-7 | MEDIUM | B2 cites #6 comment 6221094775 and names the ratified full text (#16) as option (b); recommending (a) is stated as an amendment of a ratified ruling | §1 B2, §0.1, F-11 |
+| X2S-8 | MEDIUM | `action_direction` and `scope_direction` return their basis; the coverage test counts those, so C-10 is reachable | §4, §5.1, §7.4 |
+| X2S-9 | MEDIUM | A new or retired combination is diffed against what the loader would have produced for it; the layer file itself is a `LAYER_ADDED` / `LAYER_REMOVED` record, UNDECIDABLE (C-41) | §3.8, §5.1 |
+| X2S-10 | MEDIUM | Each approval is an Ed25519 signature over `authorisation_digest`, verified against that identity's enrolled key; distinct identities *and* distinct keys are required | §4, §5.2 |
+| X2S-11 | MEDIUM | `CONFIG_KEY_DIRECTIONS` gives a direction to exact keys only; the sole wildcard is the final `**` | §3.7 |
+| X2S-12 | MEDIUM | Condition-12 text rewritten for the state at 4397c4f (OPEN, reopened); the "reopen now" text and Q-P1.3.1-8 removed | §9 F-13, §10 |
+| X2S-13 | LOW | C-35's rationale reworded; a C-36 case with a monitor-mode grantor added | §3.6, §7.4 |
+| X2S-14 | LOW | `verify_p13_config.py` runs under `--must-pass`, and must exit 0 on every mutation | §7.3 |
+| X2S-15 | LOW | Validators added to the type block; §8 gains a catch-all row | §4, §8 |
+| X2S-16 | LOW | ADR-09 row 7 stated; removing an `InstrumentType` stays TIGHTENS, and the departure is recorded with the condition that keeps it safe | §3.7, DECISION 21, ASSUMPTION 12 |
+| X2S-17 | LOW | Closure text states Ruling 12's requirement | §10 |
+
+---
 
 ## 1. BLOCKING questions — and the defaults applied
 
+Each default is used in the body and marked `[DEFAULT-Bn]` there, and listed again in ASSUMPTIONS.
+B1 to B4 are v0.2's; B5 is new in v0.3 (X2S-1). The X2 review's references to "B1–B5" use this
+numbering.
+
 | # | Question | Options | Default applied | What breaks if the default is wrong |
 |---|---|---|---|---|
-| **1** | How is direction judged? | (a) per-field heuristics; (b) **the rule's pass set**: the observed values for which it does not act | **(b)** `[DEFAULT-D1]` | Under (a), `eq 2.5 → lte 2.5` (STOP-001) is "comparison changed, threshold unchanged" and has no direction. Under (b) it is `{2.5} → (−∞, 2.5]`: the pass set grew, so it loosens. One algebra covers thresholds, comparisons, value sets and scope |
-| **2** | What is diffed? | (a) the single `policy.yaml` file; (b) **the merged effective document per (market, environment) combination, as `PolicyLoader` hashes it** | **(b)** `[DEFAULT-D2]` | Under (a) a loosening placed in `policy.market.IN.yaml` is never seen. The approval for a change is the union over every combination that will be loaded |
-| **3** | What does UNDECIDABLE cost? | (a) treated as NEUTRAL; (b) its own approval count; (c) **treated as LOOSENS** | **(c)** — required by the brief `[DEFAULT-D3]` | (a) makes every incomparable change free, which is exactly the hole X5R-G2 describes |
-| **4** | Is a pass-set shrink on an exit-gating rule a tightening? | (a) yes, per ADR-09 row 3; (b) **no — UNDECIDABLE** | **(b)** `[DEFAULT-D4]` | Under (a) one operator can, with no approval, make kill-switch liquidation impossible. That is [CONST-7] defeated through the governance layer |
-| **5** | Is a monitor rule's predicate classified? | (a) NEUTRAL, it does not bind; (b) **classified as if it bound** | **(b)** `[DEFAULT-D5]` | Under (a): loosen CASH-002 while in monitor (free), then promote to enforce (free, a tightening). Two free steps equal one unapproved loosening |
-| **6** | Which version's governance sets the approval count? | (a) the new; (b) **the active (old)** | **(b)** `[DEFAULT-D6]` | Under (a) a version that lowers its own threshold approves itself. The validator forbids < 2 today, but that is a second control; this one must not depend on it |
-| **7** | Default for a config key with no declared direction | (a) NEUTRAL; (b) **UNDECIDABLE** | **(b)** `[DEFAULT-D7]` | Under (a) every new key, and every key a rule reads by `threshold_ref`, is free to change. **Operational consequence, stated:** at team size 1, changing an unlisted key (e.g. `schedule.US.pipeline_utc`) is impossible until a second approver is enrolled (Q-P1.3-1). Adding the key to `CONFIG_KEY_DIRECTIONS` as NEUTRAL is a code change under `DEPLOY_CODE` (ADR-09 row 10) |
-| **8** | Severity lowered | (a) NEUTRAL — §4.2 says severity is "only" alert routing; (b) **LOOSENS** | **(b)** `[DEFAULT-D8]` | Lowering LOSS-004 from CRITICAL to LOW changes no verdict but delays the human. An alert is a control |
-| **9** | `authority` edited | (a) NEUTRAL text; (b) **UNDECIDABLE** | **(b)** `[DEFAULT-D9]` | Re-attributing a `[CONST]` rule to an ADR is the first step of moving it out of the constitutional approval regime |
-| **10** | How are exit-gating rules identified? | (a) a new `applies_to` schema field; (b) **schema-derivable signals plus an explicit, test-pinned set** | **(b)** `[DEFAULT-D10]` | The schema has no field for it (F-5). (b) can miss a future rule that gates exits; `t_liquidation_path_set_is_pinned` makes the set a reviewed change, and (a) is recommended for SPEC-P1.3 v0.2 |
+| **B1** | **Exit-path overlay.** Is a change that narrows the permitted set of a rule that can stand between the book and a risk-reducing exit still a TIGHTENS (zero approvals)? No ruling covers this. Ruling 12 says threshold direction depends on comparison. Ruling 13a says an exposure-reducing action is never blocked by a *missing, stale or ambiguous input*; it says nothing about a threshold breach | **(A)** No overlay. Ruling 12 applies as written. Exit protection becomes an explicit P2.9 requirement (Q-P1.3.1-11). **(B)** v0.1's overlay: on an explicit rule set, a would-be TIGHTENS becomes UNDECIDABLE (two people). **(C)** An overlay derived from a per-rule `applies_to: entry \| exit \| both` field once SPEC-P1.3 v0.2 adds it (F-5) | **(A)** `[DEFAULT-B1]`. It is the reading that conforms to Ruling 12; the step-2 review agrees. **It is not the fail-closed choice for exits — (B) is.** The Owner should decide on the blast radius in the next column, which v0.2 understated | Under (A), these need **zero approvals** and pass every pin: (1) TURN-002 0.20→0.02 (C-01). TURN-002 counts `intended_notional` of every order, exits included, and KILL-002 exempts it only for kill-switch liquidation, so on a volatile day it can deny a protective stop-out once 2% of pool NAV has traded. (2) Lowering `turnover.max_nav_traded_pct_per_session`, its config duplicate. (3) Raising HOLD-001's threshold or `holding.min_sessions` (discretionary exits only, per HOLD-001's notes). (4) Adding any enforce DENY rule (C-34). For the constitutional exit-path rules (RATE-001/002, DATA-001, LIQ-001, EXEC-001 including its emergency set) and KILL-002's `exempts`, a tightening is also zero governance approvals but fails a pin, so it needs a reviewed code change: one person, the Owner (ADR-09 row 10), plus an X2. Under (B) or (C), at team size 1 all of these are impossible until a second approver is enrolled |
+| **B2** | **Where does `HALT_ENTRIES` rank against `DENY`?** Two sources say `KILL > HALT_ENTRIES > DENY > MODIFY > ALLOW`: #6 comments 6221094775 ("Condition 12 — RULED") and 6222485680. Two say `HALT_ENTRIES` sits "between MODIFY and DENY", i.e. `KILL > DENY > HALT_ENTRIES > MODIFY > ALLOW`: the ratified full text (#16 comment 6221092946, twice) and DECISIONS.md "Consequential work". DECISIONS.md names the #16 comment as the full text; the #6 comments restate it | **(a)** `KILL > HALT_ENTRIES > DENY` (#6 restatements). **(b)** `KILL > DENY > HALT_ENTRIES` (**the ratified text**). **(c)** Both orders agree on every other pair; leave `HALT_ENTRIES` and `DENY` unordered, so a change between them is UNDECIDABLE | **(c)** `[DEFAULT-B2]`, fail-closed. The permitted sets are genuinely incomparable under Ruling 12's own test: `HALT_ENTRIES` blocks *more* entries (the whole pool for the rest of the period, even after the loss recovers) and permits *more* exits (always, by Ruling 14). If the Owner wants a total order, this spec still recommends (a) — **which means amending the ratified text** — because the pool-wide, period-long entry block is the stronger control on the side the ladder exists for, and exits are governed by 13a rather than by rank | Under (c), Ruling 14's own change (LOSS-001/002 from DENY to HALT_ENTRIES, #17) is UNDECIDABLE, so it needs two identities: **at team size 1 that blocks #17's policy edit** until B2 is answered or a second approver is enrolled. Under (a) the same change is TIGHTENS and free; under (b) it is LOOSENS. The diff changes in one constant either way (§4) |
+| **B3** | **An added rule that grants exemptions.** Ruling 12 says addition never loosens. But `PolicyGate` drops every exempted rule from the binding set, KILL included, and grants exemptions whatever the grantor's mode (F-3). One added ALLOW rule (`exists` on `audit_event_id`, `exempts: [LOSS-003, LOSS-004]`) loads; at a 25% drawdown the gate returns ALLOW where the real policy returns KILL — in `enforce` and in `monitor` mode (measured 2026-10-21) | **(a)** Literal: the addition is NEUTRAL; nothing else is recorded. **(b)** The addition record stays as the addition row says; a derived record per newly exempted rule, `rules.<X>.exempted_by.<G>`, is LOOSENS by Ruling 12's scope row (X no longer covers the orders G passes). **(c)** v0.1: the addition itself LOOSENS (contradicts the addition row). **(d)** Forbid new exemption-granting rules at load (SPEC-P1.3 v0.2 validator) | **(b)** `[DEFAULT-B3]`, fail-closed, plus (d) recommended for SPEC-P1.3 v0.2. (b) applies two ruling rows without changing either | Under (a), one identity — or none, for a monitor-mode grantor — could switch off the kill switch with zero governance approvals; only the pin in §7.2(c) would stop it at CI |
+| **B4** | **What does `scope` order?** Ruling 12 reads scope as coverage ("fewer instruments covered means more permitted"). In the schema, scope is the *aggregation cell* a rule is measured over. No scope value names a market or an instrument to filter on | **(a)** Narrowness is containment of evaluation sets: `pool` and `consolidated` are each narrower than `pool_and_consolidated`. Every other pair is UNDECIDABLE with a stated reason (§3.3). **(b)** Treat cell refinement as narrowing. **(c)** SPEC-P1.3 v0.2 adds a per-rule aggregation kind (`additive \| ratio \| property`), which makes the refinement pairs decidable | **(a)** `[DEFAULT-B4]`, fail-closed; (c) recommended for SPEC-P1.3 v0.2. (b) is unsafe: RATE-002 `strategy → global` and EXP-001 `pool → consolidated` both move to a coarser cell, and the first tightens while the second loosens (SPEC-P1.1 §9.3) | Friction only: 19 of 21 pairs need two people, and every scope change already fails the all-47 scope pin |
+| **B5** | **KILL scope resolution (new, X2S-1).** SPEC-P1.3 §4.2 (FROZEN) makes the lowest-id rule bind within an action, and `_combine` takes the verdict's `kill_scope` from that rule. A KILL from `on_missing_input: KILL` on a non-KILL rule carries `kill_scope = None`. So a change Ruling 12 classes TIGHTENS — an added KILL/POOL rule, `action` up to KILL, `on_missing_input` → KILL, scope widening, `inputs` growth, `monitor → enforce`, or a tightened predicate on such a rule — can replace LOSS-004's GLOBAL kill with a POOL kill or a kill with no scope. Measured: CASH-001 DENY→KILL/POOL and FX-001 `on_missing_input` → KILL each turn KILL/LOSS-004/GLOBAL into KILL/POOL or KILL/None, pass every pin, and need zero approvals under v0.2. By C-17, GLOBAL → POOL loosens | **(a)** Rows unchanged; a derived record `rules.<G>.kill_displaced_by.<R>`, UNDECIDABLE, for every existing GLOBAL kill rule G that a changed or added rule R can now displace (C-40). **(b)** The review's overlay: reclassify R's TIGHTENS records as UNDECIDABLE (changes the output of ruled rows). **(c)** Nothing: the measured zero-approval kill loosening stands. **(d)** Root fix in SPEC-P1.3 v0.2: a KILL verdict is GLOBAL if any binding KILL outcome's rule has `kill_scope: GLOBAL` or no `kill_scope`; pinned by a gate test | **(a)** `[DEFAULT-B5]`, fail-closed, plus **(d)** recommended for SPEC-P1.3 v0.2; once (d) lands and is pinned, C-40 is removed by a revision of this spec. (a) is UNDECIDABLE rather than LOOSENS because the effect is mixed: where R and G both fire, the verdict narrows from GLOBAL (C-17: loosens); where only R fires, there is a new kill (tightens) | Under (a), every change to a rule that can take a non-GLOBAL KILL ahead of LOSS-004 or AUDIT-002 is two-person, including tightenings of LOSS-003 (constitutional, so already a pin failure). At team size 1 those are impossible until a second approver is enrolled. If the Owner prefers (c), the kill switch can be narrowed from GLOBAL to POOL with zero approvals and a green CI |
+
+---
 
 ## 2. NON-BLOCKING details resolved
 
 | # | Detail | Resolution |
 |---|---|---|
-| 1 | Float vs Decimal | YAML parses `0.050` as a float. Both sides are compared as `Decimal(str(v))`. `0.050 → 0.05` and `20 → 20.0` are NEUTRAL (same number) |
-| 2 | Inclusive bounds | Intervals carry closedness. `lte t` is `(−∞, t]`, `lt t` is `(−∞, t)`, `eq t` is `{t}`. So `lte → lt` at the same `t` tightens; `eq → lte` loosens |
-| 3 | Symbolic bounds | `threshold_input` / `threshold_ref` are opaque tokens. Comparable only to the *same* token: `lte settled_cash → lt settled_cash` tightens; `lte settled_cash → lte cash` is UNDECIDABLE |
-| 4 | Order in sets | `inputs`, `exempts`, `allowed_values*`, `disallowed_values`, and set-valued config keys compare as sets. Reordering is not a change |
-| 5 | Lists of mappings | `hitl.actions`, `latency.stages` flatten by index. Reordering rows is a change, and UNDECIDABLE |
-| 6 | Absent vs `null` | Absent is `CONFIG_REMOVED`/`CONFIG_ADDED`. A value changed to `null` is a value change whose numeric check fails → UNDECIDABLE |
-| 7 | Removed vs re-added rule | Ids are never reused (SPEC-P1.3 §2 row 1). EXP-001 removed and EXP-007 added at 8% is two changes, and the removal alone is LOOSENS |
-| 8 | Approver identity | Same normalisation as §5.3: strip, lower-case, de-duplicate, drop empties. `["js", " JS"]` is one person |
-| 9 | Empty diff | Zero changes → zero approvals. A re-signed identical document is not a policy change |
-| 10 | Record order | Changes are sorted by `(path, field)`, so the record is byte-reproducible (the property §4.2 buys for evaluation order) |
-| 11 | Interpreter | Every suite is run with and without `python -O` |
+| 1 | Rule count | **47** rules, counted from `config/policy.yaml` at HEAD (4397c4f; unchanged since d8067b6): 45 `enforce`, 2 `monitor` (CASH-002, PORT-002); 37 DENY, 6 MODIFY, 3 KILL, 1 ALLOW. Agrees with SPEC-P1.3 §10 and Ruling 12's "47" |
+| 2 | Which rules are "constitutional" | A rule whose `authority` contains `[CONST` or `IMMUTABLE`: **20 rules** (§7.2). Wider than Block A's 13 hard numbers; wider is the fail-closed reading |
+| 3 | Float vs Decimal | YAML parses `0.050` as a float. Both sides are compared as `Decimal(str(v))`. `0.050 → 0.05` is no change; `20 → 20.0` is a recorded change classified NEUTRAL |
+| 4 | Inclusive bounds | Strictness lives in the comparison; any comparison change is UNDECIDABLE (C-08) |
+| 5 | An `eq` threshold that moves | `{a} → {b}`: neither contains the other, so UNDECIDABLE (C-03) |
+| 6 | Threshold on `in`, `not_in`, `exists`, `multiple_of` | These take no constant (SPEC-P1.3 §2 row 5). Any threshold change on one is UNDECIDABLE (C-04) |
+| 7 | Value sets | `inputs`, `exempts`, `allowed_values`, `allowed_values_emergency`, `disallowed_values` and set-valued config keys compare as sets. Reordering is not a change. Members are compared by their canonical string, so a mixed-type set (`[true, "X"]`) never needs a native sort |
+| 8 | Lists of mappings in config | `hitl.actions` and `latency.stages` flatten by index; their leaves are unlisted keys, so any change is UNDECIDABLE |
+| 9 | Absent vs `null` | Absent is `CONFIG_ADDED` / `CONFIG_REMOVED`. A value changed to `null` is a value change; a numeric check on `null` fails, so UNDECIDABLE |
+| 10 | Renamed rule | Ids are never reused (SPEC-P1.3 §2 row 1). A rename is a removal (LOOSENS, C-33) plus an addition |
+| 11 | Approver identity | Strip, lower-case, drop empties; must match `^[a-z0-9][a-z0-9._-]{0,63}$` after normalisation. `["js", " JS"]` is one person. Two identities whose enrolled public keys are byte-equal are one approver (§5.2) |
+| 12 | Empty diff | Zero changes → zero approvals. A re-signed identical document is not a policy change |
+| 13 | Record order | Changes sort by `(path, field or "", basis)`; diffs sort by `(market or "", environment or "")`. The record is byte-reproducible |
+| 14 | Time | No change record carries a timestamp. Time lives in the P1.4 audit envelope (UTC `occurred_at`) |
+| 15 | Units and numbers | A change record carries no unit and no JSON number. Every field is a string or an enum value, so it canonicalises under P1.4's `jcs-nonum-1` |
+| 16 | Monitor rules | Classified as if they bound, as in v0.1: otherwise loosen-in-monitor then promote is two free steps |
+| 17 | ALLOW rules without exemptions | Classified by the same rows, though they cannot bind a verdict |
+| 18 | Interpreter | Every suite runs with and without `python -O`, on `py -3.11` locally and Python 3.12+ in CI (condition 15) |
+| 19 | KILL-002's predicate | `eq` with no comparand; the loader accepts it (F-8). Any predicate change on it is UNDECIDABLE by C-08 or C-04 |
+| 20 | Which combinations exist | `({None} ∪ MARKETS) × ({None} ∪ E)`, where `MARKETS = ("US", "IN")` (SPEC-P1.1 `Market`) and `E` is every `<name>` with a `policy.env.<name>.yaml` in the old or the new directory. `policy.override.yaml`, when present, applies to every combination. 3 × 1 = 3 combinations today |
+| 21 | String order of rule ids | Python `str` ordering, the same order `PolicyDocument.evaluation_order()` uses. `AUDIT-001 < AUDIT-002 < … < LOSS-003 < LOSS-004 < PORT-001` |
+
+---
 
 ## 3. Classification rules
 
 ### 3.1 The principle
 
-A rule's **pass set** is the set of observed values for which it does not act. For a rule whose
-action is DENY, MODIFY or KILL:
+Ruling 12: **a change loosens if it widens the permitted set** — the set of orders, positions or
+states the policy lets through. It tightens if it narrows that set, is neutral if the set is
+unchanged, and is **UNDECIDABLE** when the diff cannot prove either. UNDECIDABLE is a real outcome,
+not an error, and for approval it counts as LOOSENS.
 
-| New pass set vs old | Direction | Why |
+How this spec applies it, in order:
+
+1. Where Ruling 12 has a row for the field, the row decides that field's record.
+2. Where it has no row, its principle decides, but only when the effect on the permitted set is
+   provable from the documents alone.
+3. Otherwise the change is UNDECIDABLE, and the reason is written into the record.
+4. Where a change to one rule alters what **another** rule does — an exemption (C-36), a displaced
+   GLOBAL kill (C-40) — that effect is a separate, derived record against the other rule. The
+   ruled record is never overwritten.
+
+This spec adds no principle the ruling does not state. That is why B1 has no overlay, while B3 and
+B5 have derived records: those apply the ruling's own scope row and C-17 to the rule actually
+affected.
+
+**Direction is never inferred from the raw number.** `LimitChange.loosens` raising
+`NotImplementedError` is correct (loader.py §8).
+
+### 3.2 The action ladder, including `HALT_ENTRIES`
+
+```
+KILL  >  HALT_ENTRIES  >  DENY  >  MODIFY  >  ALLOW
+                  (HALT_ENTRIES and DENY unordered — [DEFAULT-B2])
+```
+
+| Pair (old → new) | Direction | Basis |
 |---|---|---|
-| equal | NEUTRAL | No observation changes outcome |
-| strict subset | TIGHTENS | The rule now acts on everything it acted on before, and more |
-| strict superset | LOOSENS | Something it used to stop, it now lets through |
-| neither | UNDECIDABLE | Some observations newly pass and others newly fail. No ordering exists |
+| Same value | NEUTRAL | C-09 |
+| Up the ladder between ordered values | TIGHTENS | C-09 |
+| Down | LOOSENS | C-09 |
+| `DENY → HALT_ENTRIES`, `HALT_ENTRIES → DENY` | UNDECIDABLE | C-10 |
+| Either value not in `ACTION_LADDER` | UNDECIDABLE | C-10 |
 
-This is why a raised threshold loosens `lte` and tightens `gte`: `(−∞, 0.05] ⊂ (−∞, 0.08]` and
-`[0.20, ∞) ⊃ [0.30, ∞)`. The existing `NotImplementedError` on `LimitChange.loosens` stays
-correct — direction needs the comparison, and the diff is where both are known.
+**How the diff ranks `HALT_ENTRIES` before it exists.** The ladder is defined over action values
+(strings). A policy that uses `HALT_ENTRIES` today fails `PolicyDocument` validation, so the diff
+raises `PolicyDiffError` and authorises nothing (§8). When #17 adds the member, the diff needs no
+change. `t_every_action_is_ranked` (§7.6) fails CI if `RuleAction` gains a value the ladder lacks.
+`action_direction()` returns `(Direction, basis)` so C-09 and C-10 are tested now (§7.4).
 
-### 3.2 Per field, for a rule present in both versions
+The gate's `ACTION_PRECEDENCE` (SPEC-P1.3 §4.1) is a separate total order for binding, which #17
+must extend. `t_ladder_agrees_with_gate_precedence` requires the two to agree on every pair the
+ladder orders.
 
-| Field | Rule | Reasoning |
-|---|---|---|
-| `comparison` + `threshold` + `threshold_ref` + `threshold_input` | **Judged jointly** as one predicate: interval containment for `lte lt gte gt eq` with comparable bounds; else UNDECIDABLE | They are one predicate. Judged separately, `eq 2.5 → lte 2.5` has an unchanged threshold and a directionless comparison change. A switch of threshold *source* (constant ↔ ref ↔ input) is UNDECIDABLE: a constant cannot be ordered against a reference statically |
-| `action` | Lattice KILL > DENY > MODIFY > ALLOW. Up the lattice TIGHTENS, down LOOSENS | Same lattice as §4.1. DENY → ALLOW makes the rule incapable of binding |
-| `mode` | enforce → monitor LOOSENS; monitor → enforce TIGHTENS | A monitor rule never binds (§4.3). Promotion is ADR-09 row 3's tightening (Q-P1.3-4) |
-| `scope` | Coverage sets: `pool_and_consolidated = {pool, consolidated}`. Coverage shrink LOOSENS, growth TIGHTENS. Every other pair UNDECIDABLE | Only this family nests. `strategy → global` on RATE-002 counts a different population against the same number |
-| `on_missing_input` | KILL > DENY. DENY → KILL TIGHTENS | An unknown input halting the book is the stronger response |
-| `kill_scope` | GLOBAL > POOL. Appear/disappear UNDECIDABLE | |
-| `severity` | CRITICAL > HIGH > MEDIUM > LOW. Down LOOSENS `[DEFAULT-D8]` | Alert routing is a control |
-| `allowed_values` | Under `in` on both sides: the set *is* the pass set. Under any other comparison: UNDECIDABLE | `[LIMIT] → [LIMIT, MARKET]` grows the pass set: LOOSENS |
-| `disallowed_values` | Under `not_in` on both sides: growth TIGHTENS. Else UNDECIDABLE | The deny-set is the complement of the pass set |
-| `allowed_values_emergency` | Growth LOOSENS. **Shrink UNDECIDABLE** | Shrinking it blocks a risk-reducing action (§3.4) |
-| `allowed_values_ref` | Any change UNDECIDABLE | Repointing a reference |
-| `exempts` | Growth LOOSENS. **Shrink UNDECIDABLE** | Fewer exemptions re-subject kill-switch liquidation to settlement, PDT and rate rules (§3.4) |
-| `inputs` | Superset TIGHTENS; subset LOOSENS; swap UNDECIDABLE | Each input is one fail-closed path ([CONST-6]); removing one means the gate can no longer see it go missing |
-| `measurement.basis` / `.window` / `.timing` | Any change UNDECIDABLE | Not monotone in the threshold. A shorter `sessions:N` loss window reports a smaller loss; a longer `rolling_seconds` rate window counts more orders; a median window is neither |
-| `modify.to` | Numeric, same `*_pct` target: higher LOOSENS, lower TIGHTENS. Symbolic or other numeric: UNDECIDABLE | EXP-006 trimming to 6% instead of 4% trims less. Symbolic targets' arithmetic lives in P2.9 |
-| `modify.target`, `modify` appearing/disappearing | UNDECIDABLE | The MODIFY now changes a different quantity |
-| `authority` | UNDECIDABLE `[DEFAULT-D9]` | |
-| `description`, `notes` | NEUTRAL | Free text; no verdict changes |
-| `id` | Not a field change | A different id is a removal plus an addition (§3.3) |
+### 3.3 The scope narrowness order `[DEFAULT-B4]`
 
-`t_every_rule_field_is_classified` asserts `RULE_FIELDS == set(Rule.model_fields)`, so a field
-added to `Rule` without a classification fails CI rather than being silently ignored.
+**Definition.** Scope A is *narrower* than scope B when every evaluation a rule performs under A is
+also performed under B. Two strict relations:
 
-### 3.3 Rule addition and removal
+```
+pool          ─┐
+               ├──<  pool_and_consolidated
+consolidated  ─┘
+```
 
-| Change | Direction | Reasoning |
-|---|---|---|
-| Rule **removed** | LOOSENS | Whatever it bounded is now unbounded. The id is retired, never reused |
-| Exemption-granting rule removed (KILL-002) | UNDECIDABLE | Re-subjects liquidation to seven rules |
-| Rule added: enforced DENY/MODIFY/KILL | TIGHTENS | |
-| Rule added: gates an exit (§3.4) | UNDECIDABLE | |
-| Rule added: grants exemptions | LOOSENS | Regardless of mode — see F-3 |
-| Rule added: monitor, or ALLOW without exemptions | NEUTRAL | Cannot bind |
+ADR-15 §4 (`risk_evaluation.stricter_binds: true`, IMMUTABLE) makes `pool_and_consolidated`
+evaluate both, with the stricter binding. Moving to it widens (TIGHTENS, C-12); moving away narrows
+(LOOSENS, C-12); the same scope is NEUTRAL (C-12).
 
-### 3.4 Overlays: where a smaller pass set is not safer
+**Every other pair is UNDECIDABLE (C-13), for one of four reasons.**
 
-After per-field classification, every TIGHTENS on the following rules becomes UNDECIDABLE:
+| Reason | Meaning |
+|---|---|
+| **R1 Refinement** | One scope's cells partition the other's. An additive count against an upper bound acts *more* on the coarser cell (RATE-002 `strategy → global`); a ratio to the cell's NAV acts *less* (EXP-001 `pool → consolidated`, SPEC-P1.1 §9.3). The schema does not say which |
+| **R2 Crossing** | The cells overlap without nesting (a strategy is confined neither to one instrument nor, by any frozen spec, to one pool) |
+| **R3 Same cells, different basis** | `market`/`pool`, and `global`/`consolidated`, name the same cells but different measurement bases; equality is not provable |
+| **R4 Disjoint evaluation sets** | `pool_and_consolidated` evaluates the pool and consolidated cells; the other scope evaluates a cell that is neither |
 
-| Rule set | Signal | Example |
-|---|---|---|
-| Exemption-granting rules | `exempts` non-empty (KILL-002 today) | Removing CASH-001 from the exemption |
-| Exit-gating rules | `measurement.timing == "pre_exit"` (HOLD-001 today) | Minimum hold raised from 3 to 30 sessions |
-| Liquidation-path rules | `LIQUIDATION_PATH_RULES` = RATE-001, RATE-002, DATA-001, LIQ-001: not exempted by KILL-002, with a tunable threshold | RATE-001 at 1/min; DATA-001 at 1 s denies liquidation on any quiet tape |
-
-LOOSENS on those rules stays LOOSENS. A `mode` change on an exemption-granting rule is
-UNDECIDABLE in both directions, because `PolicyGate` applies exemptions regardless of mode (F-3).
-
-### 3.5 Non-rule configuration
-
-Every leaf outside `rules` is classified by `CONFIG_KEY_DIRECTIONS`, an ordered table, first match
-wins, ending in `** → UNDECIDABLE`. Kinds: `HIGHER_LOOSENS`, `LOWER_LOOSENS`, `TRUE_LOOSENS`,
-`FALSE_LOOSENS`, `SET_GROW_LOOSENS`, `SET_SHRINK_LOOSENS`, `NEUTRAL`, `UNDECIDABLE`.
-
-**Why config keys are in scope at all.** At least ten numbers that rules depend on live outside
-`rules` (F-2), and UNIV-001/002 read config through `threshold_ref`. Lowering
-`universe.US.min_price_usd` from `"5.00"` to `"1.00"` changes no rule text and loosens UNIV-001;
-lowering `cost.assumed_round_trip_bps.US` loosens EDGE-001. Both are LOOSENS here.
-
-| Key | Kind | Key | Kind |
+| # | Pair | Order | Reason |
 |---|---|---|---|
-| `metadata.**`, `policy_version` | NEUTRAL | `universe.*.min_*` | LOWER_LOOSENS |
-| `governance.min_approvals_to_loosen` | LOWER_LOOSENS | `universe.*.max_instruments`, `enter_rank`, `exit_rank` | HIGHER_LOOSENS |
-| `governance/hitl.risk_deny_override_permitted` | TRUE_LOOSENS | `decision.min_edge_multiple_of_cost` | LOWER_LOOSENS |
-| `kill_switch.requires_human_to_re_enable` | FALSE_LOOSENS | `cost.assumed_round_trip_bps.*` | LOWER_LOOSENS |
-| `kill_switch.auto_re_enable_permitted` | TRUE_LOOSENS | `cost.verified_monthly_usd.*`, `vm_`, `backup_`, `total_operating_is_complete` | NEUTRAL |
-| `fx.system_may_convert`, `llm.may_receive_portfolio_state` | TRUE_LOOSENS | `instrument_allowlist.tradeable` | SET_GROW_LOOSENS |
-| `risk_evaluation.*` | FALSE_LOOSENS | `instrument_allowlist.permanently_banned` | SET_SHRINK_LOOSENS |
-| `llm.replay_requires_approval`, `replay_offpeak_only` | FALSE_LOOSENS | `latency.exit.stale_bar_critical_seconds` | HIGHER_LOOSENS |
-| `llm.gate_width`, `max_concurrency`, `spend_alarm_*` | HIGHER_LOOSENS | `dr.rpo_state_seconds`, `dr.rto_*` | HIGHER_LOOSENS |
-| `account.enforce_settled_cash`, `enforce_day_trades` | FALSE_LOOSENS | `storage.records_retention_years` | LOWER_LOOSENS |
-| `account.pdt_equity_floor_usd` | LOWER_LOOSENS | `storage.disk_*_pct` | HIGHER_LOOSENS |
-| `account.pdt_max_day_trades_5d` | HIGHER_LOOSENS | `promotion.min_*`, `shadow_min_sessions`, `dsr_threshold` | LOWER_LOOSENS |
-| `portfolio.max_position_pct`, `forced_trim_pct` | HIGHER_LOOSENS | `holding.time_stop_sessions`, `hard_max_sessions` | HIGHER_LOOSENS |
-| `portfolio.min_cash_pct` | LOWER_LOOSENS | `holding.time_stop_min_return_pct` | LOWER_LOOSENS |
-| `turnover.*` | HIGHER_LOOSENS | **everything else** | **UNDECIDABLE** |
+| 1 | `pool` – `pool_and_consolidated` | `pool` narrower | containment (C-12) |
+| 2 | `consolidated` – `pool_and_consolidated` | `consolidated` narrower | containment (C-12) |
+| 3 | `global` – `strategy` | none | R1 |
+| 4 | `global` – `market` | none | R1 |
+| 5 | `global` – `instrument` | none | R1 |
+| 6 | `global` – `pool` | none | R1 |
+| 7 | `global` – `consolidated` | none | R3 |
+| 8 | `global` – `pool_and_consolidated` | none | R4 |
+| 9 | `strategy` – `market` | none | R2 |
+| 10 | `strategy` – `instrument` | none | R2 |
+| 11 | `strategy` – `pool` | none | R2 |
+| 12 | `strategy` – `consolidated` | none | R1 |
+| 13 | `strategy` – `pool_and_consolidated` | none | R4 |
+| 14 | `market` – `instrument` | none | R1 |
+| 15 | `market` – `pool` | none | R3 |
+| 16 | `market` – `consolidated` | none | R1 |
+| 17 | `market` – `pool_and_consolidated` | none | R4 |
+| 18 | `instrument` – `pool` | none | R1 |
+| 19 | `instrument` – `consolidated` | none | R1 |
+| 20 | `instrument` – `pool_and_consolidated` | none | R4 |
+| 21 | `pool` – `consolidated` | none | R1 |
 
-A removed key is LOOSENS (whatever read it now reads nothing); an added key is UNDECIDABLE;
-NEUTRAL keys stay NEUTRAL when added or removed. A set key changed by both adding and removing
-members is UNDECIDABLE. A type change (number → string, bool → int) is UNDECIDABLE.
+**For B4 option (c) only, not applied:** with a declared aggregation kind, a refinement pair becomes
+decidable — additive with an upper bound: coarser TIGHTENS; additive with a lower bound: coarser
+LOOSENS; ratio to the cell's NAV: coarser LOOSENS (a weighted average acts less); property of one
+instrument: UNDECIDABLE.
+
+Note that a C-12 TIGHTENS on a rule that can take a non-GLOBAL KILL still produces a C-40 record
+(§3.6): LOSS-003 `pool → pool_and_consolidated` is the measured case.
+
+### 3.4 Joint changes
+
+| Changed together in one rule | Classification |
+|---|---|
+| `comparison` and any of `threshold`, `threshold_ref`, `threshold_input`, `allowed_values`, `disallowed_values`, `allowed_values_ref` | Every one of those records is UNDECIDABLE (C-08) |
+| `action` and `severity` | The severity record takes the action record's direction (C-15) |
+| `action` to or from `MODIFY`, with `modify` appearing or disappearing | The `modify` record takes the action record's direction (C-18) |
+| `action` to or from `KILL`, with `kill_scope` appearing or disappearing | The `kill_scope` record takes the action record's direction (C-18). C-40 is evaluated independently (§3.6) |
+| `action` of KILL-002 away from `ALLOW` | The loader requires `exempts` to be emptied in the same change; each record is classified on its own row |
+
+### 3.5 Every `Rule` field, for a rule present in both versions
+
+`RULE_FIELDS` must equal `set(Rule.model_fields)` (§7.6). Each row has a basis id carried on every
+record it produces.
+
+| Basis | Field | Condition | Direction | Authority / reasoning |
+|---|---|---|---|---|
+| **C-01** | `threshold` | Comparison unchanged and `lte` or `lt`; both constants | higher **LOOSENS**; lower **TIGHTENS**; same number NEUTRAL | Ruling 12: raising an `lte` bound loosens |
+| **C-02** | `threshold` | Comparison unchanged and `gte` or `gt`; both constants | higher **TIGHTENS**; lower **LOOSENS**; same number NEUTRAL | Ruling 12: raising a `gte` bound tightens. Applies to HOLD-001 and EDGE-001 like any other `gte` rule `[DEFAULT-B1]` |
+| **C-03** | `threshold` | Comparison unchanged and `eq`; values differ | UNDECIDABLE | `{a}` and `{b}` are disjoint |
+| **C-04** | `threshold` | Comparison is `in`, `not_in`, `exists` or `multiple_of`; threshold appears, disappears or changes | UNDECIDABLE | These comparisons take no constant |
+| **C-05** | `threshold` / `threshold_ref` / `threshold_input` | The threshold source switches | UNDECIDABLE on each changed field | A constant cannot be ordered against a value read elsewhere |
+| **C-06** | `threshold_ref` | Repointed | UNDECIDABLE | The referenced key is classified on its own (§3.7) |
+| **C-07** | `threshold_input` | Changed | UNDECIDABLE | A different measured bound |
+| **C-08** | `comparison` | **Any change** | UNDECIDABLE, and every predicate field changed with it (§3.4) | Ruling 12 `comparison` row |
+| **C-09** | `action` | Both values ordered on the ladder (§3.2) | down **LOOSENS**; up **TIGHTENS**; same NEUTRAL | Ruling 12 `action` row |
+| **C-10** | `action` | `DENY` ↔ `HALT_ENTRIES`, or a value outside the ladder | UNDECIDABLE | `[DEFAULT-B2]`; fail closed |
+| **C-11** | `mode` | `enforce → monitor` | **LOOSENS**, on every rule | Ruling 12 `mode` row: always |
+| C-11 | `mode` | `monitor → enforce` | **TIGHTENS** | The rule now binds |
+| **C-12** | `scope` | Containment pair or same scope (§3.3) | widening **TIGHTENS**; narrowing **LOOSENS**; same NEUTRAL | Ruling 12 `scope` row |
+| **C-13** | `scope` | Any other pair | UNDECIDABLE; R1 to R4 in the record | `[DEFAULT-B4]` |
+| **C-14** | `severity` | `action` unchanged | **NEUTRAL** | Ruling 12: reporting metadata, not a control |
+| **C-15** | `severity` | `action` also changed | the action record's direction | Ruling 12 |
+| **C-16** | `on_missing_input` | Ladder `KILL > DENY` (and §3.2 for any future value) | `KILL → DENY` **LOOSENS**; `DENY → KILL` **TIGHTENS** | Principle. A `DENY → KILL` on a rule that sorts before a GLOBAL kill rule also produces C-40 |
+| **C-17** | `kill_scope` | `KILL` on both sides | `GLOBAL → POOL` **LOOSENS**; `POOL → GLOBAL` **TIGHTENS** | A global halt stops a superset of what a pool halt stops |
+| **C-18** | `kill_scope`, `modify` | Appear or disappear with an action change to or from `KILL` / `MODIFY` | the action record's direction | §3.4 |
+| **C-19** | `kill_scope` | Appears or disappears on a rule that is not `KILL` on both sides | UNDECIDABLE | SPEC-P1.3 §3.1 defines it only for `KILL` |
+| **C-20** | `allowed_values` | `in` on both sides, comparison unchanged | grow **LOOSENS**; shrink **TIGHTENS**; both ways UNDECIDABLE | Under `in` the set *is* the permitted set |
+| **C-21** | `allowed_values` | Any other comparison | UNDECIDABLE | `eq` with a set has no stated set semantics |
+| **C-22** | `disallowed_values` | `not_in` on both sides, comparison unchanged | grow **TIGHTENS**; shrink **LOOSENS**; both ways UNDECIDABLE | The deny-set is the complement of the permitted set |
+| **C-23** | `disallowed_values` | Any other comparison | UNDECIDABLE | |
+| **C-24** | `allowed_values_emergency` | Any | grow **LOOSENS**; shrink **TIGHTENS** `[DEFAULT-B1]`; both ways UNDECIDABLE | The permitted set for an emergency exit |
+| **C-25** | `allowed_values_ref` | Any change | UNDECIDABLE | A repointed reference |
+| **C-26** | `exempts` | Any | grow **LOOSENS** (plus C-36 records); shrink **TIGHTENS** `[DEFAULT-B1]`; both ways UNDECIDABLE | An exemption narrows the exempted rule's coverage (Ruling 12 scope row) |
+| **C-27** | `inputs` | Any | superset **TIGHTENS**; subset **LOOSENS**; swap UNDECIDABLE | Each input is one more fail-closed path. A superset on a rule with `on_missing_input: KILL` that sorts before a GLOBAL kill rule also produces C-40 |
+| **C-28** | `measurement.basis` / `.window` / `.timing` | Any change, one record per subfield | UNDECIDABLE | Not monotone in the threshold |
+| **C-29** | `modify.to` | Numeric on both sides, same `*_pct` target | higher **LOOSENS**; lower **TIGHTENS** | EXP-006 trimming to 6% instead of 4% trims less |
+| **C-30** | `modify.to`, `modify.target` | Symbolic, other numeric, or target changed | UNDECIDABLE | The arithmetic of a symbolic target lives in P2.9 |
+| **C-31** | `authority` | Any change | UNDECIDABLE | It keys membership of the pinned constitutional set (§7.2): governance, not reporting |
+| **C-32** | `description`, `notes` | Any change | NEUTRAL | Free text |
+| — | `id` | — | not a field change | A different id is a removal plus an addition |
+
+### 3.6 Rule addition and removal, and derived records
+
+| Basis | Change | Direction | Authority / reasoning |
+|---|---|---|---|
+| **C-33** | Rule **removed**, any rule | **LOOSENS** | Ruling 12: removal always loosens |
+| **C-34** | Rule **added**, `enforce`, action `KILL`, `HALT_ENTRIES`, `DENY` or `MODIFY` | **TIGHTENS** | Ruling 12: addition never loosens. A `pre_exit` addition is included `[DEFAULT-B1]`. C-40 may also apply |
+| **C-35** | Rule **added**, `monitor`, or action `ALLOW` | **NEUTRAL** | The added rule cannot bind a verdict itself: a monitor rule never binds and an ALLOW outcome is never binding. **Any exemption it grants is a separate C-36 record, whatever its mode** — `PolicyGate` grants exemptions from monitor-mode rules too (F-3) |
+| **C-36** | **Derived.** The new version contains a pair (G exempts X) that the old version does not — G is new, or G's `exempts` grew — in any mode of G | One `RULE_EXEMPTED` record at `rules.X.exempted_by.G`, **LOOSENS** `[DEFAULT-B3]` | Ruling 12 scope row: X no longer covers the orders G passes |
+| **C-40** | **Derived.** A rule R in the new version is *kill-capable below GLOBAL*: `mode: enforce`, (`action: KILL` or `on_missing_input: KILL`), and `kill_scope` not `GLOBAL`. R is added, or has at least one record in this diff whose direction is not NEUTRAL. G is a rule present in both versions that, in the old version, is `enforce`, `action: KILL`, `kill_scope: GLOBAL`, and `R.id < G.id` | One `RULE_KILL_DISPLACED` record at `rules.G.kill_displaced_by.R`, **UNDECIDABLE** `[DEFAULT-B5]` | SPEC-P1.3 §4.2 makes R's KILL bind ahead of G's, with R's scope. Where both fire, the verdict narrows from GLOBAL (C-17: loosens); where only R fires, there is a new kill (tightens). Neither contains the other |
+
+C-40 at today's file: the GLOBAL kill rules are AUDIT-002 and LOSS-004. 30 of the 47 ids sort before
+LOSS-004, and 1 (AUDIT-001) before AUDIT-002. LOSS-003 is already kill-capable below GLOBAL and
+sorts before LOSS-004, so on the unedited policy a LOSS-003 and LOSS-004 co-breach yields
+KILL/LOSS-003/POOL (F-14, measured). That is an existing defect, not a change, so it produces no
+record. Any non-NEUTRAL change to LOSS-003 does.
+
+### 3.7 Non-rule configuration
+
+Every leaf outside `rules` is classified by `CONFIG_KEY_DIRECTIONS`: an ordered table of **exact
+dotted keys** whose last entry is `("**", UNDECIDABLE)`. There is no other wildcard (X2S-11): a key
+that does not exist yet, even under a known prefix such as `turnover.`, gets no direction until a
+reviewed change lists it. The table below lists the 72 directed keys at today's file (v0.2's 71 plus
+`holding.min_sessions`).
+
+| Basis | Change | Direction |
+|---|---|---|
+| **C-37** | Value change on a listed key | By its `KeyDirection`; a same-number re-representation NEUTRAL |
+| **C-38** | Key added or removed | Added: UNDECIDABLE, unless listed `NEUTRAL`. Removed: **LOOSENS**, unless listed `NEUTRAL` |
+| **C-39** | An unlisted key, a type change, a set changed by both adding and removing, or a numeric key turned non-numeric or `null` | UNDECIDABLE |
+
+| Kind | Exact keys |
+|---|---|
+| NEUTRAL (9) | `policy_version`, `metadata.description`, `metadata.authored_by`, `metadata.authored_at`, `cost.verified_monthly_usd.paper`, `cost.verified_monthly_usd.live`, `cost.vm_monthly_usd`, `cost.backup_monthly_usd`, `cost.total_operating_is_complete` |
+| TRUE_LOOSENS (5) | `governance.risk_deny_override_permitted`, `hitl.risk_deny_override_permitted`, `kill_switch.auto_re_enable_permitted`, `fx.system_may_convert`, `llm.may_receive_portfolio_state` |
+| FALSE_LOOSENS (8) | `kill_switch.requires_human_to_re_enable`, `risk_evaluation.evaluate_per_pool`, `risk_evaluation.evaluate_consolidated`, `risk_evaluation.stricter_binds`, `llm.replay_requires_approval`, `llm.replay_offpeak_only`, `account.enforce_settled_cash`, `account.enforce_day_trades` |
+| LOWER_LOOSENS (25) | `governance.min_approvals_to_loosen`, `account.pdt_equity_floor_usd`, `portfolio.min_cash_pct`, `decision.min_edge_multiple_of_cost`, `cost.assumed_round_trip_bps.US`, `cost.assumed_round_trip_bps.IN`, `holding.time_stop_min_return_pct`, **`holding.min_sessions`**, `storage.records_retention_years`, `promotion.min_wf_windows`, `promotion.min_closed_trades`, `promotion.shadow_min_sessions`, `promotion.dsr_threshold`; for each of `US` and `IN`: `universe.<m>.min_addv_position_multiple`, `universe.<m>.min_sessions_history`, `universe.<m>.min_reported_quarters`; `universe.US.min_market_cap_usd`, `universe.US.min_addv_usd_floor`, `universe.US.min_price_usd`, `universe.IN.min_market_cap_inr`, `universe.IN.min_addv_inr_floor`, `universe.IN.min_price_inr` |
+| HIGHER_LOOSENS (23) | `account.pdt_max_day_trades_5d`, `portfolio.max_position_pct`, `portfolio.forced_trim_pct`, `turnover.max_new_entries_per_session`, `turnover.max_nav_traded_pct_per_session`, `holding.time_stop_sessions`, `holding.hard_max_sessions`, `llm.gate_width`, `llm.max_concurrency`, `llm.spend_alarm_warn_usd_month`, `llm.spend_alarm_critical_usd_month`, `latency.exit.stale_bar_critical_seconds`, `dr.rpo_state_seconds`, `dr.rto_safe_minutes`, `dr.rto_operational_hours`, `storage.disk_warn_pct`, `storage.disk_critical_pct`; for each of `US` and `IN`: `universe.<m>.max_instruments`, `universe.<m>.enter_rank`, `universe.<m>.exit_rank` |
+| SET_GROW_LOOSENS (1) | `instrument_allowlist.tradeable` |
+| SET_SHRINK_LOOSENS (1) | `instrument_allowlist.permanently_banned` |
+| UNDECIDABLE | `**` — everything else, last entry |
+
+`<m>` is notation in this table only; the constant lists both exact keys. `holding.min_sessions`
+duplicates HOLD-001 (`gte 3`) and is classified the same way under `[DEFAULT-B1]`; under B1 option
+(B) it returns to the catch-all.
+
+**ADR-09 row 7.** Adding *or removing* an `InstrumentType` needs Owner approval. Here, adding a
+type to `tradeable` is LOOSENS (two identities) and removing one is TIGHTENS (zero). The removal is
+a recorded departure from row 7 (DECISION 21): every applied policy version must carry a valid
+policy signature (SPEC-P1.3 §5.2), and at team size 1 the only enrolled signer is the Owner
+(ASSUMPTION 12). If a non-Owner signer is ever enrolled, P6.2 must require an Owner approval for any
+`instrument_allowlist` change.
+
+### 3.8 Layer files
+
+| Basis | Change | Direction |
+|---|---|---|
+| **C-41** | A layer file (`policy.market.<m>.yaml`, `policy.env.<e>.yaml`, `policy.override.yaml`) exists in one directory and not the other | One `LAYER_ADDED` or `LAYER_REMOVED` record, path `layers.market.<m>` / `layers.env.<e>` / `layers.override`, in every combination the file applies to: **UNDECIDABLE** |
+
+The content effect is classified separately: each combination's effective document is diffed
+against what the loader produces for that combination from the other directory, which skips absent
+layer files (X2S-9). So the first `policy.market.IN.yaml` (ADR-11 India activation) is approvable:
+it yields a C-41 record plus a record for every value it changes.
+
+---
 
 ## 4. Types
 
 ```python
+from __future__ import annotations
+
+from enum import Enum
+from typing import Annotated, Final
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_RULE_ID = r"^[A-Z]{2,7}-\d{3}$"
+_VERSION = r"^\d+\.\d+\.\d+$"
+_HASH = r"^[0-9a-f]{64}$"
+_BASIS = r"^C-\d{2}$"
+_IDENTITY = r"^[a-z0-9][a-z0-9._-]{0,63}$"
+
+
 class Direction(str, Enum):
-    LOOSENS = "LOOSENS"; TIGHTENS = "TIGHTENS"; NEUTRAL = "NEUTRAL"; UNDECIDABLE = "UNDECIDABLE"
+    LOOSENS = "LOOSENS"
+    TIGHTENS = "TIGHTENS"
+    NEUTRAL = "NEUTRAL"
+    UNDECIDABLE = "UNDECIDABLE"
+
 
 class ChangeKind(str, Enum):
-    RULE_ADDED = "RULE_ADDED"; RULE_REMOVED = "RULE_REMOVED"; RULE_FIELD = "RULE_FIELD"
-    CONFIG_ADDED = "CONFIG_ADDED"; CONFIG_REMOVED = "CONFIG_REMOVED"; CONFIG_VALUE = "CONFIG_VALUE"
+    RULE_ADDED = "RULE_ADDED"
+    RULE_REMOVED = "RULE_REMOVED"
+    RULE_FIELD = "RULE_FIELD"
+    RULE_EXEMPTED = "RULE_EXEMPTED"              # derived, C-36 [DEFAULT-B3]
+    RULE_KILL_DISPLACED = "RULE_KILL_DISPLACED"  # derived, C-40 [DEFAULT-B5]
+    CONFIG_ADDED = "CONFIG_ADDED"
+    CONFIG_REMOVED = "CONFIG_REMOVED"
+    CONFIG_VALUE = "CONFIG_VALUE"
+    LAYER_ADDED = "LAYER_ADDED"                  # C-41
+    LAYER_REMOVED = "LAYER_REMOVED"              # C-41
 
-class PolicyChange(BaseModel):            # frozen, extra="forbid"
+
+class KeyDirection(str, Enum):
+    NEUTRAL = "NEUTRAL"
+    HIGHER_LOOSENS = "HIGHER_LOOSENS"
+    LOWER_LOOSENS = "LOWER_LOOSENS"
+    TRUE_LOOSENS = "TRUE_LOOSENS"
+    FALSE_LOOSENS = "FALSE_LOOSENS"
+    SET_GROW_LOOSENS = "SET_GROW_LOOSENS"
+    SET_SHRINK_LOOSENS = "SET_SHRINK_LOOSENS"
+    UNDECIDABLE = "UNDECIDABLE"
+
+
+_RULE_KINDS = frozenset({ChangeKind.RULE_ADDED, ChangeKind.RULE_REMOVED, ChangeKind.RULE_FIELD,
+                         ChangeKind.RULE_EXEMPTED, ChangeKind.RULE_KILL_DISPLACED})
+_DERIVED_KINDS = frozenset({ChangeKind.RULE_EXEMPTED, ChangeKind.RULE_KILL_DISPLACED})
+
+
+class PolicyChange(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     kind: ChangeKind
-    path: str            # "rules.<ID>.<field>" | "rules.<ID>" | dotted config path; never empty
-    rule_id: str | None  # set iff kind is RULE_*; matches ^[A-Z]{2,7}-\d{3}$
-    field: str | None    # set iff kind is RULE_FIELD; "measurement.window", "modify.to", ...
-    old: str | None      # canonical string; None = absent in the old version
-    new: str | None      # canonical string; None = absent in the new version
+    path: Annotated[str, Field(min_length=1, max_length=300)]
+    rule_id: Annotated[str, Field(pattern=_RULE_ID)] | None
+    field: Annotated[str, Field(min_length=1, max_length=80)] | None
+    related_rule_id: Annotated[str, Field(pattern=_RULE_ID)] | None = None
+    old: str | None
+    new: str | None
     direction: Direction
-    reason: str          # human-readable; written to the audit record verbatim
-    # requires_two_person: direction in {LOOSENS, UNDECIDABLE}
+    basis: Annotated[str, Field(pattern=_BASIS)]
+    reason: Annotated[str, Field(min_length=1, max_length=600)]
 
-class PolicyDiff(BaseModel):              # frozen, extra="forbid"
-    old_version: str     # ^\d+\.\d+\.\d+$, from the validated old document
-    new_version: str
-    changes: tuple[PolicyChange, ...]   # sorted by (path, field); empty = no change
-    # requires_two_person: any change requires it
+    @model_validator(mode="after")
+    def _coherent(self) -> PolicyChange:
+        if (self.kind in _RULE_KINDS) != (self.rule_id is not None):
+            raise ValueError("rule_id is set iff the change is about a rule")
+        if (self.kind is ChangeKind.RULE_FIELD) != (self.field is not None):
+            raise ValueError("field is set iff kind is RULE_FIELD")
+        if (self.kind in _DERIVED_KINDS) != (self.related_rule_id is not None):
+            raise ValueError("related_rule_id is set iff the record is derived")
+        added = (ChangeKind.RULE_ADDED, ChangeKind.CONFIG_ADDED, ChangeKind.LAYER_ADDED)
+        removed = (ChangeKind.RULE_REMOVED, ChangeKind.CONFIG_REMOVED, ChangeKind.LAYER_REMOVED)
+        if self.kind in added and self.old is not None:
+            raise ValueError("an addition has no old value")
+        if self.kind in removed and self.new is not None:
+            raise ValueError("a removal has no new value")
+        if self.basis not in CLASSIFICATION_BASES:
+            raise ValueError(f"unknown classification basis {self.basis}")
+        return self
+
+    @property
+    def requires_two_person(self) -> bool:
+        return self.direction in (Direction.LOOSENS, Direction.UNDECIDABLE)
+
+
+def _change_key(c: PolicyChange) -> tuple[str, str, str]:
+    return (c.path, c.field or "", c.basis)
+
+
+class PolicyDiff(BaseModel):
+    """The complete change list for ONE (market, environment) combination."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    market: Annotated[str, Field(pattern=r"^(US|IN)$")] | None
+    environment: Annotated[str, Field(pattern=r"^[a-z0-9_-]{1,32}$")] | None
+    old_version: Annotated[str, Field(pattern=_VERSION)]
+    new_version: Annotated[str, Field(pattern=_VERSION)]
+    old_content_hash: Annotated[str, Field(pattern=_HASH)]
+    new_content_hash: Annotated[str, Field(pattern=_HASH)]
+    changes: tuple[PolicyChange, ...]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> PolicyDiff:
+        keys = [_change_key(c) for c in self.changes]
+        if keys != sorted(keys) or len(set(keys)) != len(keys):
+            raise ValueError("changes must be unique and sorted by (path, field, basis)")
+        return self
+
+    @property
+    def requires_two_person(self) -> bool:
+        return any(c.requires_two_person for c in self.changes)
+
+
+class ApprovalSignature(BaseModel):
+    """One approver's Ed25519 signature over authorisation_digest(diffs), hex-encoded."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    identity: Annotated[str, Field(pattern=_IDENTITY)]
+    signature_hex: Annotated[str, Field(pattern=r"^[0-9a-f]{128}$")]
+
+
+class PolicyAuthorisation(BaseModel):
+    """What was approved: written to the audit trail before the new version takes effect.
+
+    Every field is a string or a model of strings, so it canonicalises under jcs-nonum-1.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    diffs: Annotated[tuple[PolicyDiff, ...], Field(min_length=1)]
+    digest: Annotated[str, Field(pattern=_HASH)]
+    approvals: tuple[ApprovalSignature, ...]
+    required_approvals: Annotated[str, Field(pattern=r"^[0-5]$")]
+    gated_paths: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> PolicyAuthorisation:
+        combos = [(d.market or "", d.environment or "") for d in self.diffs]
+        if combos != sorted(combos) or len(set(combos)) != len(combos):
+            raise ValueError("diffs must be unique and sorted by (market, environment)")
+        ids = [a.identity for a in self.approvals]
+        if ids != sorted(set(ids)):
+            raise ValueError("approvals must be distinct and sorted by identity")
+        if list(self.gated_paths) != sorted(set(self.gated_paths)):
+            raise ValueError("gated_paths must be distinct and sorted")
+        return self
+
+
+#: The two markets (SPEC-P1.1 Market). A market layer file for any other name fails closed.
+MARKETS: Final[tuple[str, ...]] = ("US", "IN")
+#: The approval ladder, most restrictive first ([DEFAULT-B2] for the unordered pair).
+ACTION_LADDER: Final[tuple[str, ...]] = ("KILL", "HALT_ENTRIES", "DENY", "MODIFY", "ALLOW")
+#: Option (a) of B2 empties this set; option (b) swaps DENY and HALT_ENTRIES above and empties it.
+ACTION_UNORDERED_PAIRS: Final[frozenset[frozenset[str]]] = frozenset(
+    {frozenset({"HALT_ENTRIES", "DENY"})}
+)
+#: (narrower, wider). Every other distinct pair is UNDECIDABLE ([DEFAULT-B4]).
+SCOPE_NARROWER_THAN: Final[frozenset[tuple[str, str]]] = frozenset(
+    {("pool", "pool_and_consolidated"), ("consolidated", "pool_and_consolidated")}
+)
+#: C-01 .. C-41, each a row of §3.5 to §3.8.
+CLASSIFICATION_BASES: Final[frozenset[str]] = frozenset(f"C-{n:02d}" for n in range(1, 42))
 ```
 
-Canonical strings: `Decimal` via `str`, floats via `str(Decimal(str(f)))`, enums by value, sets
-sorted, mappings by sorted key. No timestamps and no units enter a `PolicyChange`: units belong
-to the rule (`*_pct` is a fraction, SPEC-P1.3 §3.3), and the change record is time-free so the
-same pair of versions always yields the same bytes.
+Field contract:
 
-## 5. AMENDMENT — SPEC-P1.3 §5.3, exact replacement text
+| Model.field | Type | Unit / tz | Null? | Valid range | A violation means |
+|---|---|---|---|---|---|
+| `PolicyChange.kind` | `ChangeKind` | — | no | enum | Model rejects; no change list exists |
+| `PolicyChange.path` | `str` | — | no | 1–300. `rules.<ID>`, `rules.<ID>.<field>`, `rules.<X>.exempted_by.<G>`, `rules.<G>.kill_displaced_by.<R>`, `layers.<…>`, or a dotted config key | Model rejects |
+| `PolicyChange.rule_id` | `str` | — | iff not a rule change | rule-id pattern. For derived records, the rule affected (X or G) | Model rejects |
+| `PolicyChange.field` | `str` | — | iff not `RULE_FIELD` | 1–80 | Model rejects |
+| `PolicyChange.related_rule_id` | `str` | — | iff not derived | the rule that caused it (G for C-36, R for C-40) | Model rejects |
+| `PolicyChange.old` / `.new` | `str` | as stored; `Decimal` via `str`, sets sorted by canonical string | `None` = absent | — | — |
+| `PolicyChange.direction` | `Direction` | — | no | enum | Model rejects |
+| `PolicyChange.basis` | `str` | — | no | one of `CLASSIFICATION_BASES` | Model rejects |
+| `PolicyChange.reason` | `str` | — | no | 1–600; written to the audit record verbatim | Model rejects |
+| `PolicyDiff.market` | `str` | — | `None` = no market layer | `US` \| `IN` | Model rejects |
+| `PolicyDiff.environment` | `str` | — | `None` = no env layer | `^[a-z0-9_-]{1,32}$` | Model rejects |
+| `PolicyDiff.old_version` / `.new_version` | `str` | — | no | `^\d+\.\d+\.\d+$` | Model rejects |
+| `PolicyDiff.old_content_hash` / `.new_content_hash` | `str` | — | no | 64 lower-case hex: `EffectiveConfig.content_hash` for that combination | Model rejects |
+| `PolicyDiff.changes` | tuple | — | no (may be empty) | unique, sorted by `(path, field or "", basis)` | Model rejects → `PolicyDiffError` |
+| `ApprovalSignature.identity` | `str` | — | no | normalised (§2 row 11) | Model rejects |
+| `ApprovalSignature.signature_hex` | `str` | — | no | 128 lower-case hex (64-byte Ed25519 signature) | Model rejects |
+| `PolicyAuthorisation.diffs` | tuple | — | no | ≥ 1, unique, sorted by `(market or "", environment or "")` | Model rejects |
+| `PolicyAuthorisation.digest` | `str` | — | no | `authorisation_digest(diffs)` (§5.2) | Recomputed and compared in §5.2 step 3 and §5.3 |
+| `PolicyAuthorisation.approvals` | tuple | — | no (may be empty) | distinct identities, sorted | Model rejects |
+| `PolicyAuthorisation.required_approvals` | `str` | identities | no | `0`–`5` as a decimal string: `0` if nothing is gated; else the largest `min_approvals_to_loosen` over the **old** effective documents | Model rejects |
+| `PolicyAuthorisation.gated_paths` | tuple | — | no | distinct, sorted paths of every LOOSENS / UNDECIDABLE change | Model rejects |
 
-Replace SPEC-P1.3 §5.3 from "**Direction is judged against the rule's comparison**" through the
-end of the paragraph beginning "**Two distinct *identities***" with:
+---
 
-> **The change list is derived, never declared.** `assert_policy_change_authorised(old, new,
-> approvers)` computes the change list itself with `diff_policies()` over the two **effective**
-> (merged) documents, for every (market, environment) combination that will be loaded
-> (SPEC-P1.3.1). A caller cannot omit a change by not mentioning it. `assert_change_authorised()`
-> and `LimitChange` are superseded for authorisation and must not be called on the approval path.
+## 5. The approval path
+
+### 5.1 Functions
+
+| Function | Behaviour |
+|---|---|
+| `derive_combinations(old_dir: Path, new_dir: Path) -> tuple[tuple[str \| None, str \| None], ...]` | §2 row 20, over the files present in **either** directory. A `policy.market.<m>.yaml` with `m` not in `MARKETS`, or an env file whose name fails the `PolicyDiff.environment` pattern, raises `PolicyDiffError`. Never accepts a combination list from a caller (X2S-2) |
+| `diff_policies(old_raw, new_raw, *, market=None, environment=None, old_layers=frozenset(), new_layers=frozenset()) -> PolicyDiff` | Validates both effective documents with `PolicyDocument` and emits every record of §3 for one combination, including C-41 from the two layer-name sets. Raises `PolicyDiffError` on validation failure |
+| `diff_policy_dirs(old_dir, new_dir) -> tuple[PolicyDiff, ...]` | For each derived combination, loads both directories with `PolicyLoader(dir).load(market=m, environment=e, require_signature=False)`, takes `EffectiveConfig.redacted` as the raw mapping and `EffectiveConfig.content_hash` as the hash, and calls `diff_policies`. A combination whose layer files exist in only one directory is still loaded from both: the loader skips absent files (X2S-9). Any `PolicyError` from the loader becomes `PolicyDiffError` |
+| `authorisation_digest(diffs) -> str` | SHA-256 hex of `canonical_json({"combinations": [{"market": m or "", "environment": e or "", "old_content_hash": …, "new_content_hash": …}, …]})`, combinations in `PolicyAuthorisation` order, with P1.4's `jcs-nonum-1` canonicaliser |
+| `assert_policy_change_authorised(old_dir, new_dir, approvals: Sequence[ApprovalSignature], public_key_for: Callable[[str], bytes]) -> PolicyAuthorisation` | §5.2 |
+| `assert_authorisation_current(auth: PolicyAuthorisation, in_force_dir: Path, candidate_dir: Path) -> None` | §5.3. Raises `StaleAuthorisationError` |
+| `action_direction(old: str, new: str) -> tuple[Direction, str]` | §3.2; the string is the basis, `C-09` or `C-10`. Also used for `on_missing_input` (C-16 is the basis recorded there) |
+| `scope_direction(old: str, new: str) -> tuple[Direction, str, str]` | §3.3; direction, basis (`C-12` or `C-13`), and the containment note or reason class R1–R4 |
+| `key_direction(path: str) -> KeyDirection` | First match in `CONFIG_KEY_DIRECTIONS` |
+
+### 5.2 Authorising a change
+
+`assert_policy_change_authorised` does, in order:
+
+1. **Derive** the combinations and the diffs with `diff_policy_dirs`. No caller-supplied change list
+   or combination list is accepted anywhere on the approval path. `assert_change_authorised()` and
+   `LimitChange` (loader.py §8) are not called on it; `loosens_for()` stays only as a test oracle.
+2. **Count required approvals.** If no change is gated, `required_approvals` is `"0"`. Otherwise it
+   is the largest `governance.min_approvals_to_loosen` among the **old** effective documents —
+   never the new one, so a version cannot lower its own threshold and approve itself.
+3. **Verify approvals** (X2S-10). For each `ApprovalSignature`: `public_key_for(identity)` returns
+   the identity's enrolled Ed25519 public key (PEM) from Vault (SPEC-P1.3 §5.2; enrolment is
+   Q-P1.3.1-1). A missing identity raises. The signature is verified with loader.py
+   `verify_signature` over `authorisation_digest(diffs).encode("ascii")`. Any failure raises
+   `PolicyGovernanceError`; a bad signature is never skipped.
+4. **Count distinct approvers.** Identities are distinct after normalisation, and two identities
+   whose key bytes are equal count once.
+5. If the count is below `required_approvals`, raise `PolicyGovernanceError` naming every gated
+   path. Otherwise return the `PolicyAuthorisation`.
+
+### 5.3 Applying an authorisation (X2S-3)
+
+An authorisation is bound to the exact version it was diffed against and the exact version it
+approved. `assert_authorisation_current(auth, in_force_dir, candidate_dir)` must be called by the
+writer that inserts the new `config_version` rows, inside the same transaction, while holding the
+lock that serialises policy changes (the writer and its lock are P1.2 / P6.4's; this is a
+precondition they import). It:
+
+1. recomputes `derive_combinations(in_force_dir, candidate_dir)` and requires it to equal the
+   authorisation's combination set;
+2. for every combination, requires the in-force effective `content_hash` to equal
+   `old_content_hash`, and the candidate's to equal `new_content_hash`;
+3. requires `authorisation_digest(auth.diffs) == auth.digest`.
+
+Any mismatch raises `StaleAuthorisationError` (a `PolicyGovernanceError`). Nothing is written, and
+the candidate must be re-diffed and re-approved against the version now in force. This blocks the
+measured pattern where two proposals built on one base undo each other, and an approval reused for
+different files.
+
+### 5.4 What is written to the audit trail
+
+From SPEC-P1.4 §3's catalogue, before the new `config_version` rows:
+
+- one `CONFIG_CHANGED` event (class SYSTEM), whose payload is `auth.model_dump(mode="json")`
+  canonicalised with `jcs-nonum-1`. Every value is a string (X2S-6);
+- one `APPROVAL_GRANTED` event (class APPROVAL) per counted approver.
+
+`trading.config_version.approval_id` (SPEC-P1.2 §6.9) holds one id and cannot name two approvers
+(F-12, Q-P1.3.1-6).
+
+### 5.5 Propagation
+
+Unchanged from SPEC-P1.3 §5.4: an applied version takes effect at the next run boundary and never
+reaches an in-flight decision.
+
+---
+
+## 6. AMENDMENT — SPEC-P1.3 §5.3, exact replacement text
+
+**What is there now.** d8067b6 rewrote SPEC-P1.3 §5.3 to v0.1 of this spec, header left at v0.1
+FROZEN; 4397c4f left it as is pending this re-run. Current lines 205–250: a table with an
+"Undecidable" row; the paragraphs "The change list is derived", "Every field is classified", "The
+two-person rule applies", "**A smaller pass set is not a tightening on a rule that can block an
+exit**", "The approval count is the active version's", "Two distinct *identities*"; the unchanged
+"This is stricter than a FROZEN ADR"; and the operational-consequence note.
+
+**Replace everything from the heading `### 5.3 Who may change what — the two-person rule` up to,
+but not including, `### 5.4`, with:**
+
+> ### 5.3 Who may change what — the two-person rule
 >
-> **Every field is classified** LOOSENS, TIGHTENS, NEUTRAL or UNDECIDABLE by the rules in
-> SPEC-P1.3.1 §3: comparison and threshold judged jointly on the pass set; `action` on the
-> KILL > DENY > MODIFY > ALLOW lattice; `mode` enforce → monitor is a loosening; `scope` by
-> coverage; removing a rule is a loosening; and every leaf outside `rules` by
-> `CONFIG_KEY_DIRECTIONS`.
+> | Direction of a change | Approvals | Authority |
+> |---|---|---|
+> | **Tightens** | **0** — automatic | ADR-09 row 3: "tightening is always safe" |
+> | **Neutral** | **0** | SPEC-P1.3.1 §3 |
+> | **Loosens** | **2 distinct identities** | This spec, §5.3; Owner Ruling 12 (DECISIONS.md, 2026-10-16) |
+> | **Undecidable** — the diff cannot prove a direction | **2 distinct identities** | Owner Ruling 12: UNDECIDABLE fails closed to LOOSENS |
+> | **Override a risk DENY** | **Impossible. No approver, no code path** | ADR-09 final row, invariant I2 |
 >
-> **The two-person rule applies to every LOOSENS and every UNDECIDABLE change.** UNDECIDABLE is
-> treated as a loosening because a change that cannot be proven to tighten does not get the
-> tightening path ([CONST-6]).
+> A policy change is every difference between the version in force and the version proposed, in
+> every (market, environment) combination, and it needs the largest approval count that any one of
+> those differences needs.
 >
-> **A smaller pass set is not a tightening on a rule that can block an exit.** On an
-> exemption-granting rule, a `pre_exit` rule, or a rule in `LIQUIDATION_PATH_RULES`, a change
-> that would otherwise tighten is UNDECIDABLE. "Tightening is always safe" (ADR-09 row 3) holds
-> only for rules that cannot stand between the book and a risk-reducing exit.
+> **The change list is derived, never declared.** `assert_policy_change_authorised()`
+> (SPEC-P1.3.1 §5) derives the combinations from the policy files and the changes from the
+> effective documents. A caller cannot leave a change or a combination out by not mentioning it.
+> `assert_change_authorised()` and `LimitChange` are not on the approval path; `loosens_for()`
+> remains only as a test oracle.
 >
-> **The approval count is the active version's.** `min_approvals_to_loosen` is read from the
+> **Every field is classified, by Owner Ruling 12.** A change loosens when it widens the permitted
+> set.
+>
+> - **Threshold:** direction depends on the comparison. Raising an `lte` or `lt` bound loosens;
+>   raising a `gte` or `gt` bound tightens. Any change of an `eq` bound is undecidable.
+> - **Action:** moving down `KILL > HALT_ENTRIES > DENY > MODIFY > ALLOW` loosens. Until the Owner
+>   ranks `HALT_ENTRIES` against `DENY`, a change between those two is undecidable.
+> - **Mode:** `enforce` → `monitor` loosens, always.
+> - **Comparison:** any change is undecidable.
+> - **Scope:** narrowing loosens and widening tightens, on the order SPEC-P1.3.1 §3.3 defines; a
+>   pair that order cannot rank is undecidable.
+> - **Removing** a rule loosens, always. **Adding** a rule is itself never a loosening. What an
+>   added or changed rule does to *other* rules is recorded against them: an exemption it grants
+>   loosens the exempted rule's scope, and a kill it can take ahead of an existing GLOBAL kill
+>   (§4.2's lowest-id binding) is undecidable for that GLOBAL rule (SPEC-P1.3.1 §3.6).
+> - **Severity** never loosens on its own; changed together with the action, it takes the
+>   action's direction.
+>
+> Every other rule field, every key outside `rules`, and every layer file is classified by
+> SPEC-P1.3.1 §3, which ends in UNDECIDABLE for anything it does not name.
+>
+> **UNDECIDABLE is a fourth outcome, not an error, and it is never passed as neutral.** For
+> approval it counts as a loosening (`[CONST-6]`).
+>
+> **The approval count is the version in force's.** `min_approvals_to_loosen` is read from the
 > version being replaced, never from the version being approved.
 >
-> **Two distinct *identities*, not two approvals.** Unchanged from v0.1: normalised and
-> de-duplicated; `["js", "JS "]` is one person.
+> **Two distinct *identities*, not two approvals.** Each approval is an Ed25519 signature, by an
+> enrolled identity, over a digest of the exact old and new content hashes of every combination.
+> Identities are normalised and de-duplicated (`["js", "JS "]` is one person), and two identities
+> sharing a key are one approver.
+>
+> **An approval is valid only for the version it was given against.** It is applied only if, when
+> the new `config_version` rows are written, every combination's version in force and candidate
+> still hash to what was approved. Otherwise the change is re-diffed and re-approved.
+>
+> **The constitution is also pinned in code.** `tests/verify_p13_policy_diff.py` pins the
+> `threshold`, `action`, `mode`, `comparison` and `scope` of every rule whose authority cites
+> `[CONST]` or `IMMUTABLE`, and the `scope` and `mode` of every rule. Changing a pinned value also
+> needs a reviewed code change (ADR-09 row 10), whatever its direction.
+>
+> **This is stricter than a FROZEN ADR, and that is why it is permitted.** ADR-09 row 2 authorises
+> the Owner *alone* to increase a limit. Requiring two is a tightening of that control, and ADR-09
+> row 3 says tightening is always safe and needs no approval — so no constitutional amendment is
+> required and **none has been made**.
+>
+> > **Operational consequence, stated rather than discovered.** At team size 1 (`[DEFAULT-3]` of
+> > P0.1), every LOOSENS and every UNDECIDABLE change is **impossible** until a second approver is
+> > enrolled. That includes any comparison change, any edit to a config key SPEC-P1.3.1 does not
+> > name, any new layer file, any change to a rule that can take a non-GLOBAL kill ahead of a
+> > GLOBAL one, and — until the Owner ranks `HALT_ENTRIES` — Ruling 14's own change of `LOSS-001`
+> > and `LOSS-002` from `DENY` to `HALT_ENTRIES`. Tightenings that change no other rule, and the
+> > kill switch, remain unblocked.
 
-The table at the head of §5.3 gains one row:
+**Differences from the d8067b6 text, and the ruling line or finding behind each:**
 
-| Direction | Approvals | Authority |
+| d8067b6 text | Replacement | Why |
 |---|---|---|
-| **Undecidable** — the diff cannot prove the direction | **2 distinct identities** | SPEC-P1.3.1 §3, `[CONST-6]` |
+| "comparison and threshold judged jointly on the pass set" | Threshold by comparison; any comparison change undecidable | Ruling 12, `threshold` and `comparison` rows |
+| "`action` on the KILL > DENY > MODIFY > ALLOW lattice" | Ladder with `HALT_ENTRIES`, plus the interim unordered pair | Ruling 12 `action` row; Ruling 14; B2 |
+| "`scope` by coverage" | Scope by SPEC-P1.3.1 §3.3 | Ruling 12 `scope` row; B4 |
+| (no addition or severity rule) | Addition never loosens; effects on other rules recorded against them; severity follows the action | Ruling 12, addition and severity rows; B3; B5 (X2S-1) |
+| "every (market, environment) combination that will be loaded" | Combinations derived from the policy files | X2S-2, X2S-9 |
+| "Two distinct identities … normalised" | Signed by enrolled identities; shared keys count once | X2S-10 |
+| (absent) | Approval bound to the version in force when applied | X2S-3 |
+| Paragraph "**A smaller pass set is not a tightening on a rule that can block an exit** …" | **Removed** | No ruling covers it; B1 default (A) |
+| (absent) | Pins paragraph | Ruling 12, "Required tests" |
+| Operational consequence names limit increases only | Names UNDECIDABLE cases, layer files, kill displacement, HALT_ENTRIES | B2, B5, C-41 |
 
-## 6. Error paths
+**If the Owner chooses B1 option (B)**, insert after the "UNDECIDABLE is a fourth outcome"
+paragraph:
+
+> **A narrower permitted set is not a tightening on a rule that can stand between the book and a
+> risk-reducing exit.** On KILL-002's `exempts`, EXEC-001's `allowed_values_emergency`, HOLD-001,
+> TURN-002, RATE-001, RATE-002, DATA-001 and LIQ-001, and on any rule whose `measurement.timing` is
+> `pre_exit`, a change that would otherwise tighten is UNDECIDABLE (Owner ruling on SPEC-P1.3.1 B1).
+
+**Not part of this amendment, but owed elsewhere:** SPEC-P1.3 §4.1's gate lattice must gain
+`HALT_ENTRIES` (#17); SPEC-P1.3 §4.2 / `_combine` should take B5 option (d); SPEC-P1.3's CONTRACTS
+rows for `assert_change_authorised` and `loosens_for` must say "not on the approval path"; the
+header version and freeze record are Q-P1.3.1-9.
+
+---
+
+## 7. Test requirements
+
+### 7.1 Rules that apply to every test
+
+1. **`require()` only.** No bare `assert` in `tests/verify_p13_policy_diff.py`,
+   `tests/mutate_x5r_g9.py` or `tests/mutate_policy_diff_code.py`. `t_no_bare_assert` parses each
+   file with `ast` and fails on any `ast.Assert` node.
+2. **Both interpreters.** Every suite runs as `py -3.11 <suite>` and `py -3.11 -O <suite>`, and on
+   Python 3.12+ in CI (condition 15).
+3. **A test counts only if it fails when the thing it tests is broken, and the evidence names that
+   test.** A suite exiting non-zero is not evidence on its own (X2S-4). Every suite prints one line
+   per failure, `FAILED <test_name>: <message>`, and every pin failure message begins with
+   `<RULE-ID>.<field>` (for example `EXP-002.action`).
+4. **Real file.** Pins read `config/policy.yaml` through `PolicyLoader` and compare against literal
+   tables in the test file.
+
+### 7.2 Pins
+
+**(a) Five attributes for the 20 constitutional rules**, plus `on_missing_input`, `kill_scope`,
+`allowed_values`, `allowed_values_emergency`, `disallowed_values`, `measurement` (basis, window,
+timing), `inputs`, absence of `threshold_ref` and `threshold_input`, and `binds`. One test per
+rule, `t_pin_<RULE_ID with _>`.
+
+| Rule | action | mode | comparison | scope | threshold / value set |
+|---|---|---|---|---|---|
+| EXP-001 | DENY | enforce | lte | pool | 0.050 |
+| EXP-002 | DENY | enforce | lte | pool | 0.200 |
+| EXP-003 | DENY | enforce | lte | pool | 2.0 |
+| EXP-004 | DENY | enforce | lte | pool | 1.0 |
+| LOSS-001 | DENY | enforce | lte | pool_and_consolidated | 0.020 |
+| LOSS-002 | DENY | enforce | lte | pool_and_consolidated | 0.050 |
+| LOSS-003 | KILL (POOL; on missing KILL) | enforce | lte | pool | 0.100 |
+| LOSS-004 | KILL (GLOBAL; on missing KILL) | enforce | lte | consolidated | 0.100 |
+| SIZE-001 | MODIFY | enforce | lte | pool | 0.010 |
+| LIQ-001 | MODIFY | enforce | lte | instrument | 0.010 |
+| RATE-001 | DENY | enforce | lte | global | 20 |
+| RATE-002 | DENY | enforce | lte | strategy | 10 |
+| STOP-001 | DENY | enforce | eq | instrument | 2.5 |
+| EXEC-001 | DENY | enforce | in | instrument | allowed `{LIMIT}`; emergency `{MARKET, LIMIT}` |
+| DATA-001 | DENY | enforce | lte | instrument | 600 |
+| REGIME-001 | DENY | enforce | not_in | market | disallowed `{UNKNOWN}` |
+| KILL-001 | DENY | enforce | in | global | allowed `{ARMED}` |
+| AUDIT-001 | DENY | enforce | exists | global | — |
+| LLM-001 | DENY | enforce | eq | global | allowed `{false}` |
+| LLM-002 | DENY | enforce | exists | global | — |
+
+`t_constitutional_set_is_exactly_the_table` pins membership. When #17 applies Ruling 14, LOSS-001
+and LOSS-002 become `HALT_ENTRIES` in a reviewed edit to this table.
+
+**(b) `scope` and `mode` for all 47 rules** (`t_scope_and_mode_pinned_for_every_rule`; on failure
+it reports every mismatch, one `<RULE-ID>.<field>` per message line), and
+`t_pinned_rule_set_is_exactly_the_file` (the 47 ids below and no others).
+
+| Scope | Rules (all `enforce` unless marked) |
+|---|---|
+| `pool` (15) | EXP-001, EXP-002, EXP-003, EXP-004, EXP-005, EXP-006, LOSS-003, SIZE-001, CASH-001, **CASH-002 (monitor)**, PORT-001, **PORT-002 (monitor)**, TURN-001, TURN-002, RECON-001 |
+| `instrument` (13) | SIZE-002, LIQ-001, STOP-001, EXEC-001, HOLD-001, HOLD-002, HOLD-003, EDGE-001, INST-001, INST-002, DATA-001, DATA-002, DATA-003 |
+| `global` (9) | RATE-001, FX-001, KILL-001, KILL-002, AUDIT-001, AUDIT-002, LLM-001, LLM-002, LLM-003 |
+| `market` (6) | UNIV-001, UNIV-002, UNIV-003, UNIV-004, UNIV-005, REGIME-001 |
+| `pool_and_consolidated` (2) | LOSS-001, LOSS-002 |
+| `consolidated` (1) | LOSS-004 |
+| `strategy` (1) | RATE-002 |
+
+Promoting PORT-002 (Q-P1.3-4) or CASH-002 is a TIGHTENS for governance but also a reviewed edit to
+this table.
+
+**(c) Kept:** `t_exemption_scope_is_pinned` — KILL-002 is `ALLOW`/`enforce` with `exempts` exactly
+`{CASH-001, CASH-002, KILL-001, HOLD-001, TURN-001, TURN-002, EXEC-001}`, and no other rule carries
+`exempts`. **(d) New:** `t_kill_scope_rules_are_pinned` — the rules with `action: KILL` or
+`on_missing_input: KILL` are exactly LOSS-003 (POOL), LOSS-004 (GLOBAL) and AUDIT-002 (GLOBAL).
+This is the test-time half of B5: it fails the CASH-001 and FX-001 edits of X2S-1.
+
+### 7.3 The five X5R-G9 mutations
+
+`tests/mutate_x5r_g9.py` applies each to a throwaway copy of the repository.
+
+**Harness contract (X2S-4, X2S-14):**
+
+- `--must-fail SUITE`: a mutation is **KILLED** only if, in both `python` and `python -O`, the suite
+  exits non-zero **and** its `FAILED` lines include the expected test (table below) with a message
+  line beginning `<RULE-ID>.<field>` for the mutated rule and field. Any other failure does not
+  count.
+- `--must-pass SUITE`: the suite must exit 0 in both modes on every mutation, or the harness exits
+  non-zero.
+- Every mutated policy must still **load**, or the harness reports `[INVALID]` and exits non-zero.
+- `--negative-control`: re-runs every mutation against a copy of the must-fail suite in which the
+  body of every pin test — `t_pin_*`, `t_scope_and_mode_pinned_for_every_rule`,
+  `t_constitutional_set_is_exactly_the_table`, `t_pinned_rule_set_is_exactly_the_file`,
+  `t_exemption_scope_is_pinned`, `t_kill_scope_rules_are_pinned` — is replaced by `return None`.
+  It exits 0 only if **every** mutation is reported **SURVIVED**. This proves the harness attributes
+  kills to pins and not to incidental fixture failures.
+
+| Mutation | Diff classification | Basis | Expected failing test (message prefix) | One approver |
+|---|---|---|---|---|
+| EXP-002 `action` → ALLOW | LOOSENS | C-09 | `t_pin_EXP_002` (`EXP-002.action`) | refused |
+| LOSS-001 `mode` → monitor | LOOSENS | C-11 | `t_pin_LOSS_001` or `t_scope_and_mode_pinned_for_every_rule` (`LOSS-001.mode`) | refused |
+| LOSS-004 `threshold` → 0.200 | LOOSENS | C-01 | `t_pin_LOSS_004` (`LOSS-004.threshold`) | refused |
+| EXEC-001 `allowed_values` += MARKET | LOOSENS | C-20 | `t_pin_EXEC_001` (`EXEC-001.allowed_values`) | refused |
+| STOP-001 `comparison` → lte | UNDECIDABLE | C-08 | `t_pin_STOP_001` (`STOP-001.comparison`) | refused |
+
+**Acceptance:** both of these exit 0 —
+`py -3.11 tests/mutate_x5r_g9.py --must-fail tests/verify_p13_policy_diff.py --must-pass tests/verify_p13_config.py`
+(five `[KILLED]` lines; `verify_p13_config.py` passes on all five, reproducing X5R-G9), and the same
+command with `--negative-control` (five `[SURVIVED]` lines).
+
+`t_x5r_g9_each_mutation_is_gated` diffs the real file against each mutation and requires exactly
+one change with the direction and basis above, `PolicyGovernanceError` for one signed approval and
+for one identity signing twice, and success for two distinct enrolled identities (test keys
+generated in the test, never real ones). It is not counted as mutation evidence.
+
+### 7.4 Classification and authorisation tests — the required cases
+
+Each case asserts `direction` and `basis`, and the full set of records produced.
+`t_every_basis_is_exercised` fails unless the bases produced across this suite — from diff records
+and from the basis returned by `action_direction` and `scope_direction` (X2S-8) — equal
+`CLASSIFICATION_BASES`.
+
+| Basis | Required cases (expected) |
+|---|---|
+| C-01 | LOSS-004 0.10→0.20 LOOSENS; EXP-001 0.05→0.04 TIGHTENS (no C-40: EXP-001 is not kill-capable); RATE-001 20→20.0 NEUTRAL; TURN-002 0.20→0.02 TIGHTENS, authorised with zero approvals (records B1's blast radius) |
+| C-02 | PORT-001 0.20→0.10 LOOSENS; 0.20→0.30 TIGHTENS; HOLD-001 3→30 TIGHTENS; EDGE-001 2.0→1.5 LOOSENS |
+| C-03 | RECON-001 0→1 UNDECIDABLE; STOP-001 2.5→3.0 UNDECIDABLE |
+| C-04 | SIZE-002 threshold null→1 (`multiple_of`) UNDECIDABLE |
+| C-05 | EXP-001 `threshold` → `threshold_ref: portfolio.max_position_pct` UNDECIDABLE |
+| C-06 | UNIV-004 `threshold_ref` repointed UNDECIDABLE |
+| C-07 | CASH-001 `threshold_input` settled_cash→cash (inputs extended) UNDECIDABLE |
+| C-08 | STOP-001 eq→lte; EXP-001 lte→lt; EXP-001 lte→eq; EDGE-001 gte→gt; CASH-001 lte→lt; EXP-001 lte→lt with threshold 0.10 (both records); EXEC-001 in→not_in with the value set moved — all UNDECIDABLE |
+| C-09 | EXP-002 DENY→ALLOW LOOSENS; SIZE-001 MODIFY→DENY TIGHTENS; REGIME-001 DENY→KILL with `kill_scope: POOL`: action and kill_scope records TIGHTENS, **no** C-40 (REGIME-001 sorts after both GLOBAL kill rules), zero approvals. `action_direction`: KILL→HALT_ENTRIES LOOSENS; HALT_ENTRIES→MODIFY LOOSENS; MODIFY→HALT_ENTRIES TIGHTENS; HALT_ENTRIES→KILL TIGHTENS; DENY→DENY NEUTRAL — each with basis C-09 |
+| C-10 | `action_direction`: DENY→HALT_ENTRIES and HALT_ENTRIES→DENY UNDECIDABLE; "FOO"→DENY UNDECIDABLE — each with basis C-10 |
+| C-11 | LOSS-001 enforce→monitor LOOSENS; KILL-002 enforce→monitor LOOSENS; PORT-002 monitor→enforce TIGHTENS (no C-40); old = real file with LOSS-003 in monitor, new = real file: TIGHTENS **plus** C-40 on LOSS-004 |
+| C-12 | LOSS-001 pool_and_consolidated→pool LOOSENS; LOSS-004 consolidated→pool_and_consolidated TIGHTENS (no C-40: LOSS-004 is GLOBAL); LOSS-003 pool→pool_and_consolidated: scope record TIGHTENS **plus** `rules.LOSS-004.kill_displaced_by.LOSS-003` UNDECIDABLE, refused with one approver (v0.2 expected TIGHTENS alone — X2S-1); `scope_direction` same scope NEUTRAL, basis C-12 |
+| C-13 | RATE-002 strategy→global (R1); EXP-001 pool→consolidated (R1); UNIV-001 market→pool (R3); SIZE-002 instrument→strategy (R2); RATE-001 global→pool_and_consolidated (R4) — all UNDECIDABLE with the reason class in `reason`. `scope_direction` over all 49 ordered pairs equals §3.3 |
+| C-14 | EXP-001 CRITICAL→LOW NEUTRAL; HOLD-002 MEDIUM→CRITICAL NEUTRAL; authorised with zero approvals |
+| C-15 | EXP-002 DENY→ALLOW with CRITICAL→LOW: severity LOOSENS; SIZE-001 MODIFY→DENY with HIGH→LOW: severity TIGHTENS |
+| C-16 | REGIME-001 `on_missing_input` DENY→KILL TIGHTENS, no C-40, zero approvals; **FX-001** DENY→KILL: TIGHTENS **plus** C-40 on LOSS-004, refused with one approver; **AUDIT-001** DENY→KILL: TIGHTENS plus C-40 on **both** AUDIT-002 and LOSS-004; LOSS-003 KILL→DENY LOOSENS (plus C-40) |
+| C-17 | LOSS-004 kill_scope GLOBAL→POOL LOOSENS; LOSS-003 POOL→GLOBAL TIGHTENS, no C-40 |
+| C-18 | SIZE-001 MODIFY→DENY with `modify` removed: modify record TIGHTENS; LOSS-003 KILL→DENY with `kill_scope` removed: kill_scope record LOOSENS; **CASH-001** DENY→KILL with `kill_scope: POOL`: action and kill_scope records TIGHTENS **plus** C-40 on LOSS-004, refused with one approver (X2S-1) |
+| C-19 | `kill_scope: POOL` added to EXP-001 (DENY) UNDECIDABLE |
+| C-20 | EXEC-001 +MARKET LOOSENS; INST-002 +HALTED LOOSENS; KILL-001 +TRIPPED LOOSENS; EXEC-001 [LIMIT]→[MARKET] UNDECIDABLE |
+| C-21 | LLM-001 [false]→[true] UNDECIDABLE |
+| C-22 | REGIME-001 +BEAR TIGHTENS; [UNKNOWN]→[BEAR] UNDECIDABLE |
+| C-23 | `disallowed_values` added to EXEC-001 (`in`) UNDECIDABLE |
+| C-24 | EXEC-001 emergency +STOP LOOSENS; emergency → [LIMIT] TIGHTENS |
+| C-25 | INST-001 `allowed_values_ref` → `instrument_allowlist.read_only` UNDECIDABLE |
+| C-26 | KILL-002 +EXP-001 LOOSENS plus a C-36 record for EXP-001; KILL-002 minus CASH-001 TIGHTENS |
+| C-27 | EXP-001 +fx_rate TIGHTENS; minus mark_price LOOSENS with `mark_price` in `reason`; swap UNDECIDABLE; LOSS-003 +fx_rate TIGHTENS **plus** C-40 on LOSS-004 |
+| C-28 | LOSS-002 window `sessions:3`, basis `nav_current`, timing `end_of_session`: three UNDECIDABLE records |
+| C-29 | EXP-006 modify.to 0.04→0.06 LOOSENS; →0.03 TIGHTENS |
+| C-30 | SIZE-001 modify.to symbolic change UNDECIDABLE; modify.target changed UNDECIDABLE |
+| C-31 | EXP-001 authority `[CONST]` → `ADR-14` UNDECIDABLE |
+| C-32 | description and notes edits NEUTRAL; authorised with zero approvals |
+| C-33 | EXP-002 removed LOOSENS; KILL-002 removed LOOSENS; EXP-001 renamed to EXP-007 at 0.08: removal LOOSENS and the set is gated |
+| C-34 | Added enforce DENY rule TIGHTENS; added enforce DENY `pre_exit` rule TIGHTENS; added **KILL-003** (LOSS-004's predicate, `kill_scope: POOL`): addition TIGHTENS **plus** C-40 on LOSS-004, refused with one approver; added **TURN-009** KILL/POOL: TIGHTENS, no C-40 (sorts after both GLOBAL kill rules) |
+| C-35 | Added monitor DENY rule NEUTRAL; added ALLOW rule without exemptions NEUTRAL |
+| C-36 | Added KILL-003 (ALLOW, `exists` on `audit_event_id`, exempts LOSS-003 and LOSS-004): addition NEUTRAL, plus `rules.LOSS-003.exempted_by.KILL-003` and `rules.LOSS-004.exempted_by.KILL-003` LOOSENS, refused with one approver; **the same rule with `mode: monitor`: the same two C-36 records** (X2S-13) |
+| C-37 | universe.US.min_price_usd "5.00"→"1.00" LOOSENS; cost.assumed_round_trip_bps.US 25→5 LOOSENS, →40 TIGHTENS; portfolio.max_position_pct 0.05→0.08 LOOSENS; portfolio.min_cash_pct 0.20→0.10 LOOSENS; account.enforce_settled_cash false LOOSENS; instrument_allowlist.tradeable +ETF LOOSENS; permanently_banned −OPTION LOOSENS; llm.gate_width 15→30 LOOSENS; holding.min_sessions 3→30 TIGHTENS, 3→1 LOOSENS; turnover.max_nav_traded_pct_per_session 0.20→0.02 TIGHTENS; metadata.description NEUTRAL; policy_version NEUTRAL |
+| C-38 | portfolio.max_gross_override added UNDECIDABLE; universe.US.min_price_usd removed LOOSENS |
+| C-39 | schedule.US.pipeline_utc changed UNDECIDABLE; instrument_allowlist.tradeable [COMMON_STOCK]→[ETF] UNDECIDABLE; **turnover.min_sessions_between_reentry added (UNDECIDABLE), then changed 5→0 in a second diff: UNDECIDABLE**, not TIGHTENS (X2S-11) |
+| C-40 | Covered by the C-11, C-12, C-16, C-18, C-27 and C-34 cases above |
+| C-41 | New dir adds `policy.market.IN.yaml` with EXP-001 at 0.10: in each IN combination, `LAYER_ADDED` UNDECIDABLE plus `rules.EXP-001.threshold` LOOSENS; the US and market-less combinations have no records |
+
+**Authorisation tests:**
+
+- **Combinations are derived (X2S-2).** The C-41 fixture is refused with one approver even though
+  the test passes no combination list; the API has no parameter for one. A
+  `policy.market.XX.yaml` raises `PolicyDiffError`. An env file present in only one directory adds
+  its combinations.
+- **Retired combination (X2S-9).** Removing a market layer yields `LAYER_REMOVED` plus the value
+  records, and is approvable with two identities.
+- **Signatures (X2S-10).** An unenrolled identity → `PolicyGovernanceError`. A signature over a
+  different digest → `PolicyGovernanceError`. Two identities whose `public_key_for` returns the
+  same key → counted once, refused for a gated change. Two distinct enrolled keys → accepted.
+- **Compare-and-swap (X2S-3).** v1 in force, LOSS-004 at 0.10. Proposal A (LOSS-004 0.10→0.08) and
+  proposal B (a description edit) are both authorised against v1. After A is applied,
+  `assert_authorisation_current` for B raises `StaleAuthorisationError`. A candidate directory
+  edited after approval → `StaleAuthorisationError`. An unchanged in-force and candidate pair →
+  passes.
+- **Canonical payload (X2S-6).** `src/audit/events.canonical_json(auth.model_dump(mode="json"))`
+  succeeds for a real `PolicyAuthorisation` with gated changes.
+- **Models (X2S-15).** Unsorted `changes`, unsorted or duplicate `diffs`, unnormalised or duplicate
+  approver identities, and `required_approvals` outside `0`–`5` are each rejected.
+- **Counts.** A mixed set (one TIGHTENS, one LOOSENS) is refused with one identity and accepted with
+  two. A pure tightening that displaces nothing is accepted with zero. With old
+  `min_approvals_to_loosen` 3 and new 2, two identities are refused and three accepted.
+- **Fail-closed.** An unvalidatable version (`on_missing_input: ALLOW`) raises `PolicyDiffError`.
+  An identical pair yields no changes and authorises with zero identities. Two runs over equal
+  inputs give equal objects.
+- **Redaction equals the hashed mapping.** For every combination of the real directory,
+  `content_hash(EffectiveConfig.redacted) == EffectiveConfig.content_hash`. This guards the diff's
+  use of `redacted` as the effective mapping (ASSUMPTION 13).
+- **Oracle.** `t_diff_agrees_with_loosens_for_on_every_ordinal_threshold`: for every rule with a
+  numeric threshold and an `lte`/`lt`/`gte`/`gt` comparison, ×1.5 and ×0.5 (capped at 1 on
+  `*_pct`), the threshold record is LOOSENS iff `loosens_for` is true, and TIGHTENS otherwise. C-40
+  records are excluded from this comparison.
+
+### 7.5 The sweep
+
+`tests/mutate_x5r_g9.py --sweep --must-fail tests/verify_p13_policy_diff.py` generates every
+mutation below, applies each to a throwaway copy, and applies the §7.3 harness contract. The
+expected test for a mutation of rule R's field f is `t_pin_<R>` if R is constitutional and f is a
+pinned field, and `t_scope_and_mode_pinned_for_every_rule` if f is `scope` or `mode`; the message
+prefix is `R.f`. Counts at today's `policy.yaml` (re-measured by the step-2 review with its own
+script, matching exactly):
+
+| Family | Rules | Generated | Load |
+|---|---|---|---|
+| Every other `mode` | all 47 | 47 | 47 |
+| Every other `scope` | all 47 | 282 | 282 |
+| Every other `action` | 20 constitutional | 60 | 20 |
+| Every other `comparison` | 20 constitutional | 160 | 104 |
+| `threshold` ×2 and ×½ | the 14 constitutional rules with a numeric threshold | 28 | 28 |
+| Value sets: EXEC-001 +MARKET; KILL-001 +TRIPPED; LLM-001 [true]; REGIME-001 [BEAR]; EXEC-001 emergency [LIMIT] | 5 named | 5 | 5 |
+| **Total** | | **582** | **486** |
+
+Acceptance: 486 loadable, 486 KILLED by attribution, exit 0; and the same run with
+`--negative-control` reports 486 SURVIVED and exits 0.
+
+### 7.6 Completeness tests
+
+- `t_every_rule_field_is_classified`: `set(RULE_FIELDS) == set(Rule.model_fields)`.
+- `t_every_action_is_ranked`: every `RuleAction` value is in `ACTION_LADDER`, and
+  `ACTION_LADDER ⊆ {RuleAction values} ∪ {"HALT_ENTRIES"}`.
+- `t_ladder_agrees_with_gate_precedence` (§3.2).
+- `t_every_scope_pair_is_classified`: all 49 ordered pairs, agreeing with §3.3.
+- `t_config_keys_are_exact`: every pattern in `CONFIG_KEY_DIRECTIONS` except the last contains no
+  `*`, `?` or `[`; the last is `("**", UNDECIDABLE)`; every listed key exists in today's file.
+- `t_every_basis_is_exercised` (§7.4).
+- `t_no_bare_assert` (§7.1).
+- `t_v1_authorisation_not_on_the_approval_path`: no module under `src/` other than
+  `src/config/loader.py` calls `assert_change_authorised` (AST scan).
+
+### 7.7 The tests fail when the code is broken
+
+`tests/mutate_policy_diff_code.py` applies each code mutation below to a throwaway copy of
+`src/config/policy_diff.py` and runs `tests/verify_p13_policy_diff.py` in both modes. A mutation is
+caught only if the **named** test is among the `FAILED` lines in both modes; a negative control
+with those tests stubbed must report every mutation uncaught. The X2 of the code (step 4) re-runs
+it.
+
+| # | Code mutation | Must be caught by (named test) |
+|---|---|---|
+| M-1 | `requires_two_person` excludes UNDECIDABLE | the C-08 authorisation case; `t_x5r_g9_each_mutation_is_gated` |
+| M-2 | DENY and MODIFY swapped in `ACTION_LADDER` | the C-09 case |
+| M-3 | `ACTION_UNORDERED_PAIRS` emptied | the C-10 case |
+| M-4 | A comparison change classified by interval containment (v0.1 behaviour) | the C-08 case (`lte→lt`) |
+| M-5 | Severity classified on its own rank | the C-14 case |
+| M-6 | Approval count read from the new version | the counts test (old 3, new 2) |
+| M-7 | Approver de-duplication removed | the signatures test (one identity twice) |
+| M-8 | C-36 records not emitted | the C-36 case |
+| M-9 | `SCOPE_NARROWER_THAN` pairs reversed | the C-12 case |
+| M-10 | C-01 and C-02 directions swapped | the C-01 case; the oracle test |
+| M-11 | Config catch-all set to NEUTRAL | the C-39 case |
+| M-12 | Removal of a rule with `exempts` classified UNDECIDABLE | the C-33 case |
+| M-13 | C-40 records not emitted | the C-16 FX-001 case; the C-18 CASH-001 case |
+| M-14 | `derive_combinations` ignores market layer files | the combinations test |
+| M-15 | `assert_authorisation_current` skips the in-force hash check | the compare-and-swap test |
+| M-16 | Signature verification skipped | the signatures test (wrong digest) |
+| M-17 | `CONFIG_KEY_DIRECTIONS` restored to v0.2's `turnover.*` glob | `t_config_keys_are_exact`; the C-39 two-step case |
+
+---
+
+## 8. Error paths
 
 | Condition | Exception / outcome | Fail-closed behaviour |
 |---|---|---|
-| Old or new document fails `PolicyDocument` validation | `PolicyDiffError` (a `PolicyError`) | No change list exists; nothing is authorised. Raised by `assert_policy_change_authorised` too |
-| A comparison bound is a token on one side and a number on the other | UNDECIDABLE | Two-person |
-| Two different tokens | UNDECIDABLE | Two-person |
-| A set-valued key is not a list on one side | UNDECIDABLE | Two-person |
-| A numeric key becomes a non-number or `null` | UNDECIDABLE | Two-person |
-| A config key with no table entry | UNDECIDABLE (`**` catch-all) | Two-person |
-| A `Rule` field with no classification | Impossible at runtime: `t_every_rule_field_is_classified` fails CI first | — |
-| Loosening/undecidable change with fewer distinct approvers than the **active** version requires | `PolicyGovernanceError` | Change refused |
-| Any change set that is entirely TIGHTENS/NEUTRAL | Returns the `PolicyDiff` | Caller writes it to the audit trail before the version takes effect ([CONST-5]) |
+| Old or new effective document fails `PolicyDocument` validation, or the loader raises any `PolicyError` | `PolicyDiffError` | No change list; nothing authorised |
+| A document uses `HALT_ENTRIES` before `RuleAction` has it | `PolicyDiffError` (validation) | As above |
+| A market layer for a market not in `MARKETS`, or an invalid env layer name | `PolicyDiffError` | Nothing authorised |
+| `changes` or `diffs` out of canonical order, or duplicated | Model validation error → `PolicyDiffError` | Nothing authorised |
+| **Any other exception during derivation or classification** (for example a `TypeError` from an unexpected value shape) | `PolicyDiffError`, chained to the original | Nothing authorised |
+| An action value missing from `ACTION_LADDER` | UNDECIDABLE (C-10) | Two-person; CI already fails by `t_every_action_is_ranked` |
+| A scope value missing from the scope table | UNDECIDABLE (C-13) | Two-person |
+| A bound is a token on one side and a number on the other | UNDECIDABLE (C-05) | Two-person |
+| A set-valued key is not a list on one side; a numeric key turns non-numeric or `null`; an unlisted key | UNDECIDABLE (C-39) | Two-person |
+| A `PolicyChange` whose `basis` is not a row of this spec | Model validation error → `PolicyDiffError` | Nothing authorised |
+| A `Rule` field with no row | Impossible at runtime: `t_every_rule_field_is_classified` fails CI first | — |
+| An approval by an unenrolled identity, or with a signature that does not verify | `PolicyGovernanceError` | Change refused |
+| Fewer distinct approvers (identity and key) than the version in force requires, with any gated change | `PolicyGovernanceError` | Change refused |
+| At apply time, the in-force or candidate hash of any combination differs from the authorisation, or the combination set differs | `StaleAuthorisationError` | Nothing written; re-diff and re-approve against the version in force |
+| Every change TIGHTENS or NEUTRAL, with no C-36/C-40/C-41 record | `PolicyAuthorisation` with `required_approvals = "0"` | Caller writes `CONFIG_CHANGED` before the version takes effect (`[CONST-5]`) |
+| Audit write of the authorisation fails | — (caller) | The version does not take effect (`[CONST-5]`) |
 
-## 7. Upstream defects found — required output
+---
 
-| # | Defect | Evidence (executed) | Consequence | Owner |
-|---|---|---|---|---|
-| **F-1** | `threshold_ref` is never validated, and 3 of 5 do not resolve. UNIV-001 references `universe.{market}.min_price`; the key is `min_price_usd`/`min_price_inr`. UNIV-002 references `min_market_cap`; the key is `min_market_cap_usd`/`_inr`. UNIV-003's "ref" is an expression, `max(...)`, not a key | Resolution check over `policy.yaml`: UNIV-001/002/003 DO NOT RESOLVE for US or IN; UNIV-004/005 resolve | Whatever P2.9 does with an unresolvable ref is unspecified. If it treats it as a missing input, UNIV-001..003 deny every instrument — safe, but an empty universe. If it does anything else it is inventing a threshold. **The diff cannot attribute a key change to these rules**, which is why config keys are classified directly (§3.5) | P1.3 v0.2: validate every `threshold_ref` resolves; split UNIV-003 into data |
-| **F-2** | **STAGE-1-GAP-AUDIT §9 says no Block A number is "stated two ways". It is.** `portfolio.max_position_pct: 0.050` duplicates EXP-001; `forced_trim_pct` EXP-006; `min_cash_pct` PORT-001; `turnover.*` TURN-001/002; `holding.min_sessions/time_stop_sessions/hard_max_sessions` HOLD-001/002/003; `decision.min_edge_multiple_of_cost` EDGE-001; `account.pdt_max_day_trades_5d` CASH-002 | `portfolio.max_position_pct 0.05` and `EXP-001 0.05` read from the same load | The two copies can diverge in one signed version and nothing detects it. The diff governs both; it does not reconcile them | P1.3 v0.2: one copy, referenced by `threshold_ref` |
-| **F-3** | `PolicyGate` applies an exemption whenever an ALLOW rule passes, **regardless of `mode`**. A monitor-mode KILL-002 still exempts | Set KILL-002 to `monitor`, fail CASH-001: verdict `ALLOW` | §4.3's "monitor does not bind" is false for exemptions. Mode changes on exemption rules are UNDECIDABLE here until fixed | P1.3 v0.2: `if passed and rule.binds and ...` in `PolicyGate.evaluate` |
-| **F-4** | The signature covers the **merged** document. Any market, environment or override layer changes the signed hash | Base hash ≠ hash with a one-key `policy.market.IN.yaml` | One signature per (market, env, override) combination, not one per policy version. And any edit to the `operator_override` layer invalidates the signature, so the process does not start until it is re-signed. The override deny-list covers `rules.`, `governance.` and `kill_switch.` only: an override setting `portfolio.max_position_pct: 0.08` loads (re-run 2026-10-21) while EXP-001 stays at 0.05 | Q-P1.3.1-2 |
-| **F-5** | No field says whether a rule applies to exits | Schema of `Rule` | `LIQUIDATION_PATH_RULES` has to be explicit (§3.4, `[DEFAULT-D10]`) | P1.3 v0.2: `applies_to: entry \| exit \| both` |
-| **F-6** | `assert_change_authorised()` is still exported and still trusts a caller-supplied change list | `loader.py` §8 | The bypass X5R-G2 describes stays callable. This phase does not edit the FROZEN loader; the amendment forbids its use on the approval path | P6.2 / P6.4 must call `assert_policy_change_authorised`; remove in P1.3 v0.2 |
-| **F-7** | ADR-09 row 3 "tightening is always safe" is false for exit-gating rules | §0, §3.4 | Narrowed here, in §5.3, without amending ADR-09 | Owner may wish to annotate ADR-09 row 3 |
+## 9. Upstream defects — required output
 
-## 8. Verification
+| # | Defect | Evidence | Consequence | Owner | Status |
+|---|---|---|---|---|---|
+| **F-1** | `threshold_ref` is never validated; UNIV-001, UNIV-002 and UNIV-003 do not resolve to any key | v0.1 §7; the P1.3 v0.2 plan | P2.9 behaviour on an unresolvable ref is unspecified. Keys are classified directly (§3.7) | SPEC-P1.3 v0.2 | Carried |
+| **F-2** | Rule constants duplicated in non-rule config | v0.1 §7 | Two copies can diverge in one signed version. The diff governs both | SPEC-P1.3 v0.2 | Carried |
+| **F-3** | `PolicyGate` grants exemptions whatever the grantor's `mode` | v0.1 §7; re-measured in step 2 (monitor grantor → ALLOW at 25% drawdown) | C-35 no longer claims an added monitor ALLOW "cannot bind"; C-36 fires in any mode | SPEC-P1.3 v0.2 | Carried |
+| **F-4** | The signature covers the merged document; the override deny-list covers only `rules.`, `governance.`, `kill_switch.`; market and environment layers have no deny-list at all and may carry a whole `rules:` list (measured in step 2) | v0.1 §7; X2S-2 | One signature per combination. Every layer is now covered by derived combinations and C-41 | SPEC-P1.3 v0.2; Q-P1.3.1-2 | Carried |
+| **F-5** | No field says whether a rule applies to exits | `Rule` schema | Ruling 13a needs it in P2.9 (Q-P1.3.1-11) | SPEC-P1.3 v0.2, P2.9 | Carried |
+| **F-6** | `assert_change_authorised()` still trusts a caller-supplied change list and is still exported | loader.py §8 | Guarded by `t_v1_authorisation_not_on_the_approval_path` | SPEC-P1.3 v0.2 | Carried |
+| **F-8** | KILL-002 is `eq` with no comparand; the validator accepts it | `Rule._coherent` | KILL-002's predicate is unstated | SPEC-P1.3 v0.2, P2.9 | Carried; Q-P1.3.1-7 |
+| **F-9** | An added ALLOW rule can exempt KILL rules | Measured 2026-10-21, twice | Closed in the diff by C-36 `[DEFAULT-B3]`, at test time by §7.2(c) | This spec; SPEC-P1.3 v0.2 (B3 option d) | Mitigated |
+| **F-10** | Ruling 12 reads `scope` as coverage; the schema uses it as an aggregation cell | §3.3 | B4 | Owner; SPEC-P1.3 v0.2 | Carried |
+| **F-11** | Two records say `KILL > HALT_ENTRIES > DENY` (#6 comments 6221094775, 6222485680); two say "between MODIFY and DENY" (#16 comment 6221092946, the ratified full text, and DECISIONS.md) | §1 B2 | B2 | Owner | Carried |
+| **F-12** | `trading.config_version.approval_id` is a single `uuid` | SPEC-P1.2 §6.9 | A two-person approval cannot be recorded on the row it authorises | P1.2 / P1.4 / P6.4 | Carried; Q-P1.3.1-6 |
+| **F-13** | d8067b6 recorded condition 12 CLOSED prematurely | d8067b6; reopened in **4397c4f**, which records it OPEN, re-running per #6 | Closure criteria in §10 | Owner | Corrected upstream in 4397c4f |
+| **F-14** | **New.** On the unedited policy, a LOSS-003 and LOSS-004 co-breach yields **KILL, LOSS-003, POOL**: the lowest-id KILL binds with its own scope | Measured in step 2 and again for this revision | Contradicts SPEC-P1.3 §10 ("consolidated drawdown 10% → GLOBAL KILL") and ADR-15 §4 ("stricter binds") | SPEC-P1.3 v0.2 (B5 option d) | New |
+| **F-15** | **New.** A KILL produced by `on_missing_input: KILL` on a non-KILL rule carries `kill_scope = None`, and no spec says what P2.10 does with a scopeless kill | `_combine` reads `rule.kill_scope`; FX-001 edit measured KILL/None | Undefined kill scope at the most safety-critical boundary | SPEC-P1.3 v0.2 (B5 option d treats None as GLOBAL); P2.10 | New |
 
-All runs: Python 3.13.16, pydantic 2.13.5, PyYAML 6.0.3, cryptography 50.0.1 (claude.ai sandbox),
-and re-run on Python 3.11 with pydantic 2.13.5 against the full repository (2026-10-21).
-**Not run on 3.12** (condition 15 stays open).
+(F-7 of v0.1 was withdrawn in v0.2; it is B1.)
 
-| Check | Result |
-|---|---|
-| `tests/verify_p13_policy_diff.py` on the real file | **55/55 PASS**, with and without `-O` |
-| `tests/verify_p13_config.py` on the real file (unchanged) | 39/39 PASS |
-| `tests/mutate_x5r_g9.py --must-fail tests/verify_p13_policy_diff.py` | **5/5 KILLED**, each under `-O`. Each mutated policy still loads, so each is a real, deployable mutation |
-| Same five against `verify_p13_config.py` | 5/5 survive — X5R-G9 reproduced |
-| Sweep: every alternative `action`/`mode`/`comparison`/`scope` value on each of the 20 constitutional rules | 360 mutations: 96 rejected by the loader; **264 loadable, 264 killed** by the new suite; the old suite killed 13 of the 264 |
+---
 
-Which tests kill each X5R-G9 mutation (under `-O`):
+## 10. STAGE-1-GAP-AUDIT §10 — condition 12
 
-| Mutation | Failing tests |
-|---|---|
-| EXP-002 `action` → ALLOW | `t_pin_EXP_002`, `t_action_follows_the_lattice`, `t_x5r_g9_…` |
-| LOSS-001 `mode` → monitor | `t_pin_LOSS_001`, `t_mode_enforce_to_monitor_loosens_and_back_tightens`, `t_x5r_g9_…` |
-| LOSS-004 `threshold` → 20% | `t_pin_LOSS_004`, `t_threshold_direction_respects_comparison`, `t_x5r_g9_…` |
-| EXEC-001 allows MARKET | `t_pin_EXEC_001`, `t_value_sets`, `t_x5r_g9_…` |
-| STOP-001 `comparison` → lte | `t_pin_STOP_001`, `t_comparison_changes_by_pass_set`, `t_x5r_g9_…` |
+**Current state (4397c4f):** OPEN, "in progress, re-running per #6's execution sequence", with a
+"Condition 12 — reopened 2026-10-21" note. That record is correct and this spec proposes no edit to
+it now.
 
-The pins are the primary detector. The diff tests also fail on a mutated tree only because their
-fixtures are read from the mutated file — that is incidental and is not counted as evidence.
-
-**Pinned per constitutional rule** (20 rules: authority cites `[CONST…]` or `IMMUTABLE`):
-`action`, `mode`, `comparison`, `scope`, `threshold`, `on_missing_input`, `kill_scope`,
-`allowed_values`, `allowed_values_emergency`, `disallowed_values`, `measurement` (basis, window,
-timing), `inputs`, absence of `threshold_ref`/`threshold_input`, and `binds`.
-`t_constitutional_set_is_exactly_the_table` pins membership, so a rule cannot leave the set by an
-`authority` edit and a new `[CONST]` rule cannot arrive unpinned.
-
-**Not pinned, deliberately:** the 27 non-constitutional rules. A tightening of one needs zero
-approvals by governance; a pin would turn it into a `DEPLOY_CODE` change. They are governed at
-change time by the diff, not at test time by a table.
-
-**`tests/verify_p11_x5_conditions.py`:** not runnable in the drafting sandbox (no
-`src/domain/models.py`). Re-run against the full repository: 12/12, with and without `-O`, and
-unaffected by the five mutations.
-
-## 9. Text for STAGE-1-GAP-AUDIT §10 — condition 12 to CLOSED
-
-Replace the condition 12 row with:
+**The condition text itself is stale** (X2S-17). It still reads "Pin `action`, `mode`, `comparison`
+and `scope` of the constitutional rules; define loosening for a non-threshold change (X5R-G2)".
+When the condition is closed, the row should read:
 
 | # | Condition | Gates | Severity | State |
 |---|---|---|---|---|
-| **12** | Pin `action`, `mode`, `comparison` and `scope` of the constitutional rules; define loosening for a non-threshold change (X5R-G2) | P2.9; any policy change | HIGH | **CLOSED** 2026-10-21 by SPEC-P1.3.1-POLICY-DIFF v0.1 — see evidence below |
+| **12** | Pin all five attributes (`threshold`, `action`, `mode`, `comparison`, `scope`) of every constitutional rule and `scope` and `mode` of every rule; classify every policy change by Owner Ruling 12, with UNDECIDABLE failing closed to the two-person rule (X5R-G2, X5R-G9) | P2.9; any policy change | HIGH | **CLOSED** by SPEC-P1.3.1-POLICY-DIFF (FROZEN), with the evidence below |
 
-Add below the table:
+**Closure criteria.** The row may read CLOSED only when the closing record quotes, from one commit,
+all of the following:
 
-> **Condition 12 — closure evidence.** (1) `tests/verify_p13_policy_diff.py` pins 16 governed
-> fields of each of the 20 constitutional rules and pins the membership of that set; it uses
-> `require()` and passes 55/55 under both `python` and `python -O`. (2) The five X5R-G9 mutations
-> each still load and are each killed under `-O` (`tests/mutate_x5r_g9.py --must-fail
-> tests/verify_p13_policy_diff.py`, exit 0). (3) A sweep of every alternative `action`, `mode`,
-> `comparison` and `scope` across the 20 rules produced 264 loadable mutations, all killed; the
-> pre-existing suite killed 13. (4) `src/config/policy_diff.py` derives the complete change list
-> between two policy versions and classifies every `Rule` field and every config leaf as
-> LOOSENS / TIGHTENS / NEUTRAL / UNDECIDABLE; `t_every_rule_field_is_classified` makes an
-> unclassified field a CI failure. (5) SPEC-P1.3 §5.3 is amended to apply the two-person rule
-> to every LOOSENS and UNDECIDABLE change, with the approval count taken from the active version.
-> **Residue carried, not closed:** F-1 to F-6 of SPEC-P1.3.1 §7 (P1.3 v0.2); Q-P1.3-1 (second
-> approver); Python 3.12+ (condition 15).
-
-And in §9, the sentence "A rule's `action`, `mode`, `comparison` and `scope` are not pinned" is
-replaced by "Pinned by SPEC-P1.3.1 (condition 12, CLOSED)". The sentence "none stated two ways"
-is replaced by "none stated two ways inside `rules`; ten are duplicated in non-rule config
-(SPEC-P1.3.1 F-2)".
+1. SPEC-P1.3.1 at status FROZEN, after an X2 of the spec (delta re-review of v0.3) in a separate
+   conversation with its BLOCKER findings cleared, and **B1 to B5** each answered by the Owner or
+   its default ratified.
+2. `src/config/policy_diff.py` generated by X1 citing only the frozen spec, with an X2 of the code
+   in a separate conversation.
+3. `py -3.11 tests/verify_p13_policy_diff.py` and `py -3.11 -O tests/verify_p13_policy_diff.py`
+   both exit 0, and the same on Python 3.12+ in CI (or condition 15 named as carried).
+4. `py -3.11 tests/mutate_x5r_g9.py --must-fail tests/verify_p13_policy_diff.py --must-pass
+   tests/verify_p13_config.py` exits 0 with five `[KILLED]` lines, **each attributed to the pin in
+   §7.3**; and the same command with `--negative-control` exits 0 with five `[SURVIVED]` lines.
+5. `py -3.11 tests/mutate_x5r_g9.py --sweep --must-fail tests/verify_p13_policy_diff.py` exits 0
+   with every loadable mutation KILLED by attribution, the loadable count equal to §7.5's for the
+   policy file at that commit; and with `--negative-control`, every one SURVIVED.
+6. `py -3.11 tests/mutate_policy_diff_code.py` exits 0, every M-1 to M-17 caught by its named test
+   in both modes, and its negative control passes.
+7. `t_no_bare_assert` passes, and `verify_p13_config.py` and `verify_p11_x5_conditions.py` still
+   pass in both modes.
+8. SPEC-P1.3 §5.3 carries the §6 text, and its version and freeze record are settled
+   (Q-P1.3.1-9).
+9. If B5's default (a) was ratified rather than option (d) landed, F-14 and F-15 are carried in
+   writing against SPEC-P1.3 v0.2 and P2.10.
 
 ---
 
@@ -337,54 +1120,94 @@ is replaced by "none stated two ways inside `rules`; ten are duplicated in non-r
 
 | # | Decision | Rationale | Reversible? | Blast radius if wrong |
 |---|---|---|---|---|
-| 1 | Direction is judged on the pass set; comparison and threshold jointly | One algebra covers thresholds, comparisons, value sets and scope. Separate judgement is how STOP-001 `eq → lte` slipped | Yes | **Critical** — a misclassified loosening takes the zero-approval path |
-| 2 | UNDECIDABLE is a first-class outcome and costs two approvers | Required; [CONST-6] applied to governance | No | Low — the cost is friction, never a loss |
-| 3 | Shrinks on exemption, `pre_exit` and liquidation-path rules are UNDECIDABLE, not TIGHTENS | A "tightening" there can trap a liquidation; ADR-09 row 3 does not hold for them | Yes | **Critical** if reversed — one operator could disable the exit path |
-| 4 | The diff runs on merged effective documents, per (market, env) | Layer-only loosenings would otherwise be invisible | Yes | High |
-| 5 | Monitor rules are classified as if they bound | Blocks the loosen-then-promote laundering path | Yes | High |
-| 6 | Approval count comes from the active version | A version must not approve itself | No | High |
-| 7 | Unlisted config keys default to UNDECIDABLE | Fail closed; a rule may read any key | Yes | Medium — operational friction at team size 1 |
-| 8 | Pins cover the 20 constitutional rules, not all 47 | Pinning non-constitutional rules makes free tightenings into code deployments | Yes | Medium — non-constitutional rules rely on change-time diffing |
-| 9 | `LIQUIDATION_PATH_RULES` is an explicit, test-pinned set | The schema has no `applies_to` (F-5) | Yes — replace with a schema field | High if a new exit-gating rule is not added |
-| 10 | The FROZEN loader is not edited | Code under a frozen spec changes with a spec revision, not a side-patch | Yes | Low — F-3 and F-6 stay open until P1.3 v0.2 |
+| 1 | Direction is decided by Ruling 12's rows; where it has none, by its permitted-set principle when provable; otherwise UNDECIDABLE | The ruling is binding and adds one principle; this spec adds none | No — it is the ruling | **Critical** |
+| 2 | Any `comparison` change is UNDECIDABLE, and so is every predicate field changed with it | Ruling 12 `comparison` row | No — ruling | High |
+| 3 | Ladder `KILL > HALT_ENTRIES > DENY > MODIFY > ALLOW`, with `HALT_ENTRIES`/`DENY` unordered pending B2 | Two pairs of records disagree, and the permitted sets are incomparable | Yes — one constant | Medium — blocks #17's edit at team size 1 until answered |
+| 4 | Scope narrowness = evaluation-set containment: 2 ordered pairs, 19 UNDECIDABLE with reasons | Ordering by cell size gives opposite answers | Yes — B4 option (c) | Low |
+| 5 | `severity` is NEUTRAL alone and follows the action otherwise | Ruling 12 `severity` row | No — ruling | Low |
+| 6 | Rule addition is TIGHTENS or NEUTRAL; effects on other rules are derived records (C-36 LOOSENS, C-40 UNDECIDABLE) | Keeps every ruled record intact while closing the measured zero-approval paths (F-9, X2S-1) | Yes — B3, B5 | **Critical** if reversed: the kill switch can be switched off (B3) or narrowed to POOL (B5) at zero approvals |
+| 7 | No exit-path overlay | Ruling-conformant (B1); its real blast radius — TURN-002, its config key, `holding.min_sessions`, added DENY rules, at zero approvals — is stated, and exit protection is put to P2.9 as an explicit requirement | Yes — B1 options (B), (C) | High if wrong: a protective stop-out can be denied after a free tightening |
+| 8 | Pins: five attributes on 20 constitutional rules; `scope` and `mode` on all 47; plus the KILL-002 exemption pin and the kill-rule set pin | Ruling 12 "Required tests"; §7.2(d) is the test-time half of B5 | No — ruling | Medium |
+| 9 | Rule removal is LOOSENS for every rule | Ruling 12 | No | Low |
+| 10 | `enforce → monitor` is LOOSENS on every rule | Ruling 12 | No | Low |
+| 11 | `kill_scope` / `modify` appearing with an action change take the action's direction | Consequences the loader enforces | Yes | Low — C-40 covers the kill-scope effect independently |
+| 12 | Monitor rules are classified as if they bound | Blocks loosen-then-promote | Yes | High |
+| 13 | **The combination set is derived from the two policy directories**; a layer file appearing or disappearing is UNDECIDABLE | A caller-supplied set let a market-layer loosening pass with zero approvals (X2S-2); a fixed key match made new combinations unapprovable (X2S-9) | Yes | High |
+| 14 | The approval count comes from the version in force at approval | A version must not approve itself | No | High |
+| 15 | **An authorisation is applied only by compare-and-swap** against the in-force and candidate hashes | Stale bases undo approved changes (X2S-3) | Yes | High |
+| 16 | **Approvals are Ed25519 signatures by enrolled identities over the diff digest**; distinct identities and keys | Plain strings let one person supply two names (X2S-10); SPEC-P1.3 §5.2 already chose Ed25519 for attribution | Yes | High |
+| 17 | Config keys get a direction only by exact name; unlisted keys are UNDECIDABLE | Globs gave future keys a direction (X2S-11) | Yes | Medium — friction at team size 1 |
+| 18 | `authority` stays UNDECIDABLE | It keys the pinned constitutional set | Yes | Low |
+| 19 | Every record carries a `basis` row id; the classifier helpers return theirs | Traceability; makes basis coverage testable (X2S-8) | Yes | Low |
+| 20 | Evidence counts a kill only when a named pin or test fails with the expected message, in both modes, with a negative control | A suite exit code passed with every pin removed (X2S-4) | Yes | **Critical** for the evidence: otherwise step 5 proves nothing |
+| 21 | Removing an `InstrumentType` from `tradeable` stays TIGHTENS, a recorded departure from ADR-09 row 7 | Every applied version carries the Owner's policy signature at team size 1; a role-based approval layer is not justified for one key | Yes | Low — revisit when a non-Owner signer is enrolled |
+| 22 | `required_approvals` and every other authorisation field are strings | `jcs-nonum-1` bans JSON numbers (X2S-6) | Yes | Medium — otherwise no change can be recorded |
 
 ## ASSUMPTIONS
 
 | # | Assumption | Why I had to assume it | How to verify | Impact if false |
 |---|---|---|---|---|
-| 1 | `[DEFAULT-D1]` P2.9's evaluator implements `passed = observed <comparison> threshold` | P2.9 is unwritten; SPEC-P1.3 §3.2 implies it | P2.9's evaluator, against `t_threshold_direction_respects_comparison` | Every pass-set classification inverts |
-| 2 | `[DEFAULT-D10]` RATE-001/002, DATA-001, LIQ-001 are the only tunable rules that bind against liquidation | KILL-002's notes say EXP-*, LOSS-*, INST-001 cannot bind against a reduction; that depends on P2.9 | P2.9: run a liquidation order through every rule | A missed rule's tightening is free and can slow an exit |
-| 3 | EXP-*/LOSS-* cannot bind against a sell | KILL-002 notes | Same | Same |
-| 4 | Severity lowered is a loosening `[DEFAULT-D8]` | Alerting is a control in practice | Owner | Some severity edits need two people unnecessarily |
-| 5 | `[DEFAULT-D2]` every (market, env) combination that will run is enumerable at approval time | `TRADING_ENV` and markets are a small fixed set | P6.4 deployment manifest | A combination missed at approval runs unapproved |
-| 6 | Directions in `CONFIG_KEY_DIRECTIONS` are as tabulated — e.g. lowering `pdt_equity_floor_usd` restricts fewer accounts | Reading of ADR-13 Chain D / PDT rule; the floor itself is unverified (condition 16) | Broker PDT documentation | One key misclassified |
+| 1 | `[DEFAULT-B1]` Exit protection belongs in P2.9, as an explicit requirement that a computed exposure-reducing order is never denied by TURN-002, TURN-001 or HOLD-001 | No ruling covers it; 13a covers missing, stale or ambiguous inputs only | Owner answer to B1; P2.9 spec | Until P2.9 meets Q-P1.3.1-11, a free tightening of TURN-002 can deny a stop-out |
+| 2 | `[DEFAULT-B2]` `HALT_ENTRIES` and `DENY` stay unordered until the Owner ranks them | Records disagree two against two; the permitted sets are incomparable | Owner answer to B2 | If (a) is intended, Ruling 14's edit is needlessly two-person meanwhile |
+| 3 | `[DEFAULT-B3]` An exemption is a narrowing of the exempted rule's scope | Ruling 12's addition row read with its scope row | Owner answer to B3 | If the addition row governs every effect of an addition, the hole is closed only by the pin and option (d) |
+| 4 | `[DEFAULT-B4]` `scope` is an aggregation cell in P2.9 | Schema and `policy.yaml` usage | Owner answer to B4; P2.9 | Some UNDECIDABLE outcomes are unnecessary friction |
+| 5 | `[DEFAULT-B5]` A displaced GLOBAL kill is an UNDECIDABLE effect on the GLOBAL rule | SPEC-P1.3 §4.2's lowest-id binding plus C-17 | Owner answer to B5; SPEC-P1.3 v0.2 option (d) | If the Owner accepts option (c), a GLOBAL kill can be narrowed to POOL at zero approvals |
+| 6 | P2.9's evaluator implements `passed = observed <comparison> threshold` | P2.9 is unwritten; SPEC-P1.3 §3.2 implies it | P2.9, against C-01/C-02 tests | Every threshold classification inverts |
+| 7 | `PolicyGate` applies exemptions and kill scope as loader.py §10 does today | Read and measured | SPEC-P1.3 v0.2 | If option (d) lands, C-40 becomes unnecessary (removed by revision) |
+| 8 | `HALT_ENTRIES` will be spelled exactly `"HALT_ENTRIES"` | Ruling 14 and #6 spell it so | #17's code | `t_every_action_is_ranked` fails CI |
+| 9 | Every combination that will run is `({None} ∪ MARKETS) × ({None} ∪ env files present)` | The loader takes `market` and `environment` only; `TRADING_ENV` names an env file | P6.4 deployment manifest | A run with an environment that has no file loads base plus market layer, which is the (m, None) combination already diffed |
+| 10 | The policy-change writer can hold a lock and compare hashes in the transaction that inserts `config_version` | SPEC-P1.2 §6.9 defines the table, not the writer | P1.2 / P6.4 writer design | Without the lock, two concurrent applies could both pass the compare-and-swap |
+| 11 | Enrolled approver keys are readable from Vault at approval time (`public_key_for`) | SPEC-P1.3 §5.2 keeps the policy key in Vault; approver keys are Q-P1.3.1-1 | P6.2 | No approval can be counted, so every gated change is refused: fail-closed |
+| 12 | At team size 1 the only enrolled policy signer is the Owner | ADR-09 `[DEFAULT-3]` of P0.1 | Q-P1.3.1-1 | A non-Owner signer could remove an `InstrumentType` without the Owner (DECISION 21) |
+| 13 | `EffectiveConfig.redacted` equals the hashed merged mapping | loader.py `_redact` only renders `Decimal` as string and lists for tuples; YAML yields neither difference | The redaction test in §7.4 | The diff would compare something other than what was signed |
+| 14 | `CONFIG_KEY_DIRECTIONS` directions are as tabulated | Carried from v0.1; the PDT floor is unverified (condition 16) | Broker PDT documentation | One key misclassified |
+| 15 | Python 3.12+ behaves as 3.11 for this code | Only `py -3.11` has the dependencies locally | Condition 15, CI | Evidence must be re-run |
 
 ## OPEN QUESTIONS
 
 | # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
 |---|---|---|---|---|
-| **Q-P1.3.1-1** | Who is the second approver? (carries Q-P1.3-1) | Owner | Enrol a second Ed25519 identity in Vault | Every LOOSENS **and every UNDECIDABLE** change — wider than before; includes edits to any unlisted config key |
-| **Q-P1.3.1-2** | One signature per (market, env, override) combination, or sign the base layer and hash layers separately? (F-4) | Owner + P6.4 | SPEC-P1.3 §5.2 vs §6; `PolicyLoader.load()` signs `content_hash(merged)` | P6.4 deployment; any use of `operator_override` |
-| **Q-P1.3.1-3** | How should P2.9 treat an unresolvable `threshold_ref` (F-1)? | P2.9 author | UNIV-001/002/003 refs vs `universe.*` keys | **P2.9** |
-| **Q-P1.3.1-4** | Add `applies_to` to `Rule` (F-5)? | P1.3 v0.2 | `Rule` schema | Nothing today; replaces `LIQUIDATION_PATH_RULES` |
-| **Q-P1.3.1-5** | Does the liquidation path go through `PolicyGate` at all, or straight to the broker? | P2.10 | P2.10 kill-switch liquidation design | If it bypasses the gate, §3.4's liquidation overlay is unneeded — and KILL-002 is dead |
+| **B1–B5** | §1 | Owner | §1 of this spec | Freezing this spec (#6 step 3) |
+| **Q-P1.3.1-1** | Who is the second approver, and how is each approver's Ed25519 key enrolled and served by `public_key_for`? (carries Q-P1.3-1) | Owner; P6.2 | Enrol a second identity in Vault | Every gated change; under B2 (c), #17's `HALT_ENTRIES` edit |
+| **Q-P1.3.1-2** | One signature per (market, env, override) combination, or sign the base and hash layers separately? Should market and env layers get a deny-list like the override layer? (F-4) | Owner + P6.4 | SPEC-P1.3 §5.2 vs §6 | P6.4 |
+| **Q-P1.3.1-3** | How does P2.9 treat an unresolvable `threshold_ref`? (F-1) | P2.9 author | UNIV-001/002/003 refs | P2.9 |
+| **Q-P1.3.1-4** | Add `applies_to` to `Rule`? (F-5) | SPEC-P1.3 v0.2; Owner via B1 | `Rule` schema; Ruling 13a | P2.9 |
+| **Q-P1.3.1-5** | Does kill-switch liquidation go through `PolicyGate` at all? | P2.10 | P2.10 liquidation design | P2.10 |
+| **Q-P1.3.1-6** | Where is a two-person approval stored, given `config_version.approval_id` holds one id? (F-12) | P1.2 / P1.4 / P6.4 | SPEC-P1.2 §6.9; SPEC-P1.4 §3 | The first policy change after go-live |
+| **Q-P1.3.1-7** | What does KILL-002's `eq` compare against? (F-8) | SPEC-P1.3 v0.2; P2.9 | `Rule._coherent`; KILL-002 | P2.9 |
+| **Q-P1.3.1-9** | Is the §5.3 amendment a re-freeze event for SPEC-P1.3? d8067b6 left it at v0.1 FROZEN | Owner / X3 | SPEC-P1.3 header; STAGE-1-FREEZE §11 | #6 step 3 |
+| **Q-P1.3.1-10** | Who owns the next SPEC-P1.3.1 revision? The P1.3 v0.2 plan also proposes one, for `applies_to` | Owner | `AI-Trading-Agent-stage1-fresh-reviews/P1.3-v0.2/PLAN.md` §8 | Versioning of this spec |
+| **Q-P1.3.1-11** | **New.** Under B1 (A), P2.9 must guarantee that an order the risk engine computes as exposure-reducing (Ruling 13a's definition) is never denied by TURN-001, TURN-002 or HOLD-001, and must state which other rules bind against such an order | P2.9 author | Ruling 13a; TURN-002 inputs (`intended_notional`) | **P2.9** |
+| **Q-P1.3.1-12** | **New.** Take B5 option (d) in SPEC-P1.3 v0.2: a KILL verdict is GLOBAL if any binding KILL outcome's rule is GLOBAL or has no `kill_scope`? (F-14, F-15) | SPEC-P1.3 v0.2; Owner | SPEC-P1.3 §4.2; loader.py `_combine` | P2.10; removal of C-40 |
 | Q15 *(carried)* | Suites on Python 3.12+ | CI | `python3.12 -O tests/verify_p13_policy_diff.py` | All |
+
+(Q-P1.3.1-8 of v0.2, "reopen condition 12?", is withdrawn: 4397c4f reopened it.)
 
 ## CONTRACTS EXPORTED
 
 | Name | Kind | Signature or schema | Consumers |
 |---|---|---|---|
-| `diff_policies` | function | `(old_raw: Mapping, new_raw: Mapping) -> PolicyDiff`; raises `PolicyDiffError` | P6.2, P6.4 |
-| `assert_policy_change_authorised` | function | `(old_raw, new_raw, approver_ids: Sequence[str]) -> PolicyDiff`; raises `PolicyGovernanceError` / `PolicyDiffError` | **P6.2, P6.4 — the only approval path** |
-| `PolicyDiff` | model | `old_version, new_version, changes`; `.requires_two_person`, `.by_direction()`, `.for_rule()` | P6.2, P1.4 (audit record of the approval) |
-| `PolicyChange` | model | §4 | P1.4 |
+| `derive_combinations` | function | `(old_dir: Path, new_dir: Path) -> tuple[tuple[str \| None, str \| None], ...]`; raises `PolicyDiffError` | P6.4, tests |
+| `diff_policies` | function | `(old_raw: Mapping, new_raw: Mapping, *, market=None, environment=None, old_layers=frozenset(), new_layers=frozenset()) -> PolicyDiff`; raises `PolicyDiffError` | tests, `diff_policy_dirs` |
+| `diff_policy_dirs` | function | `(old_dir: Path, new_dir: Path) -> tuple[PolicyDiff, ...]` | P6.2, P6.4 |
+| `authorisation_digest` | function | `(diffs: Sequence[PolicyDiff]) -> str` (64 hex) | Approver tooling (P6.2), P1.4 |
+| `assert_policy_change_authorised` | function | `(old_dir: Path, new_dir: Path, approvals: Sequence[ApprovalSignature], public_key_for: Callable[[str], bytes]) -> PolicyAuthorisation`; raises `PolicyGovernanceError`, `PolicyDiffError` | **P6.2, P6.4 — the only approval path** |
+| `assert_authorisation_current` | function, **precondition** | `(auth: PolicyAuthorisation, in_force_dir: Path, candidate_dir: Path) -> None`; raises `StaleAuthorisationError`. Must be called in the transaction that writes the new `config_version` rows, under the policy-change lock | **P1.2, P1.4, P6.4** — the config writer |
+| `action_direction` | function | `(old: str, new: str) -> tuple[Direction, str]` | Tests; #17 |
+| `scope_direction` | function | `(old: str, new: str) -> tuple[Direction, str, str]` | Tests |
+| `key_direction` | function | `(path: str) -> KeyDirection` | P6.2; any phase adding a config key |
+| `PolicyChange`, `PolicyDiff`, `ApprovalSignature`, `PolicyAuthorisation` | models | §4; all-string, `jcs-nonum-1`-safe | P1.4 (`CONFIG_CHANGED` payload), P6.2, P6.4 |
 | `PolicyDiffError` | exception | subclass of `PolicyError` | P6.2 |
-| `Direction`, `ChangeKind`, `KeyDirection` | enums | §4, §3.5 | P6.2, P1.4 |
-| `CONFIG_KEY_DIRECTIONS` | constant | ordered `(pattern, KeyDirection)`; last entry `("**", UNDECIDABLE)` | P6.2; any phase adding a config key |
+| `StaleAuthorisationError` | exception | subclass of `PolicyGovernanceError` | P6.4 |
+| `Direction`, `ChangeKind`, `KeyDirection` | enums | §4 | P6.2, P1.4 |
+| `MARKETS`, `ACTION_LADDER`, `ACTION_UNORDERED_PAIRS`, `SCOPE_NARROWER_THAN` | constants | §4 | #17, tests |
+| `CONFIG_KEY_DIRECTIONS` | constant | ordered `(exact key, KeyDirection)`; last entry `("**", UNDECIDABLE)` | P6.2; any phase adding a config key |
 | `RULE_FIELDS` | constant | equals `set(Rule.model_fields)` | CI |
-| `LIQUIDATION_PATH_RULES` | constant | `{"RATE-001","RATE-002","DATA-001","LIQ-001"}` | P2.10 |
-| `key_direction` | function | `(path: str) -> KeyDirection` | P6.2 |
-| `tests/verify_p13_policy_diff.py` | test suite | 55 checks, `require()` only | **CI**, run with and without `-O` |
-| `tests/mutate_x5r_g9.py` | test harness | `[--must-fail SUITE ...] [SUITE ...]` → exit 0 iff every mutation loads and is killed | CI, gap audits |
+| `CLASSIFICATION_BASES` | constant | `{"C-01", …, "C-41"}` | CI, P1.4 |
+| `tests/verify_p13_policy_diff.py` | test suite | §7.2, §7.4, §7.6; `require()` only; `FAILED <name>: <RULE-ID>.<field> …` lines | **CI**, with and without `-O` |
+| `tests/mutate_x5r_g9.py` | harness | `[--sweep] [--negative-control] --must-fail SUITE [--must-pass SUITE …]` → exit 0 iff every loadable mutation is KILLED by attribution (or, under `--negative-control`, every one SURVIVED) | CI, gap audits |
+| `tests/mutate_policy_diff_code.py` | harness | M-1 to M-17, attributed to named tests, with a negative control | X2 of the code, step 5 |
+| AMENDMENT SPEC-P1.3 §5.3 | spec text | §6 | SPEC-P1.3, #6 step 3 |
+| ~~`LIQUIDATION_PATH_RULES`~~ | ~~constant~~ | Removed in v0.2 (`[DEFAULT-B1]`); restored only under B1 option (B) | — |
 
-**END OF SPEC-P1.3.1-POLICY-DIFF v0.1**
+**END OF SPEC-P1.3.1-POLICY-DIFF v0.3 (DRAFT)**
