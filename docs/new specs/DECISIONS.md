@@ -121,6 +121,12 @@ A default is not a ruling. Status is PENDING until the Owner confirms or overrul
 | DEFAULT-56 | Legacy PDT equity check uses the lower of live and previous-close equity | PENDING | SPEC-CR1-US-DAY-TRADING |
 | DEFAULT-57 | Legacy day trades counted per sell fill | PENDING | SPEC-CR1-US-DAY-TRADING |
 | DEFAULT-58 | Model-portfolio entries funded from settled model cash only, both markets | PENDING | SPEC-CR1-US-DAY-TRADING |
+| DEFAULT-59 | India intraday: Upstox primary, no backup, until the Owner confirms or buys Fyers Prime | PENDING | SPEC-P0.2-PROVIDERS |
+| DEFAULT-60 | Upstox Analytics Token is the only Upstox credential in v1 | PENDING | SPEC-P0.2-PROVIDERS |
+| DEFAULT-61 | Fyers: non-trading app, no scheduled job, no scripted login, no client before OQ-68 | PENDING | SPEC-P0.2-PROVIDERS |
+| DEFAULT-62 | India bars stored as immutable snapshots of complete fetches, labelled by adjustment basis | PENDING | SPEC-P0.2-PROVIDERS |
+| DEFAULT-63 | Upstox fills India corporate actions, news and sector as PROVISIONAL; fundamentals BLOCKED | PENDING | SPEC-P0.2-PROVIDERS |
+| DEFAULT-64 | Dormancy alert at 300 and 330 days per account, counting only trades and KYC updates | PENDING | SPEC-P0.2-PROVIDERS |
 
 ## 3. Assumptions verified or falsified
 
@@ -131,6 +137,8 @@ been carried out.
 |------------|---------|----------|------|
 | PDT equity floor USD 25,000 (historical `ASSUMPTION [VERIFY-P0.2]`, SPEC-P1.1 §9.4, `config/policy.yaml`; Stage 1 gap audit G-2, condition 16) | **FALSIFIED as current; VERIFIED as the legacy value.** FINRA Rule 4210(f)(8)(B) day-trading provisions replaced by intraday margin, 4210(d)(2), effective 2026-06-04, phase-in to 2027-10-20; Alpaca lifted PDT on 2026-06-04 | SEC Release 34-105226, 91 FR 20731; FINRA Regulatory Notice 26-10; `SPEC-CR1-US-DAY-TRADING` section 2 | 2026-10-18 |
 | US settlement T+1; Regulation T payment period (historical Q-P1.1-1, question part) | **VERIFIED.** T+1 (17 CFR 240.15c6-1(a)); payment period = settlement cycle + 2 business days (12 CFR 220.2); 90-day freeze for a sale before payment (12 CFR 220.8(c)) | eCFR, up to date as of 2026-10-15; `SPEC-CR1-US-DAY-TRADING` section 2 | 2026-10-18 |
+| Fyers intraday history from 3 July 2017 is free (issue #68; Owner decision of 2026-10-17 in the root `DECISIONS.md`) | **FALSIFIED for the free plan; VERIFIED as the archive.** Standard serves intraday from 2025 and daily from 2021, each on a rolling window; the deeper history is Prime, paid. Free multi-year intraday exists at Upstox from January 2022 | Fyers plans page and history page, read 2026-10-30; `SPEC-P0.2-PROVIDERS` F-77, F-78, F-83, UP-40 | 2026-10-30 |
+| A daily interactive token step may be needed at Upstox and Fyers (issue #68, open item 4) | **Answered.** Upstox: none for read-only data (Analytics Token, one year), though a dormant account cannot generate a token. Fyers: a browser login each day it is used; a sample shows a refresh token, but Fyers says continuous refresh sessions are no longer supported | `SPEC-P0.2-PROVIDERS` F-79, F-87, F-103, F-105, UP-45 | 2026-10-30 |
 
 ## DECISIONS MADE
 
