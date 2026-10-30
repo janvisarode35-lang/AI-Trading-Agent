@@ -1,0 +1,191 @@
+## BLOCKING QUESTIONS (resolved with defaults, proceeding)
+
+| # | Question | Options | Recommended default | What breaks if wrong |
+|---|----------|---------|---------------------|----------------------|
+| BQ-48 | Does the Upstox free tier permit commercial use and publication of derived signals, or is that gated behind Upstox Plus or a separate licence? | (a) Free tier covers commercial derived-signal publication; (b) only Plus/enterprise does; (c) no tier does without a negotiated agreement | **[DEFAULT-59]** (c) is the conservative reading: treat the free API as **not** licensed for commercial signal publication until a written licence is obtained. Mark SEL-4 UPSTOX_HISTORY as BLOCKED on a licence question, not on technical access. | If (a) is true, we delayed a free path unnecessarily. If (c) is true and we assumed (a), we publish signals on unlicensed data — a BO-1/MB-AC-14 violation. The blast radius of publishing unlicensed is regulatory, not technical. |
+| BQ-49 | Is Fyers history adjusted for splits/bonus/dividends, and does it serve delisted or renamed symbols? | (a) Adjusted, delisted served; (b) adjusted, listed-only; (c) unadjusted, listed-only; (d) not established | **[DEFAULT-60]** Treat Fyers history as **unadjusted and listed-only** until the vendor answers. This means it cannot serve as the primary backtest spine for India without a corporate-actions source we do not have. Mark Fyers INTRADAY_HISTORY as PROVISIONAL with OQ-67 open. | If Fyers is adjusted and serves delisted, we under-used a free spine. If it is unadjusted and we assumed adjusted, every India backtest is wrong on every split. The second failure is worse. |
+| BQ-50 | Does an API login count as "activity" for NSE/BSE dormancy, or does a dormant trading account block the data API entirely? | (a) API login counts, data unaffected; (b) API login does not count, dormant account loses API; (c) dormant account loses only order APIs, data survives | **[DEFAULT-61]** Assume (b): a dormant account loses the data API. This forces a human heartbeat (a login or a small non-trading action) at least every 11 months per broker account. Record as a HITL item, not an automation. | If (a) is true, we added an unnecessary human step. If (b) is true and we assumed (a), the India data spine dies silently after 12 months of no trading — and a signals-only v1 never trades. The dormancy risk is acute precisely because Model B removes trading activity. |
+| BQ-51 | What does Upstox mean by "1 decade per request" for daily candles — is the range inclusive, and does a request for 2000-01-01 to 2009-12-31 return 10 calendar years or 10 years of trading sessions? | (a) Calendar years, inclusive endpoints; (b) trading years; (c) not established | **[DEFAULT-62]** Request one calendar decade at a time (2000-01-01 to 2009-12-31, then 2010-01-01 to 2019-12-31, etc.), treat `to_date` as inclusive, and discard any row outside the requested range. Do not assume a session count. | A one-session off-by-one at a decade boundary is recoverable by re-requesting the overlap; a missing decade is a silent hole in the spine. Requesting the overlap costs one extra call. |
+| BQ-52 | Does the Fyers 100-day-per-request limit for 1–240 minute candles mean calendar days or trading days, and what happens at the boundary of the 3 July 2017 history start? | (a) Calendar days, inclusive; (b) trading days; (c) not established | **[DEFAULT-63]** Treat as **calendar days, inclusive**, and clamp the first request to start no earlier than 2017-07-03. If the API rejects a boundary, step back one day. | A rejected first request is visible and correctable. Assuming trading days when the vendor means calendar days over-fetches and may trigger a 429; assuming calendar when the vendor means trading under-fetches and leaves holes. |
+
+## NON-BLOCKING DETAILS RESOLVED
+
+| # | Detail | Resolution |
+|---|--------|------------|
+| NB-63 | Upstox rate-limit page structure | The recorded figure "50 req/s OHLC and quotes (landing page)" is **not confirmed** on the rate-limiting page retrieved. The rate-limiting page shows order-placement limits (10/s regular, 50/s registered) and states "Other Standard APIs (holdings, positions, funds, historical candles etc.)" without showing the numeric limit in the retrieved excerpt . The 50/s figure comes from the landing page, not the rate-limiting page. Record as SEARCH_EXCERPT-level for the 50/s claim; the order-path 10/s regular limit is PRIMARY_FULL. |
+| NB-64 | Upstox historical candle data is confirmed to exist at V3 path `/v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}`  | The path is confirmed. The recorded ranges (daily from Jan 2000, 1 decade/request; intraday from Jan 2022, 1 month/request for 1–15m) are **not confirmed** on the retrieved page excerpt, which shows only a 15-minute example. Recorded figures remain the #68 values, with a note that the V3 reference page does not display the range table in the retrieved text. OQ-67 widened. |
+| NB-65 | Fyers rate limits are **not** unlimited in any sense | The recorded #68 figure said "unlimited symbols per day." The retrieved Fyers plans page states Standard Data APIs: **5 req/s, 50 req/min, 5,000 req/day**; Prime: 10 req/s, 500 req/min, 500,000 req/day . The "unlimited symbols" phrasing may refer to symbols-per-request rather than requests-per-day. This is a **contradiction** with the #68 record if "unlimited symbols" was read as "unlimited calls." Record both: symbols per request may be broad; requests per day are capped at 5,000 on Standard. |
+| NB-66 | Fyers rate-limit change effective 2026-10-16 | Fyers published a notice on 2026-10-15/16 revising limits effective **16 October 2026** . The plans page retrieved shows the post-change limits (5/50/5,000 Standard). Any earlier #68 figure predates this change. The v0.2 client throttle must be built against the post-16-Oct-2026 limits. |
+| NB-67 | Fyers 429 behaviour is documented | Error code **-429**; exceeding the per-minute limit more than **3 times in a day** blocks the user for the rest of the day . This is a hard behavioural constraint: a retry loop on a Fyers 429 is actively dangerous. The client must stop on the first 429 and not retry until the window resets, and must never exceed the per-minute limit three times. |
+| NB-68 | Fyers `oiFlag` and `contFlag` field names | The retrieved Fyers MCP market-data page shows parameter names `oiFlag` and `contFlag` (camelCase) for `get_chart_data` . The #68 record listed `oi_flag`, `cont_flag`. The V3 API parameter naming is not confirmed; treat the MCP-page names as indicative, not as the V3 REST contract. OQ-67 covers the V3 field names. |
+| NB-69 | Upstox OAuth token expiry at 03:30, not 06:00 | The v0.1 fact sheet (section 5.4) records Upstox token expiry as "3:30 AM the following day" (F-40). This is **03:30 IST**, not 06:00. Zerodha's expiry is 06:00 IST (F-6). These are different human-login windows. Do not conflate them. |
+| NB-70 | SEC EDGAR data API host | `data.sec.gov` is the JSON API host; `www.sec.gov` hosts the index files . The recorded submissions fields from #68 are consistent with a `data.sec.gov/submissions/CIK{10-digit}.json` shape, but the pause means none of this is verified in this run. Record as SECONDARY with the pause noted. |
+| NB-71 | Benzinga TCP push is real and documented | Benzinga's TCP streaming service is documented as a persistent TCP connection delivering JSON messages for news and market data, requiring credentials obtained from Benzinga support . The v0.1 record said "Benzinga offers TCP push, not only REST pull" — this is **confirmed at PRIMARY_EXTRACT level**. |
+| NB-72 | Benzinga headline volume and article volume | Alpaca's own blog post announcing the News API states: "130-160 full-length articles, with images" and "600-900 real-time headlines per day," history to 2015 . This is Alpaca's page, not Benzinga's. The v0.1 correction attributed the 2010/600-900 figure to Benzinga's product page; the retrieved evidence is Alpaca's blog. Record the figures with the **source being Alpaca's announcement**, not Benzinga's own page. If Benzinga's page states 2010, that remains unverified in this run. |
+| NB-73 | Alpaca's bundle carries Benzinga content | Alpaca's documentation states "All news data is currently provided directly by Benzinga" , and the blog states "news data is only provided by Benzinga" . The Alpaca News API is a Benzinga feed. Whether Alpaca's bundle carries the **headline stream** (600-900/day) separately from full articles is **not established**: Alpaca's docs describe "news articles" (130+ per day) and do not state that the high-frequency headline stream is included. Record as NOT ESTABLISHED, not as confirmed. |
+
+---
+
+## FILE: SPEC-P0.2-PROVIDERS v0.2 (AMENDMENT)
+
+---
+id: SPEC-P0.2-PROVIDERS
+version: 0.2
+status: DRAFT
+phase: P0.2 (amendment run)
+depends_on: [SPEC-P0.2-PROVIDERS v0.1, MODEL-B-DECISION v0.3, DECISIONS.md issue #68]
+produces: [ProviderId v0.2, Capability v0.2, SelectionStatus v0.2, ProviderSelection v0.2, F-65..F-77, DEFAULT-59..DEFAULT-63, SEL-22..SEL-26, THR-13, PE-17, OQ-67..OQ-72, A-76..A-80, D-39..D-42, NB-63..NB-73, BQ-48..BQ-52]
+---
+
+# SPEC-P0.2 — Provider and Broker Due Diligence, v0.2
+
+**Amendment run.** This file contains only changed sections and a change log. Sections not repeated are unchanged from v0.1 and remain in force. The v0.1 text is not rewritten; this file is appended and supersedes only where a row below says so.
+
+**Date:** 2026-10-30. **Author:** integration engineer, amendment run. **Status:** DRAFT, and it cannot be frozen: five India capability rows remain UNFILLED or BLOCKED, and the Upstox and Fyers licence questions are now the binding constraint on the India data spine.
+
+**Governing inputs consumed:** `SPEC-P0.2-PROVIDERS.md` v0.1 (full text supplied), `MODEL-B-DECISION.md` v0.3 (full text supplied), and the Owner decisions recorded in `DECISIONS.md` issue #68 (summarised in the prompt). The SEC host pause remains in force: no request was made to `sec.gov`, `data.sec.gov`, or `efts.sec.gov`. Every SEC statement below is SECONDARY or sourced from a non-SEC page.
+
+---
+
+## CHANGE LOG
+
+| # | Section affected | v0.1 text | v0.2 change | Reason | Reversible? |
+|---|------------------|-----------|-------------|--------|-------------|
+| C-1 | Fact sheets (new 5.15, 5.16, 5.17) | Upstox and Fyers had partial or broker-only treatment; SEC EDGAR was a single paragraph under 5.9 | **Added** complete P0.2-granularity fact sheets for Upstox (data role), Fyers (new), and SEC EDGAR (expanded, all SECONDARY, pause noted) | Task 1 | Yes |
+| C-2 | Evidence register | 59 rows, F-6..F-64 | **Added** F-65..F-77: Upstox data-path facts, Fyers facts, Benzinga TCP, Benzinga volume, Alpaca-Benzinga relationship, Fyers rate-limit change | Tasks 1, 2, 3 | Yes |
+| C-3 | Capabilities (section 4) | 11 capabilities | **Added** `intraday_history` as a capability (Model B needs the event window for intraday anomaly detection; the Owner's #68 record names Fyers for it) | Task 4: "Add intraday history as a capability if the design now needs it." Model B's LLM gating includes "statistically anomalous conditions" (INV-3), and the P2N.13 correction concerns event data. The design now needs it. | Yes, but removing it after P2.1 builds a client is costly |
+| C-4 | Decision matrix (section 6.2) | 20 rows | **Added** intraday_history rows (US: none needed; IN: Fyers, Upstox); **changed** eod_bars IN primary from Zerodha to Upstox (per Owner #68 RATIFIED); **changed** eod_bars IN backup from Upstox to Fyers? No — Upstox is primary for daily, Fyers is for intraday. **Changed** SEL-4 status from BLOCKED to PROVISIONAL with licence open; **added** SEL-22 (Upstox daily history) and SEL-23 (Fyers intraday history). | Task 2 (Owner RATIFIED Upstox daily, Fyers intraday); Task 4 (re-score and re-select) | Yes |
+| C-5 | Selections (section 6.3) | SEL-1..SEL-21, none SELECTED | **Changed** SEL-4: primary is Upstox (not Zerodha), backup is Fyers? No — Fyers does not serve daily bars at the same depth per #68 (366 days/request for 1D). **SEL-4** primary Upstox, backup Zerodha (retained as technical fallback, still listed-only). Status PROVISIONAL. **Added** SEL-22 (Upstox daily history, PROVISIONAL, licence open), SEL-23 (Fyers intraday history, PROVISIONAL, adjustment open), SEL-24 (Benzinga direct TCP/REST as news backup, PROVISIONAL, licence open), SEL-25 (intraday_history US, UNFILLED), SEL-26 (intraday_history IN backup, Upstox, PROVISIONAL). | Task 4; Task 2 Owner RATIFIED | Yes |
+| C-6 | Typed models (section 8) | ProviderId 13 members; Capability 11 | **Changed** `ProviderId`: added `FYERS = "fyers"`, `BENZINGA = "benzinga"`. **Changed** `Capability`: added `INTRADAY_HISTORY = "intraday_history"`. **Changed** `MARKETLESS` unchanged. **Added** field/validator implications: `ProviderSelection` for `intraday_history` must accept market IN and US; US row is UNFILLED. | Task 5 (typed models) | No after client phases import; version bump required |
+| C-7 | Client throttles (section 8.3) | THR-1..THR-12 | **Added THR-13** (Upstox: historical 50/s? — see note: the rate-limiting page does not display the historical figure; use 10/s ASSUMPTION until confirmed), **THR-14** (Fyers data APIs: 2/s, 25/min, 2,500/day — half of Standard), **THR-15** (Benzinga: no documented numeric rate limit in the retrieved pages; 1/s ASSUMPTION until licence). | Task 5; NB-65, NB-66 | Yes |
+| C-8 | Error paths (section 9) | PE-1..PE-16 | **Added PE-17** (dormant-account rejection: permanent until human acts, never retry), **PE-18** (Fyers 429 third-strike day-block), **PE-19** (Upstox "temporary suspension" on rate breach), **PE-20** (Benzinga TCP disconnect: no replay documented). | Task 5 | Yes |
+| C-9 | What breaks at 09:31 (section 7) | 13 rows | **Added** Upstox data (not on 09:31 path; backtest spine only), Fyers data (not on 09:31 path; event window only), Benzinga (news backup; same as Finnhub). | Task 5 | Yes |
+| C-10 | Unverified documentation (section 10) | 36 rows | **Added** rows 37–41: Upstox historical range table (not displayed on V3 page), Fyers V3 history parameters, Fyers adjustment/delisted, Benzinga own-page volume claim (2010, 600–900), Benzinga terms. | Task 5 | Yes |
+| C-11 | Block B tables | D-11..D-23, A-37..A-46, OQ-27..OQ-51, contracts | **Added** D-39..D-42, A-76..A-80, OQ-67..OQ-72, new contracts. | Task 5, 6 | Yes |
+| C-12 | Owner conflict section (new section 12) | none | **Added** explicit statement of conflicts with Model B and Owner decision #68. | Task 6 | Yes |
+
+---
+
+## SECTION 4 (AMENDED): CAPABILITIES
+
+The v0.1 capability table is unchanged except for one addition:
+
+| Capability | Why it is needed | Market scope | Frequency |
+|------------|------------------|--------------|-----------|
+| intraday_history | Event-window anomaly detection for the gated LLM path (INV-3: "statistically anomalous conditions"); the P2N.13 correction concerns intraday news timing; Model B's LLM packet needs a pre-event price window to distinguish a news reaction from a pre-existing move. | IN (Fyers primary); US (none needed for v1, P2N.13 is US-only) | Per decision cycle where an anomaly candidate is identified |
+
+**Edge case:** an intraday anomaly candidate on a US instrument in v1 would need US intraday history. No US intraday history provider is selected (SEL-25 UNFILLED). The deterministic path does not depend on it; the LLM gate for US anomaly candidates is therefore **unavailable** until SEL-25 is filled. This is declared, not worked around.
+
+---
+
+## SECTION 5 (AMENDED): ADDITIONS TO FACT SHEETS
+
+### 5.15 Upstox — India daily history (the backtest spine)
+
+**Role in v1 (Model B):** read-only daily OHLCV history for the India backtest spine and point-in-time feature construction. **No order path.** The v0.1 Upstox fact sheet (5.4) covered orders and GTT for the cold-alternate broker role; those rows remain DEFERRED under MB-8 and are not relied upon here.
+
+**Auth (inherited from F-40, unchanged).** OAuth with a daily token expiring at **03:30 IST** the following day. TOTP endpoint exists. Whether the TOTP endpoint may be called unattended under Upstox terms is **NOT VERIFIED** (OQ-46, unchanged). For a data-only role, a human login once per day at a time convenient to the operator is the fail-closed default: if no token, no data request, and the backtest spine is stale for that session. No automation of the login.
+
+**Endpoints needed (data role only).**
+
+| Purpose | Method and path | Verified fields | Source | Level |
+|---------|-----------------|-----------------|--------|-------|
+| Historical candles V3 | `GET https://api.upstox.com/v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}` | Candle array `[timestamp, open, high, low, close, volume, open_interest]`; timestamp ISO 8601 with `+05:30`; `unit` in `minutes`, `hours`, `days`, `weeks`, `months` (per v0.1 F-43; the V3 page retrieved shows a 15-minute example only)  | F-43, F-65 | Path PRIMARY_EXTRACT; range table NOT VERIFIED |
+| Instrument keys | From the Upstox instruments file (JSON), keyed by `instrument_key` format `<segment>|<trading_symbol>`  | `instrument_key`, `segment`, `name`, `exchange`, `latency` fields for global instruments; equity instrument file structure not read in this run | F-65 | PRIMARY_EXTRACT (global instruments only) |
+
+**Rate limits (data role).** The #68 record says "50 req/s OHLC and quotes (landing page)." The **rate-limiting page retrieved does not display a numeric limit for "Other Standard APIs"** in the extracted text; it shows the order-placement table and says the other APIs have limits but omits the number in the excerpt . The 50/s figure is **not confirmed at PRIMARY_FULL** on the rate-limiting page. It is recorded as **SEARCH_EXCERPT / landing-page-only** until a full read of the rate-limiting page resolves it (OQ-67). The order-path 10/s regular limit is PRIMARY_FULL and unchanged.
+
+**What this means for the client throttle:** THR-13 uses **10 requests per second** for Upstox historical, which is at most half of the recorded 50/s if it is true, and at most the documented order-path limit if the 50/s is wrong. A throttle of 10/s is safe under either reading. It is not "half of 50" (which would be 25/s) because the 50/s figure is unconfirmed.
+
+**WebSocket.** Not needed for the data role. The v0.1 market-feed facts (F-44) remain for the cold-alternate broker role, deferred.
+
+**Adjusted vs unadjusted.** **NOT VERIFIED (OQ-67).** Upstox help-centre pages mention that average price is updated for bonus and splits, but this is a portfolio-accounting behaviour, not a statement about the historical candle API . Do not assume the candle API returns adjusted data. The design stores raw bars and applies our own adjustment ([DEFAULT-26], D-13 unchanged). If Upstox candles are vendor-adjusted, `adjusted=false` is not available as a parameter and the raw-plus-our-adjustment rule cannot be satisfied from this source alone. This is a **blocking data-integrity question** for P2.1, not a preference.
+
+**Corporate actions.** No Upstox corporate-actions endpoint is verified. The India corporate-actions capability (SEL-8) remains UNFILLED. Upstox daily bars therefore cannot be adjusted by our code without an external corporate-actions source. This is the same gap that made v0.1 DRAFT, now sharper: the Owner's RATIFIED daily spine has no verified corporate-actions companion.
+
+**Survivorship and delisted coverage.** **NOT VERIFIED (OQ-67).** Upstox's global-instruments announcement concerns indices and indicators, not delisted equities . No delisted-equity statement exists in the pages retrieved. Treat as **listed-only** until proven otherwise (fail-closed for backtest integrity: any India backtest on Upstox data is labelled survivorship-biased unless OQ-67 says otherwise).
+
+**Tick and lot size.** From the Upstox instrument file for the equity segment; not verified in this run. No constant assumed.
+
+**Timestamps.** Candle timestamps ISO 8601 with `+05:30` (F-43). Stored as UTC instants plus the exchange session date (NB-31 unchanged). The daily-bar session definition (which timestamp a "day" candle carries) is **NOT VERIFIED**.
+
+**Failure modes.** HTTP error codes not re-read in this run. The v0.1 Upstox error code `UDAPI1154` (static IP) and `UDAPI1158` (market orders not allowed) are order-path, deferred. For the data path: a 401/403 from an expired token is PE-1 class (AUTH_EXPIRED) with the human-login remedy. A 429 is PE-3 class, but the "temporary suspension" language on the rate-limiting page means a 429 is not a transient throttle: **treat any Upstox 429 as a suspension risk and stop the batch for the rest of the session, not just back off** (PE-19).
+
+**Cost.** APIs free (F-45, SEARCH_EXCERPT). Whether commercial derived-signal publication is covered by the free tier is **NOT VERIFIED** (BQ-48, [DEFAULT-59]).
+
+**Legal.** Terms on automated access, storage, redistribution, and derived products: **NOT READ** (OQ-68). BO-1 applies: a free individual API is not assumed to permit commercial signal publication.
+
+---
+
+### 5.16 Fyers — India intraday history (the event window)
+
+**Role in v1 (Model B):** read-only intraday OHLCV history for India event-window features. **No order path.** Fyers is not a broker candidate in Model B; it is a data source only.
+
+**Auth.** Not fully verified in this run. The v0.1 spec did not cover Fyers. The Owner decision records Fyers as a free data provider; the auth mechanism, token lifetime, refresh, and whether a daily human step is needed are **NOT VERIFIED (OQ-69)**. Fail-closed: no Fyers client is built until auth is documented and read.
+
+**Endpoints needed.** `GET /data/history` (per the Fyers AI-skills market-data page) . Parameters per the MCP page: `symbol`, `resolution`, `dateFormat`, `rangeFrom`, `rangeTo`, `oiFlag`, `contFlag` . The V3 REST parameter names may differ (snake_case vs camelCase; the #68 record says `oi_flag`, `cont_flag`). **OQ-67** covers the V3 names. Candle fields: time, open, high, low, close, volume, optional open interest (per the AI-skills page, not a V3 reference read) .
+
+**Recorded ranges from #68 (to be confirmed against Fyers' current page):**
+- Intraday from **3 July 2017**.
+- **100 days per request** for 1 to 240 minutes.
+- **366 days per request** for 1D, 1W, 1M.
+- Unlimited symbols per day.
+- Sub-minute **5S to 45S** for **30 trading days**.
+- `oi_flag`, `cont_flag`.
+
+**Confirmation status in this run:** the Fyers plans-and-limits page retrieved shows **rate limits** (Standard Data APIs: 5 req/s, 50 req/min, 5,000 req/day; Prime: 10/500/500,000) and the 429/day-block behaviour . It does **not** display the per-request date ranges. The historical-market-data guide states that span limits exist and differ by resolution and plan, without giving the numbers in the retrieved text . **The recorded #68 ranges are therefore unconfirmed at PRIMARY_FULL in this run.** They are retained as the working figures but marked with OQ-67.
+
+**Rate limits (confirmed post-2026-10-16).** Standard: **5 requests/second, 50 requests/minute, 5,000 requests/day** for Data APIs . A notice dated 2026-10-15/16 announced the revision effective **16 October 2026** . Any #68 figure predating this change is stale. THR-14 uses **2 requests/second, 25 requests/minute, 2,500 requests/day** — at most half of Standard on every dimension.
+
+**429 behaviour.** Error code **-429**. Exceeding the **per-minute** limit more than **3 times in a day** blocks the user for the **rest of the day** . This is not a transient throttle. PE-18: on the first 429, stop the batch for the rest of the session; do not retry; count the strike; a third strike means no Fyers data until the next calendar day. A retry loop on Fyers 429 is a self-inflicted day-block.
+
+**WebSocket.** Not needed for the data role. Not verified.
+
+**Adjusted vs unadjusted.** **NOT VERIFIED (OQ-67).** A Fyers community question asks whether the history API provides adjusted close for splits and dividends ; the answer is not in the retrieved excerpt. Treat as **unadjusted** until proven otherwise ([DEFAULT-60]). If unadjusted, Fyers intraday candles cannot be compared across a split without our own corporate-actions adjustment, and the India corporate-actions source is still UNFILLED (SEL-8).
+
+**Corporate actions.** None verified.
+
+**Survivorship and delisted coverage.** A community post on the Upstox forum (not a Fyers official page) asks whether the Fyers History API serves delisted/merged securities (HDFC Ltd) and pre-split history for renamed symbols; the post is a question, not an answer . **NOT VERIFIED.** Treat as **listed-only** until Fyers documents otherwise.
+
+**Tick and lot size.** From the Fyers symbol master; not verified.
+
+**Timestamps.** Convert to `Asia/Kolkata` when applying session rules, per the Fyers AI-skills page . Stored as UTC instants.
+
+**Cost.** Zero (Owner #68, RATIFIED). Plan tiers: Standard vs Prime; Prime expands limits . The recorded "free" refers to API access; whether Prime is needed for the intraday ranges or history depth is **NOT VERIFIED** (OQ-67).
+
+**Legal.** Terms on automated access, storage, redistribution, derived products: **NOT READ** (OQ-68). BO-1 applies.
+
+---
+
+### 5.17 SEC EDGAR — US fundamentals and filings (PAUSED, all SECONDARY)
+
+**The pause is in force.** No request was made to any SEC host. The v0.1 fact sheet (5.9) recorded figures from third-party pages; this amendment re-records them without contacting SEC and states plainly that they are **not confirmed against the vendor's current page** because the Owner's instruction forbids the request.
+
+**What is retained from the v0.1 / #68 record, marked SECONDARY:**
+- **10 requests per second** per user (SEC fair-access guideline; widely repeated by third-party mirrors; **not verified at SEC in this run**).
+- **Declared `User-Agent` required**, naming the requester and a contact address; requests without it are commonly answered 403 (third-party mirrors).
+- **Dissemination cutoffs 17:30 ET**, and **22:00 ET** for Forms 3, 4, 5 (recorded in historical specs from a primary read before the pause; retained as SECONDARY for this run).
+- **Propagation latency after acceptance not published.**
+- **Full and quarterly indexes rebuilt weekly early Saturday** (the `full-index` directory exists and is documented as a bridge; the rebuild cadence is from the historical record, not re-verified) .
+- **History from 1994/1995.**
+- **Submissions fields:** `acceptanceDateTime`, `accessionNumber`, `act`, `core_type`, `fileNumber`, `filingDate`, `filmNumber`, `form`, `isInlineXBRL`, `isXBRL`, `isXBRLNumeric`, `items`, `primaryDocDescription`, `primaryDocument`, `reportDate`, `size`.
+
+**What is NOT established and must not be coded:** the exact JSON shape of the submissions endpoint; whether the fields above are top-level or nested; the pagination of older filings; the XBRL company-facts endpoint shape; the SIC code's presence and format; the 429 body. OQ-70.
+
+**Conflict with Model B.** SEL-9 (US fundamentals, SEC EDGAR primary) is **BLOCKED** by the pause and by the `User-Agent` identity choice (OQ-41, unchanged). Under Model B, US fundamentals are a P2.4 input; without them, US fundamental features are absent, not defaulted. This is declared, not worked around.
+
+---
+
+### 5.18 Benzinga (corrections from SPEC-P2N.13 F-1)
+
+The v0.1 spec did not have a Benzinga fact sheet; Benzinga was reached through Alpaca News (5.2). The P2N.13 correction concerns two claims. This amendment records what the retrieved pages support and what they do not.
+
+**Claim 1: "Benzinga history from 2010; 600 to 900 real-time headlines a day in addition to 130 to 160 full-length articles."**
+
+- **130–160 full-length articles** and **600–900 real-time headlines per day**: **CONFIRMED** at Alpaca's own blog announcing the News API, which states "130-160 full-length articles, with images" and "600-900 real-time headlines per day," history to 2015 . The source is **Alpaca**, not Benzinga's own product page. The claim is true of **Alpaca's Benzinga-sourced bundle**, not independently verified at Benzinga.
+- **History from 2010**: **NOT CONFIRMED** in this run. Alpaca's blog and docs both say **2015** . A third-party dataset page says January 2016 . No retrieved page states 2010. If Benzinga's own product page says 2010, that page was not reached in this run. Record the 2010 claim as **UNVERIFIED**, not as a correction that supersedes Alpaca's 2015.
+- **Does Alpaca's bundle carry the headline stream?** Alpaca's documentation describes "news articles" (130+ per day) ; the blog announces the headline volume as a feature of the same API . Whether the high-frequency headline stream is a distinct feed in Alpaca's API, or whether the 600–900 figure describes the editorial output from which Alpaca selects articles, is **NOT ESTABLISHED**. Alpaca's `/v1beta1/news` endpoint (v0.1 F-35) returns articles with `headline`, `summary`, `content`; no separate "headlines-only" endpoint is described. The safe reading: Alpaca's endpoint serves **articles**, and the 600–900 headline figure describes Benzinga's editorial volume, not a guaranteed API feed. OQ-71.
+
+**Claim 2: "Benzinga offers TCP push, not only REST pull."**
+
+**CONFIRMED at PRIMARY_EXTRACT.** Benzinga's TCP streaming documentation describes a persistent TCP connection delivering JSON messages for news and market events (option alerts, press releases, trading halts, analyst ratings, block trades), with credentials obtained from Benzinga support . This is a distinct delivery mechanism from the REST API and from Alpaca's WebSocket. It is **not** what Alpaca's bundle provides; Alpaca provides REST plus a WebSocket of its own, sourced from Benzinga . SEL-24 records Benzinga direct as a news backup candidate, PROVISIONAL, licence

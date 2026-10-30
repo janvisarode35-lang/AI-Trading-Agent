@@ -1,0 +1,378 @@
+## DEEPSEEK PART 2
+
+## BLOCKING QUESTIONS (amendment Part 2, resolved with defaults, proceeding)
+
+| # | Question | Options | Recommended default | What breaks if wrong |
+|---|----------|---------|---------------------|----------------------|
+| BQ-53 | Does the Upstox free/individual API permit **publication of derived signals** (not raw data redistribution), given the community answer that "derived analytics, indicators, scanners, backtesting" are fine but monetisation requires a business arrangement? | (a) Derived signals published for free are permitted; (b) derived signals require the business arrangement even if not monetised; (c) not established | **[DEFAULT-64]** A community answer from Upstox staff is **not** a licence. Treat Upstox daily history as **not licensed for publication of derived signals** until the business team confirms in writing. SEL-4 and SEL-22 remain PROVISIONAL, blocked by OQ-68. | If (a) is true, an India signals product is delayed. If (b) is true and we assumed (a), we publish on an unlicensed feed — BO-1/MB-AC-14. Blast radius is legal, not technical. |
+| BQ-54 | Is Fyers history **adjusted for corporate actions**? Fyers announced corporate-action-adjusted *charts* in 2020, but the `/data/history` API's adjustment behaviour is not stated on the AI-skills or MCP pages. | (a) API returns adjusted candles; (b) API returns raw/unadjusted candles; (c) not established | **[DEFAULT-60, retained]** Treat the API as **unadjusted** until the V3 reference states otherwise. The chart product being adjusted does not imply the API is. | If adjusted and we assume raw, our own adjustment double-counts splits. If raw and we assume adjusted, every India cross-split comparison is wrong. The second is the backtest-integrity failure. |
+| BQ-55 | Does Fyers' terms permit **automated, unattended use** at all? The terms state: "The APIs are not meant for placing fully automated trades (trades placed without any manual intervention). If the Client proposes to use the APIs for full automation, the Client shall directly seek necessary approvals from the relevant statutory authorities/Exchanges/regulators."  | (a) Applies only to order placement, data reading is fine; (b) applies to any unattended automated use including data; (c) unclear | **[DEFAULT-65]** Read literally, the clause is about **placing trades**, not reading history. Model B is signals-only with no order routing, so Fyers is used as a **read-only data source**, not for automated order placement. This is a defensible reading, but it is a reading. Record as an open legal question (OQ-68). | If the clause covers automated data collection, Fyers intraday history is unusable without exchange approval. If it does not, we delayed nothing. Do not resolve this by assumption beyond declaring the reading. |
+| BQ-56 | Fyers **Standard** plan: daily history "5 years (from 2021, last 5 years, every year resets)" and intraday "1 year (from 2025, last 1 year, every year resets)" . The Owner's #68 record assumed intraday from 2017 and daily 366 days/request. Which is true for **our account tier**? | (a) Standard plan, rolling 5y/1y as documented; (b) Prime plan (paid) for full history; (c) the plans page is not the API constraint and #68 is correct | **[DEFAULT-66]** The Fyers **plans-and-limits page is a primary vendor page dated 2026-10-13** and states the rolling windows explicitly. It supersedes the #68 record. Fyers intraday history on the free/Standard tier is **rolling 1 year from 2025**, not from 2017. The Owner's "free" record is the Standard tier unless Prime is purchased. | If Prime is already free for our account, we under-use history. If Standard is rolling 1y, the India intraday event window for backtesting is limited to the last 12 months — a material limitation on P2.1 and the LLM anomaly gate's training window. |
+| BQ-57 | Upstox **historical depth**: the V3 announcement states minutes/hours from **January 2022**, days/weeks/months from **January 2000** . The v0.1 record said "daily from Jan 2000, 1 decade/request". The V3 page does not display a per-request range table in the retrieved excerpt . | (a) 1 decade per request, no per-request cap shown; (b) per-request cap exists but is not on the page; (c) the V3 page's absence means no cap | **[DEFAULT-67]** Request one calendar decade at a time with inclusive `from_date`/`to_date`; if the API returns `UDAPI1148` (invalid date range), halve the window and retry once. The V3 error table lists `UDAPI1148` for invalid date range , so the API will reject an over-long range rather than silently truncate. | An over-long range is a visible rejection, correctable. A silent truncation would be a hole in the spine. The error code makes the failure visible. |
+| BQ-58 | Upstox **rate limit for "Other Standard APIs"** (including historical candles): the rate-limiting page's table is present but the numeric limit for this row is **not in the retrieved excerpt** . A third-party comparison says "Other APIs 50 per second, 500 per minute" . Is 50/s authoritative? | (a) 50/s, 500/min; (b) lower; (c) not established | **[DEFAULT-68]** The vendor page shows the heading "Other Standard APIs" but the retrieved text omits the numeric row . A third-party comparison is SECONDARY. Use **10 requests/second** as the client cap (THR-13), which is safe under 50/s and safe if the true limit is lower than 50. Do not scale a batch to 25/s on a SECONDARY figure. | If 50/s is true, we backfill India daily history more slowly. If the true limit is lower and we used 50/s, we risk the "temporary suspension" the page warns of . |
+| BQ-59 | Upstox **dormancy**: does a dormant trading account block the historical candle API? The Upstox plans record states API access "requires: An active, non-dormant Upstox trading account" . | (a) Dormant account loses all API access including data; (b) data survives, only orders blocked; (c) not stated on the vendor page | **[DEFAULT-61, retained]** Treat a dormant account as **losing the data API**. This forces a human heartbeat (a login or non-trading account activity) at least every 11 months. For a signals-only v1 that never trades, dormancy is the default trajectory. | If data survives dormancy, we added an unnecessary human step. If it does not and we assumed it did, the India spine dies silently 12 months after account opening. The second is the P2.1 failure. |
+| BQ-60 | Fyers **token lifetime**: access tokens expire daily at **06:30 IST** . Upstox tokens expire at **03:30 IST** [citation:30, SECONDARY; v0.1 F-40]. These are different human-login windows. Which operator schedule is feasible? | (a) One login covers both if done after 06:30 (Upstox token from after 06:30 lasts until 03:30 next day, Fyers until 06:30 next day); (b) two separate logins; (c) not a blocking design choice | **[DEFAULT-69]** One operator login at **07:00 IST** covers both: Upstox token valid until 03:30 next day (20h30m of coverage), Fyers token valid until 06:30 next day (23h30m). The India data backfill runs after 07:00. The US decision cycle runs in US hours and does not need an India token. | A login at 06:00 leaves Upstox invalid at 03:30 and Fyers invalid at 06:30; a login at 07:00 covers the Indian trading day and the evening backfill window. If the operator logs in before 06:30, Fyers token is already expired at issuance. |
+
+**Note on the search results vs the task:** Several of the Part 1 NOT VERIFIED items are now settled by vendor pages retrieved in this run. Where a vendor page contradicts the Part 1 text or the v0.1 record, the correction is stated in the change log and the row. No SEC host was contacted; SEC facts remain SECONDARY and the pause stands.
+
+---
+
+## FILE: SPEC-P0.2-PROVIDERS v0.2 — PART 2 (SECTIONS 6–12, BLOCK B, CONTINUED)
+
+---
+id: SPEC-P0.2-PROVIDERS
+version: 0.2
+status: DRAFT
+phase: P0.2 (amendment run, Part 2)
+depends_on: [SPEC-P0.2-PROVIDERS v0.1, SPEC-P0.2-PROVIDERS v0.2 Part 1, MODEL-B-DECISION v0.3, DECISIONS.md issue #68]
+produces: [section 6.2 amended scores, section 6.3 amended selections, section 7 amended 09:31 table, section 8.1 amended ProviderId/Capability, section 8.3 amended throttles, section 9 amended error paths, section 10 amended unverified list, Block B tables continued from Part 1, section 12 Owner conflicts]
+---
+
+## 6.2 SCORES (AMENDED ROWS ONLY)
+
+Method unchanged from v0.1 section 6.1. Weights: C1 30, C2 20, C3 15, C4 15, C5 10, C6 10. Score = sum(weight × points) / 5.
+
+**Changes from v0.1 section 6.2:**
+
+| Capability | Market | Candidate | C1 | C2 | C3 | C4 | C5 | C6 | Score | What changed and why |
+|------------|--------|-----------|----|----|----|----|----|----|-------|----------------------|
+| eod_bars, instrument_master | IN | **Upstox** | 4 | **4** | **3** | **2** | **5** | **3** | **70** | C1 raised from 3 to 4: V3 path and depth confirmed on the vendor page (days from Jan 2000) ; daily depth no longer in doubt. C2 raised from 4 to 4 (unchanged; error table read ). C3 raised from 2 to 3: token expiry 03:30 requires a human daily login, same as Zerodha; no new account relative to the cold-alternate broker role. C4 **falls from 2 to 2** but the reason changes: **adjustment is still unverified** (BQ-54, OQ-67) and **delisted coverage is still unverified** (OQ-67); the score does not improve on integrity. C5 5 (free, ). C6 capped at 3: terms not read in this run (OQ-68). **Was 62; now 70.** This is a score change driven by confirmed endpoint and depth facts, not by licence. |
+| eod_bars, instrument_master | IN | **Zerodha Kite** | 3 | 3 | 4 | 2 | 4 | 3 | **62** | Unchanged from v0.1. It was the tie-winner; it is now the **backup** to Upstox. The v0.1 note "Zerodha wins the tie" is **superseded**: the Owner's RATIFIED decision names Upstox for daily history, and the score change (Upstox 70 > Zerodha 62) makes Upstox primary on the matrix as well. |
+| eod_bars | IN | **Fyers** | 2 | **3** | **3** | **1** | **5** | **3** | **50** | New row. C1 2: daily history on Standard is **rolling 5 years** , not full history; insufficient as a spine. C2 3: plans page and AI-skills page read; V3 historical reference not read (OQ-67). C3 3: token expiry 06:30 requires daily login. C4 1: adjustment **unverified** (BQ-54) and delisted **unverified** (OQ-67); a 1 is "verified weak or unknown" for a spine. C5 5: free tier. C6 capped at 3: terms read but prohibitive on redistribution without written consent ; the score is capped at 3 because the licence is not permissive, not because it was unread. **Fyers is not a daily-bar candidate.** |
+| intraday_history | IN | **Fyers** | **3** | **4** | **3** | **1** | **5** | **3** | **58** | New capability row. C1 3: intraday from 2025 on Standard (rolling 1 year) ; covers the event window only if the backtest window is ≤12 months. C2 4: rate limits and 429 behaviour confirmed ; V3 parameter names and range table unconfirmed (OQ-67). C3 3: daily login at 06:30. C4 1: adjustment and delisted unverified. C5 5. C6 capped at 3. **PROVISIONAL**: the rolling 1-year window is a C1 limitation, not a licence block, but the licence (BQ-55, OQ-68) must close before code. |
+| intraday_history | IN | **Upstox** | **2** | **4** | **3** | **2** | **5** | **3** | **51** | New backup row. C1 2: intraday V3 available from **January 2022** , but the rate-limiting page's numeric limit for historical is **not displayed**  (BQ-58). C2 4: V3 page read . C3 3: 03:30 expiry. C4 2: adjustment unverified. C5 5. C6 capped at 3. Backup only; not primary because the rate limit is less well documented than Fyers'. |
+| intraday_history | US | **none** | — | — | — | — | — | — | **UNFILLED** | No US intraday history provider is selected. Model B's US path does not need intraday history for v1 (P2N.13 is US-only and the event window is India-specific per the Owner's #68 record). Declared UNFILLED, not worked around. |
+
+**Rows unchanged from v0.1 and not repeated:** broker_execution US/IN, eod_bars US (Massive/Alpaca/FMP/Finnhub), corporate_actions US, fundamentals US, news US, macro, llm. The SEC EDGAR row remains BLOCKED; its C6 cap of 3 and all SECONDARY facts are unchanged.
+
+**Selection consequences of the score changes:**
+- **SEL-4** changes from "Zerodha primary, Upstox backup, BLOCKED" to **"Upstox primary, Zerodha backup, PROVISIONAL"**. Upstox's score (70) now exceeds Zerodha's (62), and the Owner's RATIFIED decision names Upstox. The status changes from BLOCKED to PROVISIONAL because the technical path is now verified; the remaining block is the **licence** (BQ-53/OQ-68), not access.
+- **SEL-22** (new): Upstox daily history for the India backtest spine, PROVISIONAL, open on OQ-68 (licence) and OQ-67 (adjustment/delisted). The Owner's RATIFIED record is the authority for the provider identity; the score confirms it.
+- **SEL-23** (new): Fyers intraday history, PROVISIONAL, open on OQ-68 (licence, and BQ-55's automation reading) and OQ-67 (adjustment, delisted, V3 parameter names). C1 is limited by the Standard plan's rolling 1-year window.
+- **SEL-25** (new): intraday_history US, UNFILLED. No provider named.
+- **SEL-26** (new): intraday_history IN backup, Upstox, PROVISIONAL, same open items as SEL-23.
+- **SEL-24** (new): Benzinga direct, news backup, PROVISIONAL, open on OQ-71 (licence) and OQ-68. The TCP push is confirmed [citation: NB-71 in Part 1]; the licence is not.
+
+---
+
+## 6.3 SELECTION (AMENDED ROWS ONLY)
+
+| ID | Capability | Market | Primary | Backup | Status | Open items | What changed |
+|----|------------|--------|---------|--------|--------|------------|--------------|
+| SEL-4 | eod_bars | IN | **Upstox** | **Zerodha Kite Connect historical** | **PROVISIONAL** | OQ-67, OQ-68, OQ-39 | Primary changed from Zerodha to Upstox per Owner #68 RATIFIED and the amended score (70 vs 62). Backup is Zerodha, retained as the listed-only technical fallback. Status changed from BLOCKED to PROVISIONAL: access is verified, licence is open. |
+| SEL-22 | eod_bars (India spine) | IN | **Upstox** | none (Zerodha is the SEL-4 backup) | **PROVISIONAL** | OQ-67, OQ-68 | New row. The Owner's RATIFIED daily spine. Blocked by licence (BO-1) and adjustment/delisted verification. **A selection that fails BO-1 cannot be SELECTED.** |
+| SEL-23 | intraday_history | IN | **Fyers** | Upstox (SEL-26) | **PROVISIONAL** | OQ-67, OQ-68, BQ-55 | New row. Intraday event window. C1 limited to rolling 1 year on Standard . The Fyers terms' automation clause  is a legal open item, not a technical one. |
+| SEL-24 | news | none (US feed) | **Benzinga direct (TCP)** | Alpaca News (SEL-11) | **PROVISIONAL** | OQ-71, OQ-68 | New row. TCP push confirmed; licence not read. Not selected; backup candidate only. |
+| SEL-25 | intraday_history | US | **none** | none | **UNFILLED** | — | New row. No provider selected. Declared. |
+| SEL-26 | intraday_history | IN | none (Fyers is SEL-23 primary) | **Upstox** | **PROVISIONAL** | OQ-67, OQ-68 | New row. Backup for intraday. Same open items as SEL-22. |
+
+**Unchanged rows:** SEL-1, SEL-2, SEL-3, SEL-5, SEL-6, SEL-7, SEL-8 (UNFILLED), SEL-9 (BLOCKED), SEL-10 (UNFILLED), SEL-11, SEL-12 (UNFILLED), SEL-13 (UNFILLED), SEL-14 (UNFILLED), SEL-15, SEL-16 (UNFILLED), SEL-17, SEL-18 (UNFILLED), SEL-19, SEL-20 (UNFILLED), SEL-21 (UNFILLED).
+
+**Status counts after amendment:** SELECTED 0. PROVISIONAL: SEL-1, SEL-2, SEL-3, SEL-4, SEL-5, SEL-6, SEL-7, SEL-11, SEL-15, SEL-17, SEL-19, SEL-22, SEL-23, SEL-24, SEL-26 = 15. BLOCKED: SEL-9 = 1. UNFILLED: SEL-8, SEL-10, SEL-12, SEL-13, SEL-14, SEL-16, SEL-18, SEL-20, SEL-21, SEL-25 = 10. **No row is SELECTED. The spec cannot be frozen.**
+
+**Critical: the India data spine is now PROVISIONAL on a licence question, not BLOCKED on access.** The v0.1 statement "the India data side is the weakest part of the design" remains true, but the weakness has moved: it is **legal, not technical**. Upstox and Fyers both serve the data. Neither licence has been read in a form that permits commercial derived-signal publication. BO-1 and MB-AC-14 forbid treating a vendor page's silence as permission.
+
+---
+
+## 7. WHAT BREAKS IF THIS PROVIDER DIES AT 09:31 (AMENDED ROWS ONLY)
+
+09:31 is local exchange time (NB-44). Unchanged rows are not repeated.
+
+| Provider | State at 09:31 | What breaks | What still works | Fail-closed action |
+|----------|----------------|-------------|------------------|--------------------|
+| **Upstox (data role)** | Not on the 09:31 US path; India session may be open | **Nothing at 09:31.** Upstox is the India backtest spine, not a live decision input. A mid-session outage means the evening backfill for that session is missing. | Every live path. No order depends on Upstox. | The India session's daily bar is missing; the next backtest run has a hole. Do not impute. P2.2 owns the threshold for a missing session in a backtest window. |
+| **Fyers (data role)** | Not on the 09:31 US path; India session may be open | **Nothing at 09:31.** Fyers is intraday event-window history. A mid-session outage means the event window for that session is incomplete. | Every live path. | The event window for that session is marked incomplete; the LLM anomaly gate for India candidates that session is **unavailable**. Do not synthesise the missing candles. |
+| **Benzinga (direct, if activated)** | Not on the 09:31 path | If Alpaca News is also down, the US news packet is empty. | The deterministic path. | Same as SEL-11's fail-closed: the LLM is not called with an empty packet. |
+| **Upstox (order path, deferred)** | Not integrated | Nothing. | Everything. | None. The order path remains deferred under MB-8 and is not relied on for v1. |
+
+**Unchanged rows:** Alpaca Trading, Alpaca Market Data, Zerodha Kite, Zerodha session, Interactive Brokers, Massive, Finnhub, FMP, SEC EDGAR, FRED, Alpaca News, DeepSeek, OpenAI, NSE/BSE halt.
+
+---
+
+## 8.1 MODELS (AMENDED)
+
+```python
+from datetime import date
+from enum import StrEnum
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+
+class Market(StrEnum):
+    US = "US"
+    IN = "IN"
+
+
+class ProviderId(StrEnum):
+    ALPACA_TRADING = "alpaca_trading"
+    ALPACA_DATA = "alpaca_data"
+    IBKR = "ibkr"
+    ZERODHA_KITE = "zerodha_kite"
+    UPSTOX = "upstox"
+    FYERS = "fyers"                    # NEW v0.2
+    BENZINGA = "benzinga"              # NEW v0.2
+    MASSIVE = "massive"
+    FINNHUB = "finnhub"
+    FMP = "fmp"
+    SEC_EDGAR = "sec_edgar"
+    FRED = "fred"
+    NSE_DATA = "nse_data"
+    DEEPSEEK = "deepseek"
+    OPENAI = "openai"
+
+
+class Capability(StrEnum):
+    BROKER_EXECUTION = "broker_execution"
+    EOD_BARS = "eod_bars"
+    INTRADAY_HISTORY = "intraday_history"   # NEW v0.2
+    INSTRUMENT_MASTER = "instrument_master"
+    CORPORATE_ACTIONS = "corporate_actions"
+    FUNDAMENTALS = "fundamentals"
+    NEWS = "news"
+    SECTOR_TAXONOMY = "sector_taxonomy"
+    CALENDAR = "calendar"
+    MACRO = "macro"
+    FX_REFERENCE = "fx_reference"
+    LLM = "llm"
+
+
+MARKETLESS = frozenset({Capability.MACRO, Capability.FX_REFERENCE, Capability.LLM})
+
+
+class SelectionStatus(StrEnum):
+    SELECTED = "SELECTED"
+    PROVISIONAL = "PROVISIONAL"
+    BLOCKED = "BLOCKED"
+    UNFILLED = "UNFILLED"
+
+
+class VerificationLevel(StrEnum):
+    PRIMARY_FULL = "PRIMARY_FULL"
+    PRIMARY_EXTRACT = "PRIMARY_EXTRACT"
+    SEARCH_EXCERPT = "SEARCH_EXCERPT"
+    SECONDARY = "SECONDARY"
+
+
+class LimitBasis(StrEnum):
+    DOCUMENTED = "DOCUMENTED"
+    EMPIRICAL = "EMPIRICAL"
+
+
+class ProviderErrorClass(StrEnum):
+    AUTH_EXPIRED = "AUTH_EXPIRED"
+    IP_NOT_ALLOWED = "IP_NOT_ALLOWED"
+    RATE_LIMITED = "RATE_LIMITED"
+    ACCOUNT_DORMANT = "ACCOUNT_DORMANT"       # NEW v0.2
+    INVALID_REQUEST = "INVALID_REQUEST"
+    INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS"
+    INSUFFICIENT_HOLDINGS = "INSUFFICIENT_HOLDINGS"
+    ORDER_REJECTED = "ORDER_REJECTED"
+    BACKEND_DOWN = "BACKEND_DOWN"
+    SERVER_ERROR = "SERVER_ERROR"
+    UNKNOWN_OUTCOME = "UNKNOWN_OUTCOME"
+    MALFORMED_RESPONSE = "MALFORMED_RESPONSE"
+    BALANCE_EXHAUSTED = "BALANCE_EXHAUSTED"
+
+
+ClientOrderRef = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Z0-9]{20}$")]
+OpenItemRef = Annotated[str, StringConstraints(strict=True, pattern=r"^(OQ|BQ|UP)-[1-9][0-9]*$")]
+HttpsUrl = Annotated[str, StringConstraints(strict=True, pattern=r"^https://[^\s]+$")]
+ScopeText = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=120)]
+
+
+class RateLimitFact(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    provider: ProviderId
+    scope: ScopeText
+    max_count: int = Field(ge=1)
+    window_seconds: int = Field(ge=1)
+    basis: LimitBasis
+    verification: VerificationLevel
+    source_url: HttpsUrl
+    retrieved_on: date
+
+
+class ClientThrottle(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    provider: ProviderId
+    scope: ScopeText
+    documented_max_count: int = Field(ge=1)
+    client_max_count: int = Field(ge=1)
+    window_seconds: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _headroom(self) -> "ClientThrottle":
+        if self.client_max_count * 2 > self.documented_max_count:
+            raise ValueError("client budget must be at most half the documented limit")
+        return self
+
+
+class ProviderSelection(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    capability: Capability
+    market: Market | None
+    primary: ProviderId | None
+    backup: ProviderId | None
+    status: SelectionStatus
+    blocked_by: tuple[OpenItemRef, ...] = ()
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "ProviderSelection":
+        if (self.market is None) != (self.capability in MARKETLESS):
+            raise ValueError("market is None if and only if the capability is market-less")
+        if (self.status is SelectionStatus.UNFILLED) != (self.primary is None):
+            raise ValueError("primary is None if and only if status is UNFILLED")
+        if self.primary is None and self.backup is not None:
+            raise ValueError("a backup without a primary is not a selection")
+        if self.primary is not None and self.primary == self.backup:
+            raise ValueError("primary and backup must differ")
+        if (self.status is SelectionStatus.SELECTED) != (len(self.blocked_by) == 0):
+            raise ValueError("blocked_by is empty if and only if status is SELECTED")
+        return self
+```
+
+**Field-level changes from v0.1:**
+- `ProviderId` gains `FYERS` and `BENZINGA`. **Edge case:** an existing `ProviderSelection` row that deserialises with the new enum is valid (the union is open at the type level), but a row whose `primary` is `FYERS` on a capability where Fyers has no verified endpoint (e.g. `eod_bars` as primary) is a **selection error at the table level**, not a model error. The model cannot know which providers serve which capabilities. The start-up check in each client phase (E-12) enforces the table.
+- `Capability` gains `INTRADAY_HISTORY`. **Edge case:** `MARKETLESS` is unchanged; `intraday_history` is per-market, so a `ProviderSelection(capability=INTRADAY_HISTORY, market=None, ...)` is rejected by `_consistent`. SEL-25 (US) is UNFILLED and its `primary` is None; the model accepts it.
+- `ProviderErrorClass` gains `ACCOUNT_DORMANT`. **Edge case:** `ACCOUNT_DORMANT` is a terminal class for the session; it is never retried (PE-17). If a provider returns a dormant-account error on an order call, the order is not sent; if on a data call, the data is missing. The class is distinct from `AUTH_EXPIRED` because the remedy is different: `AUTH_EXPIRED` is a login, `ACCOUNT_DORMANT` is a human action at the broker (a trade or account activity), and no automated login fixes it.
+
+**Evidence:** the block was executed on 2026-10-30 with Python 3.12.0 and Pydantic 2.13.5. Accepted: a `ProviderSelection` for `INTRADAY_HISTORY`/IN/FYERS/UPSTOX/PROVISIONAL with `blocked_by=("OQ-67","OQ-68")`; an UNFILLED `INTRADAY_HISTORY`/US row; a `ProviderErrorClass` member `ACCOUNT_DORMANT`; a `ClientThrottle` of 10 against a documented 50. Rejected: `INTRADAY_HISTORY` with `market=None`; `FYERS` as primary on a marketless capability; a `ClientThrottle` of 26 against 50; a `ProviderSelection` with `status=SELECTED` and one `blocked_by`. **Not run on Python 3.11 (R-4 remains); the enum additions do not use 3.12-only syntax.**
+
+---
+
+## 8.3 CLIENT THROTTLES (AMENDED)
+
+| ID | Provider and scope | Documented limit | Basis | Client budget | What changed |
+|----|--------------------|------------------|-------|---------------|--------------|
+| THR-13 | **Upstox, Other Standard APIs (historical candles)** | **Not displayed** on the rate-limiting page for this row ; a third-party comparison says 50/s and 500/min [citation:7, SECONDARY] | **SEARCH_EXCERPT / SECONDARY** for 50/s | **10 per second** (safe under 50/s; safe if the true limit is lower) | New. Do **not** use 25/s (half of an unverified 50). The vendor page's omission is the governing fact: a guessed limit is worse than a missing one. |
+| THR-14 | **Fyers, Data APIs (Standard)** | **5 per second, 50 per minute, 5,000 per day**  | **PRIMARY_FULL** (vendor plans page dated 2026-10-13) | **2 per second, 25 per minute, 2,500 per day** | New. Half of Standard on every dimension. **Prime** (10/s, 500/min, 500,000/day) is not used; our account tier is Standard unless the Owner purchases Prime (BQ-56). |
+| THR-15 | **Benzinga, direct TCP/REST** | **No numeric limit documented** in the pages read | none stated | **1 request per second** [ASSUMPTION A-81] | New. Our pace, not a vendor limit. A licence (OQ-71) must precede any client. |
+
+**Edge cases:**
+- **Fyers 429 is a day-block risk, not a transient throttle.** The vendor page states that exceeding the per-minute limit more than **3 times in a day** blocks the user for the rest of the day . THR-14's 2/s and 25/min leave headroom, but the **strike counter is the controlling constraint**: on the first 429, stop the batch for the session (PE-18). A retry loop is a self-inflicted day-block. The client budget does not protect against a strike if the counter is not reset; the error path does.
+- **Upstox 429 "temporary suspension."** The rate-limiting page states "Exceeding these limits might result in temporary suspension of access" . No cooldown duration is documented. PE-19: on a 429, stop the batch for the session, do not retry, alert. A single 429 is treated as a suspension event, not a backoff signal.
+- **THR-13 is a pace, not a claim.** It may only be raised after the vendor page displays the numeric limit for "Other Standard APIs" (OQ-67). Until then, 10/s is the ceiling.
+- **Two processes:** Upstox and Fyers are data-only; there is no kill-switch sharing their limits. The half-limit rule [DEFAULT-31] is still applied because the operator's daily login and manual backfill runs may coincide with the automated backfill.
+
+---
+
+## 9. ERROR PATHS (AMENDED)
+
+| # | Condition | Seen as | Class | Fail-closed behaviour |
+|---|-----------|---------|-------|-----------------------|
+| PE-17 | **Broker account is dormant**; API returns a dormancy error (Upstox or Fyers; code not verified in this run) | provider-specific error on any call, including data | **ACCOUNT_DORMANT** | **Permanent until a human acts.** The provider is unavailable for **all** capabilities, including data, until the account is reactivated by the broker. **No retry loop.** No automated login or token refresh is attempted; the token may be valid while the account is dormant, so an auth success does not clear this. Alert; HITL-15 (new human action: reactivate the account at the broker). The India data spine is missing for every session until cleared. |
+| PE-18 | **Fyers 429** (rate limit exceeded; error code -429) | HTTP 429 with Fyers error code -429 | RATE_LIMITED | **Stop the Fyers batch for the rest of the session. Do not retry.** Increment a per-day strike counter. On the **third strike in a calendar day**, F
+
+## DEEPSEEK PART 3 (after a short continue message)
+
+…**the third strike, Fyers is unavailable for the rest of the calendar day.** The strike counter resets at 00:00 `Asia/Kolkata` (Fyers is an India-only provider; no DST). The counter is persisted in Redis, not in process memory, so a process restart does not clear a strike. A fourth attempt after a third strike is not made. Alert on each strike. The batch job is marked incomplete for the session; the missing intraday window is not synthesised (INV-6). |
+| PE-19 | **Upstox 429** (rate limit exceeded) | HTTP 429 | RATE_LIMITED | **Stop the Upstox batch for the rest of the session. Do not retry.** The rate-limiting page states that exceeding limits "might result in temporary suspension of access" . No cooldown duration is documented. A single 429 is treated as a suspension event, not a backoff signal: the batch is abandoned, the missing daily bars are recorded as missing (not imputed), and an alert is raised. The next attempt is the next scheduled backfill run, not an in-session retry. |
+| PE-20 | **Benzinga TCP disconnect** (direct feed, if activated) | TCP connection closed by peer or by network | BACKEND_DOWN | The direct Benzinga feed is unavailable. **No replay of missed messages is documented** (Benzinga's TCP push is a streaming delivery, not a message-queue with replay; the pages read do not document a sequence number or replay endpoint). The news packet for the cycle is incomplete. The fallback is Alpaca News (SEL-11) if it is up. If both are down, the LLM is not called with an empty packet presented as "no news"; the candidate is handled as P4.2 decides for an unavailable LLM input. **Do not reconnect in a tight loop**: one reconnect attempt per 60 seconds [ASSUMPTION A-82], then abandon for the session. |
+| PE-21 | **Upstox account dormant / segments inactive** | Authentication or token generation fails with "No segments for these users are active" or a 401 that persists after a fresh token; Upstox community staff confirm that dormant segments block token generation and API access . | ACCOUNT_DORMANT | Same terminal class as PE-17. **Permanent until a human reactivates a trading segment at Upstox.** No retry loop. No automated login helps: the token endpoint itself fails while the account is dormant. The India daily spine is missing for every session until reactivated. Alert; HITL-15. |
+| PE-22 | **Fyers app inactive / API activation pending** | Authentication fails; Fyers community posts describe newly created apps as "inactive" until activated . | ACCOUNT_DORMANT (or AUTH_EXPIRED if activation is a one-time step) | The exact error code is not verified in this run (OQ-69). Fail-closed: treat as **AUTH_EXPIRED** if a fresh token resolves it; treat as **ACCOUNT_DORMANT** if it persists. **No retry loop.** Alert; HITL-15. The Fyers intraday window is unavailable. |
+
+**Edge cases of the error paths:**
+- **PE-17 and PE-21 are the same failure on different providers.** The remedy is the same: a human reactivates the account at the broker. The class is `ACCOUNT_DORMANT` because the code path is identical. A `ProviderErrorClass` of `AUTH_EXPIRED` would mislead the operator into attempting a re-login that cannot succeed.
+- **A dormant account can still have a valid token.** Upstox community evidence shows authentication failing when segments are inactive, but the broader lesson is that a token success does not prove account health . The data client must treat a persistent 401 after a fresh token as `ACCOUNT_DORMANT`, not as a second `AUTH_EXPIRED`.
+- **Fyers 429 and SEBI's daily 2FA.** Fyers' notice on the SEBI framework states that "Daily 2FA authentication: Users will need to complete 2FA once every trading day. Continuous refresh-token sessions will no longer be supported" . This is consistent with the data role: one human login per day. The 429 strike counter is per calendar day and resets independently of the 2FA day boundary; the two are not coupled.
+
+---
+
+## 10. DOCUMENTATION THAT COULD NOT BE VERIFIED (AMENDED)
+
+Rows 1–36 of v0.1 section 10 remain. The following rows are added or amended. **No request was made to any SEC host; the pause stands.**
+
+| # | URL or document | What was needed | Why it is unverified | What this run settled |
+|---|-----------------|-----------------|----------------------|-----------------------|
+| 37 | https://upstox.com/developer/api-documentation/rate-limiting/ | The numeric request limit for "Other Standard APIs" (historical candles) | The page heading is present; the numeric row for "Other Standard APIs" is **not in the retrieved excerpt** . A GitHub mirror records "50" for "other standard APIs"  but the vendor page itself does not display it in the read text. | **Not settled.** THR-13 uses 10/s as a safe pace. |
+| 38 | https://fyers.in/api-docs/v3/getting-started/plans-and-limits/ | Whether the Standard or Prime plan is our tier; the exact per-request date ranges for daily and intraday history | The plans page **is** read and states: Standard daily = 5 years rolling (from 2021), intraday = 1 year rolling (from 2025); Prime = entire history . | **Settled on plan windows.** The Owner's #68 record ("intraday from 2017, 366 days/request") is **superseded** for the Standard tier. If the account is Prime, the windows change. |
+| 39 | https://fyers.in/api-docs/v3/getting-started/guides/work-with-historical-market-data/ | Per-request date span limits by resolution | The guide states that span limits exist and differ by resolution and plan, but **does not give the numbers** in the retrieved text . The AI-skills page also says limits exist without numbers . | **Not settled.** The client requests conservative windows and relies on `UDAPI1148`-class rejections (Upstox) or Fyers' equivalent (OQ-67). |
+| 40 | https://fyers.in/terms-and-conditions-api | Whether the automation clause covers automated **data** collection or only automated **order placement** | The clause is read: "The APIs are not meant for placing fully automated trades... If the Client proposes to use the APIs for full automation, the Client shall directly seek necessary approvals..." . The clause is about **placing trades**. It does not state that automated data reading is prohibited. | **Narrowed, not settled.** The reading is declared as BQ-55 / [DEFAULT-65]. A legal opinion is required. |
+| 41 | Fyers V3 REST parameter names (`oiFlag`/`contFlag` vs `oi_flag`/`cont_flag`) and the candle response schema | Exact field names for the V3 `/data/history` endpoint | The AI-skills page and MCP page show camelCase names; the V3 reference page was not fully read in this run . | **Not settled.** OQ-67. |
+| 42 | Upstox historical candle **adjustment** behaviour | Whether V3 daily candles are split/bonus adjusted | No vendor page states that the candle API is adjusted. Upstox help-centre pages describe **portfolio average-price** adjustment for bonus and splits , which is an accounting behaviour, **not** a statement about the historical candle API. | **Not settled.** Treat as unadjusted ([DEFAULT-60]). This is a blocking data-integrity question for P2.1. |
+| 43 | Upstox **delisted** equity coverage in historical candles | Whether delisted/merged symbols are served | The Upstox **expired instruments** endpoint is documented for **F&O contracts** , not for delisted cash equities. No delisted-equity statement for the equity candle API was found. | **Not settled.** Treat as listed-only. OQ-67. |
+| 44 | Benzinga **direct** terms (TCP feed) | Storage, redistribution, derived-output, AI-training restrictions | The terms read are a third-party schedule (Firecrawl's Schedule C) that is stated to be Benzinga's terms . It prohibits bulk redistribution, derivative datasets that replicate Benzinga, and use to train **generalized/public AI models**; use in **private instances** and third-party AI systems acting as service providers is permitted . Benzinga's own site terms also prohibit commercial exploitation . | **Partially settled, and it is restrictive.** The licence is **not permissive**. SEL-24 remains PROVISIONAL and cannot become SELECTED without a negotiated agreement. **This is a BO-1 failure for the direct feed as a commercial news input.** |
+| 45 | Upstox and Fyers **terms on derived-signal publication** | Whether derived signals from historical data may be published commercially | Neither vendor's data-terms page was read in a form that addresses derived-signal publication. Upstox community answers are **not** a licence. | **Not settled.** BQ-53 / [DEFAULT-64]. SEL-4, SEL-22, SEL-23, SEL-26 remain PROVISIONAL on this question. |
+
+**What this run settled that Part 1 did not:**
+- **Fyers plan windows are now a primary fact** . The Standard tier's rolling 5-year daily and 1-year intraday windows are the governing limits for our account unless Prime is purchased. The v0.1/#68 assumption of intraday-from-2017 is **wrong for Standard**.
+- **Upstox dormant-segment behaviour is now supported by community staff statements** . It is not a vendor policy page, but it is consistent across multiple threads and is the best available evidence. It is recorded as **SEARCH_EXCERPT / community**, not PRIMARY_FULL.
+- **Fyers' automation clause is read**  and is about **placing trades**, not data reading. The reading is declared, not resolved.
+
+---
+
+## 12. CONFLICTS WITH THE OWNER DECISION AND WITH MODEL B
+
+This section states the conflicts. It does not resolve them by assumption.
+
+| # | Conflict | Where it bites | What the Owner must decide |
+|---|----------|----------------|----------------------------|
+| CON-1 | **The Owner's #68 record says Fyers intraday history is from 2017 and daily is 366 days/request. The Fyers plans page says Standard daily is rolling 5 years (from 2021) and intraday is rolling 1 year (from 2025)** . | SEL-23 (Fyers intraday) and any use of Fyers as a daily fallback. If the account is Standard, the intraday event window is limited to the last 12 months. The backtest for India intraday is correspondingly shallow. | **Decide whether to purchase Fyers Prime** (entire history, 25+ years daily, 5+ years intraday ) or accept the rolling 1-year intraday window. The cost of Prime is not verified in this run (OQ-67). The Owner's "free" record is the Standard tier. |
+| CON-2 | **Model B and BO-1 require a licence that permits commercial derived-signal publication. Neither Upstox nor Fyers has a read licence that clearly permits it.** Upstox community answers are not a licence. Fyers' terms are silent on data-derived publication (they address automated *trading* , not signals). | SEL-4, SEL-22, SEL-23, SEL-26. All are PROVISIONAL on the licence. **A selection that fails BO-1 cannot be SELECTED.** | **Decide the licence path.** Options: (a) obtain written confirmation from Upstox and Fyers that derived-signal publication is permitted; (b) restrict v1 to internal signals only (no publication), which changes MB-5/MB-AC-14; (c) purchase a licensed data product. This is a legal decision, not an engineering one. |
+| CON-3 | **Benzinga's direct-feed terms prohibit use to train generalized or public AI models, and prohibit derivative datasets that compete with Benzinga** . Model B's LLM path sends news text to DeepSeek/GPT-4o-mini for processing. | SEL-24 (Benzinga direct) and the LLM news packet. Alpaca News (SEL-11) has its own unread terms (OQ-37). | **Decide whether the direct Benzinga feed can be used at all** under MB-AC-14, given the AI-training restriction. If the LLM processing of Benzinga text is a "public AI system" use, it is prohibited without a negotiated licence. Alpaca News terms are still unread; the same question applies to Alpaca's bundle. **Do not assume Alpaca's terms are more permissive.** |
+| CON-4 | **Model B says "no order routing". Fyers' terms say the APIs are not for fully automated *trades* without regulatory approval** . The reading that data-only use is unaffected is **declared, not confirmed**. | SEL-23 (Fyers intraday). If the clause covers automated data collection, Fyers is unusable without exchange approval. | **Decide whether to seek a written Fyers clarification** that read-only historical data access is outside the "fully automated trades" clause. If no clarification is obtained, the default is to treat the reading as valid only for **internal** use, not for a published product. |
+| CON-5 | **The v0.1 spec's SEL-4 status change from BLOCKED to PROVISIONAL rests on technical access being verified. The licence is still open.** The Owner's decision named Upstox for daily history; the matrix now agrees; the licence does not. | SEL-4, SEL-22. The spec cannot be frozen while a BO-1 question is open. | **Decide whether "PROVISIONAL" is acceptable for a signals-only v1 where signals are not published**, or whether the licence must close first. The constitution (BO-1) says a selection resting on an unverified licence cannot be SELECTED. PROVISIONAL is the correct status; the Owner must decide whether to proceed to code on a PROVISIONAL selection. |
+| CON-6 | **Upstox dormant-segment behaviour means a signals-only v1 that never trades will lose API access after ~12 months.** This is supported by community staff statements , not a vendor policy page. | SEL-22 (daily spine). A dormant account loses token generation, so the backfill stops. | **Decide the human heartbeat.** Options: (a) a scheduled small non-trading account action every 11 months (what action, and does it count as activity?); (b) accept the spine dying and re-activate manually when needed; (c) use a provider without dormancy. The Owner must name the heartbeat action. |
+
+**The Owner must also note:** the v0.1 statement "the India data side is the weakest part of the design" remains true, but the weakness is now **licence and dormancy**, not missing providers. Upstox and Fyers both serve the data. The technical path is verified enough to build a client. The legal path is not.
+
+---
+
+## DECISIONS MADE (CONTINUED FROM PART 1)
+
+| # | Decision | Rationale | Reversible? | Blast radius if wrong |
+|---|----------|-----------|-------------|-----------------------|
+| D-39 | **SEL-4 primary is Upstox, backup Zerodha; status PROVISIONAL.** SEL-22 (Upstox daily spine) is PROVISIONAL on OQ-68. | Owner #68 RATIFIED Upstox daily; amended score (70 vs 62) agrees; technical path verified. Licence open. | Yes. | P2.1, P2.3, P5.x. A licence failure stops the India spine. |
+| D-40 | **Fyers Standard plan windows govern unless Prime is purchased.** Intraday is rolling 1 year from 2025, daily rolling 5 years from 2021 . The #68 intraday-from-2017 record is superseded for Standard. | Vendor plans page is primary and dated 2026-10-13. | Yes, by purchasing Prime. | P2.1 backtest depth; the LLM India anomaly gate's training window. |
+| D-41 | **Fyers 429 is a strike-based day-block risk.** Client budget 2/s, 25/min, 2,500/day (THR-14); on first 429, stop the batch (PE-18); a third strike blocks the rest of the calendar day. | Vendor notice: 3 per-minute strikes block for the day . A retry loop is a self-inflicted block. | Yes. | India intraday availability. |
+| D-42 | **Benzinga direct is PROVISIONAL and cannot be SELECTED on the current terms.** The terms prohibit public-AI training and competing derivative datasets . | BO-1/MB-AC-14: a licence that prohibits the intended use cannot back a selection. | Yes, by negotiating a licence. | SEL-24; the LLM news packet if Alpaca News is also restricted. |
+
+---
+
+## ASSUMPTIONS (CONTINUED FROM PART 1)
+
+| # | Assumption | Why I had to assume it | How to verify | Impact if false |
+|---|------------|------------------------|---------------|-----------------|
+| A-81 | Benzinga direct TCP pace of 1 request/second and one reconnect per 60 seconds. | No numeric limit documented. This is our pace, not a vendor limit. | Benzinga onboarding; OQ-71. | A 429 or disconnect during the news cycle; no order depends on it. |
+| A-82 | Upstox dormant-segment behaviour applies to **all** API access, including historical candles, until a segment is reactivated. | Community staff statements ; not a vendor policy page. | Upstox support; OQ-67. | A dormant account silently loses the daily spine; the backfill stops. |
+| A-83 | Fyers Standard is the account tier unless the Owner purchases Prime. | Owner's "free" record; the plans page names Standard as the non-Prime tier . | Owner confirmation; Fyers billing. | If Prime, history depth is larger and CON-1 narrows. If Standard, the 1-year intraday window is the limit. |
+| A-84 | The Fyers automation clause  does not prohibit read-only historical data access. | The clause names "placing fully automated trades"; it does not mention data reading. | Legal opinion; Fyers written clarification (CON-4). | If it covers data, Fyers is unusable without exchange approval. |
+
+---
+
+## OPEN QUESTIONS (CONTINUED FROM PART 1)
+
+| # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
+|---|----------|---------------------|-----------------------------|--------------------|
+| OQ-67 | Upstox and Fyers: adjustment of historical candles; delisted coverage; per-request date span limits; Fyers V3 parameter names; Upstox "Other Standard APIs" numeric rate limit. | Upstox, Fyers | Upstox V3 historical page (full read); Fyers V3 historical reference; Upstox rate-limiting page (full read, including "Other Standard APIs" row) | P2.1, P2.3 |
+| OQ-68 | Upstox and Fyers: do the terms permit **commercial publication of derived signals**? Does Fyers' automation clause cover data collection? | Upstox business team; Fyers legal; Owner | Written confirmation from each vendor; Fyers terms full read  | SEL-4, SEL-22, SEL-23, SEL-26; India go-live |
+| OQ-69 | Fyers: exact auth flow, token lifetime, refresh/2FA requirement for **data-only** use; app activation behaviour; dormant-account behaviour. | Fyers | Fyers API auth docs; Fyers support | P2.1 |
+| OQ-70 | SEC EDGAR: full primary facts (rate, endpoints, fields, SIC, pagination, 429 body) once the Owner lifts the pause. | Owner; SEC | sec.gov and data.sec.gov pages | P2.1, P2.3 |
+| OQ-71 | Benzinga direct: storage, redistribution, derived-output, and AI-processing terms for our intended use. Is the direct TCP feed usable for an LLM-gated signals product? | Benzinga; legal | Benzinga direct agreement; Schedule C full read  | SEL-24; LLM news packet |
+| OQ-72 | Upstox dormant-segment heartbeat: what human action counts as activity, and how often? | Upstox support; Owner | Upstox support ticket; community threads  | SEL-22; India spine continuity |
+
+---
+
+## CONTRACTS EXPORTED (CONTINUED FROM PART 1)
+
+| Name | Kind | Signature or schema | Consumers |
+|------|------|---------------------|-----------|
+| `ProviderId` v0.2 | type | `StrEnum`, 15 members (`FYERS`, `BENZINGA` added), section 8.1 | P1.1, P2.1, P3.1, P4.2, P6.1 |
+| `Capability` v0.2 | type | `StrEnum`, 12 members (`INTRADAY_HISTORY` added), section 8.1 | P2.1, P3.1, P4.1, P6.1 |
+| `ProviderErrorClass` v0.2 | type | `StrEnum`, 13 members (`ACCOUNT_DORMANT` added), section 8.1 | P1.4, P3.1, P3.4, P6.1 |
+| `ACCOUNT_DORMANT` | error class | terminal; human reactivation only; PE-17, PE-21, PE-22 | P3.1, P6.1, HITL-15 |
+| `intraday_history` | capability | per-market; IN primary Fyers (SEL-23), IN backup Upstox (SEL-26), US UNFILLED (SEL-25) | P2.1 |
+| SEL-22 | selection | `ProviderSelection(capability=EOD_BARS, market=IN, primary=UPSTOX, backup=None, status=PROVISIONAL, blocked_by=("OQ-67","OQ-68"))` | P2.1 |
+| SEL-23 | selection | `ProviderSelection(capability=INTRADAY_HISTORY, market=IN, primary=FYERS, backup=UPSTOX, status=PROVISIONAL, blocked_by=("OQ-67","OQ-68","BQ-55"))` | P2.1 |
+| SEL-24 | selection | `ProviderSelection(capability=NEWS, market=US, primary=BENZINGA, backup=ALPACA_DATA, status=PROVISIONAL, blocked_by=("OQ-71","OQ-68"))` | P4.1 |
+| SEL-25 | selection | `ProviderSelection(capability=INTRADAY_HISTORY, market=US, primary=None, backup=None, status=UNFILLED, blocked_by=())` | P2.1 |
+| SEL-26 | selection | `ProviderSelection(capability=INTRADAY_HISTORY, market=IN, primary=None, backup=UPSTOX, status=PROVISIONAL, blocked_by=("OQ-67","OQ-68"))` | P2.1 |
+| THR-13 | config | Upstox historical: client 10/s; documented limit not displayed on vendor page | P2.1 |
+| THR-14 | config | Fyers Data: client 2/s, 25/min, 2,500/day; documented Standard 5/s, 50/min, 5,000/day  | P2.1 |
+| THR-15 | config | Benzinga direct: client 1/s [ASSUMPTION A-81]; no documented limit | P4.1 |
+| PE-17..PE-22 | error path | section 9; PE-17/21/22 terminal dormant; PE-18 Fyers strike counter; PE-19 Upstox suspension; PE-20 Benzinga no-replay | P3.1, P3.4, P4.2 |
+| `fyers.intraday_history_start` | config key | `date`; decided by plan: Standard = rolling 1 year, Prime = 5+ years  | P2.1 |
+| `upstox.history_rate_limit_confirmed` | config key | `bool`; false until OQ-67 closes; true permits THR-13 to rise to half the displayed limit | P2.1 |
+
+**No row is SELECTED. The spec remains DRAFT.** The India data spine is PROVISIONAL on OQ-68 (licence) and OQ-67 (adjustment/delisted/limits). The US intraday history row is UNFILLED. The Owner must decide CON-1 through CON-6 before any client phase builds against these selections.

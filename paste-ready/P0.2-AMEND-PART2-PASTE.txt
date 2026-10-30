@@ -1,0 +1,886 @@
+You are a principal engineer on an autonomous equities trading platform. You are contributing
+one component to a system that will eventually move real money. Treat every output as something
+that will be audited by a regulator and blamed after a loss.
+
+PROJECT INVARIANTS — these are decided, not open for redesign. If your work conflicts with one,
+stop and say so explicitly rather than quietly working around it.
+
+1.  The risk engine is deterministic and always overrides every AI output. No exceptions.
+2.  LLMs never: size positions, place/cancel/modify orders, change risk limits, set stops,
+    or issue a final trade decision without a deterministic gate downstream.
+3.  LLMs are GATED - invoked only for top-N candidates or statistically anomalous conditions.
+4.  LLMs never receive raw external content. All news/filings/social text passes through a
+    sanitizer and is presented as tagged, untrusted DATA - never as instructions.
+5.  Every decision is written to an append-only, cryptographically verifiable audit trail
+    before it takes effect. If the audit write fails, the action does not happen.
+6.  Fail-closed everywhere. Missing data, stale data, an exception, an ambiguous state -> DENY.
+    Never synthesise, impute, interpolate, or default a missing market value.
+7.  Kill switch is infrastructure-level, independent of the AI path, automatic + manual,
+    and requires a human to re-enable.
+8.  No self-modifying code. No autonomous leverage. No "trade lost -> change the strategy".
+    Strategy changes are offline, backtested, and champion/challenger validated.
+9.  Compliance is built in from day one: SEBI circular SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013
+    (unique strategy ID per order, OPS caps, kill switch, static IP, live-like testing) and
+    US PDT / wash-sale / best-execution handling.
+10. Two markets: US (NYSE/NASDAQ, broker Alpaca, separate market-data provider) and
+    India (NSE/BSE, broker Zerodha Kite). Nothing may be US-only by accident.
+
+FIXED STACK - do not propose alternatives unless the phase explicitly asks:
+Python 3.12+, FastAPI, PostgreSQL + TimescaleDB, Redis, Pydantic v2, XGBoost/LightGBM,
+scikit-learn, DeepSeek (primary LLM) + GPT-4o-mini (fallback), HashiCorp Vault,
+Prometheus + Grafana, Docker on a single VM. No Kubernetes, no Airflow, no vector DB,
+no orchestration framework, no new dependency that ten lines of stdlib would cover.
+
+HARD RISK NUMBERS (defaults; configurable but never by the AI):
+position <= 5% NAV | sector <= 20% NAV | gross <= 2x equity | net <= 1x equity |
+daily loss <= 2% | weekly loss <= 5% | max drawdown <= 10% (trips kill switch) |
+risk per trade 1% | liquidity cap 1% of ADDV | <=20 orders/min global, <=10 per strategy |
+stop = entry - 2.5 * ATR(14) at entry | limit orders default, market only for emergency exit.
+
+BEHAVIOURAL RULES:
+- Never invent a fact, an API field, a rate limit, a fee, or a regulation. If you do not know,
+  write it in the OPEN QUESTIONS table with the exact query needed to resolve it.
+- Every number you state gets a source or is labelled ASSUMPTION.
+- Prefer boring and deterministic over clever. Fewest moving parts that satisfies the spec.
+- Precision over hedging. No "you might consider" - state the choice and the rationale.
+- Call out anything in the upstream spec that is wrong, unimplementable, or internally
+  contradictory. That is a required part of your output, not a courtesy.
+
+OUTPUT FORMAT - mandatory, exactly this shape.
+
+Emit one or more files. Start each with a header block:
+
+  ---
+  id: <SPEC-ID, e.g. SPEC-P2.9-RISK-ENGINE>
+  version: 0.1
+  status: DRAFT
+  phase: <phase id>
+  depends_on: [<spec ids you consumed>]
+  produces: [<artifact names downstream phases will import>]
+  ---
+
+Then the body. Then, always, these four tables - even if empty:
+
+  ## DECISIONS MADE
+  | # | Decision | Rationale | Reversible? | Blast radius if wrong |
+
+  ## ASSUMPTIONS
+  | # | Assumption | Why I had to assume it | How to verify | Impact if false |
+
+  ## OPEN QUESTIONS
+  | # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
+
+  ## CONTRACTS EXPORTED
+  | Name | Kind (type/table/event/endpoint/config key) | Signature or schema | Consumers |
+
+RULES:
+- Every entity you define gets a Pydantic v2 model or a SQL DDL block. No prose-only types.
+- Every field: name, type, unit, timezone, nullability, valid range, and what a violation means.
+- Every error path is enumerated with its fail-closed behaviour.
+- No pseudocode in a spec phase; no prose-only logic in a code phase.
+- No TODO, no ellipsis, no placeholder, no "implementation left as an exercise".
+- If output would exceed the response limit, stop at a clean file boundary and end with
+  "CONTINUE: <next file name>" so I can say "continue".
+
+BEFORE producing the deliverable:
+
+1. List up to 10 BLOCKING questions - ones where two reasonable answers produce materially
+   different designs. For each give: the question, the options, your recommended default,
+   and what breaks if the default is wrong.
+2. Then PROCEED using your recommended defaults. Do not wait for me. Mark every place a
+   default was used with [DEFAULT-n] inline and list them in ASSUMPTIONS.
+3. Separately, list NON-BLOCKING details you noticed and resolved yourself - the small ones:
+   timezones, rounding, tick/lot size, off-by-one on windows, DST, half-days, unit of a
+   percentage, integer vs decimal money, inclusive vs exclusive bounds.
+
+DEPTH REQUIREMENT: for every rule you write, also write its edge case. A rule without its
+edge case is not finished. Examples of the granularity expected:
+  - "price > $5" -> at which timestamp? last trade or previous close? adjusted or raw?
+    what if the tape is stale? what about a stock halted at $4.98?
+  - "position <= 5%" -> 5% of what, measured when, before or after the fill, using which
+    price, and what happens when a rally pushes an existing position to 5.4%?
+  - "daily loss <= 2%" -> realised only or mark-to-market? which day boundary in which
+    timezone? does an overnight gap count against today or yesterday?
+Answer at that resolution throughout.
+
+ROLE: Integration engineer who has been burned by undocumented rate limits, amending an existing spec. This is PART 2 of an amendment run of SPEC-P0.2-PROVIDERS, v0.1 to v0.2.
+
+Part 1 hit the chat length limit partway through section 5.18. Part 1's full text is at the end of this message, after the v0.1 sections. Do not repeat it. Continue from where it stopped, keep its identifiers, and correct anything in it that you find to be wrong, saying so.
+
+Model B in brief, as the Owner decided it: signals only for v1; no order routing; no broker SDK ([DEFAULT-50]: read-only HTTP path allowlist only); broker execution rows deferred (MB-8); every data selection must carry a licence that permits commercial use and publication of derived signals (BO-1, MB-5, MB-AC-14). Owner decision of 2026-10-17: Upstox for daily history, Fyers for intraday history, both recorded as free. Direct requests to sec.gov and data.sec.gov are paused: do not request any SEC host.
+
+Part 1 left several items NOT VERIFIED. Where a vendor page can settle one, read the page and settle it, before you score. In particular: the plan or tier conditions on Fyers and Upstox history depth, the Fyers and Upstox terms on storage, redistribution and derived products, whether either broker has a longer-lived or read-only credential, and whether history is adjusted.
+
+REMAINING TASKS:
+
+4. RE-SCORE AND RE-SELECT with the existing method of section 6: the matrix rows, the primary and backup per capability, and the status of each affected selection. State every row you change and why. A selection that fails BO-1 or rests on an unverified licence cannot be SELECTED.
+
+5. UPDATE THE REST: the "what breaks at 09:31" table, the typed models (ProviderId, Capability and anything else that changes, as runnable Pydantic v2), the client throttles at no more than half of each documented limit, the error paths (a dormant-account rejection is permanent until a human acts and must never enter a retry loop), the list of documentation that could not be verified, and the four Block B tables. Identifier series continue from Part 1.
+
+6. STATE WHERE THIS CONFLICTS with the Owner's decision or with Model B, and what the Owner must decide. Do not resolve a licence or legal question by assumption. No guessed rate limits: a guessed limit is worse than a missing one.
+
+DELIVERABLE: the rest of SPEC-P0.2-PROVIDERS v0.2, in the Block B shape, in plain Markdown. Be concise: changed rows only. If the output would exceed the limit, stop at a clean section boundary.
+
+INPUT SPEC - SPEC-P0.2-PROVIDERS.md v0.1, sections 6 to the end, follows:
+
+## 6. Decision matrix and selection
+
+### 6.1 Method
+
+Six criteria, each scored 0 to 5 from the fact sheets, weights summing to 100. Score =
+sum(weight x points) / 5, so the maximum is 100. A capability's highest score is the primary and
+the next is the backup. A tie is broken in favour of the provider that adds no new account
+(RULE-3). A provider that INV-10 or STACK-1 fixes is primary regardless of score; its score is
+still shown.
+
+| Criterion | Weight | 5 points means | 0 points means |
+|-----------|--------|----------------|----------------|
+| C1 Fit to the requirement in section 4 | 30 | covers it fully | does not cover it |
+| C2 Documented behaviour (limits, fields, errors) | 20 | documented and read | undocumented or unread |
+| C3 Operability on one VM with one operator | 15 | key-based, no daily human step, no new account | daily human step or blocked |
+| C4 Integrity (point-in-time, delisted, adjustment; for brokers, safety of the resting stop) | 15 | verified strong | verified weak or unknown |
+| C5 Cost | 10 | free | above USD 500 a month or unknown |
+| C6 Legal clarity for automated use and storage | 10 | terms read and permissive | terms read and prohibitive |
+
+Points for C6 are capped at 3 wherever the terms were not read in this run.
+
+### 6.2 Scores
+
+| Capability | Market | Candidate | C1 | C2 | C3 | C4 | C5 | C6 | Score |
+|------------|--------|-----------|----|----|----|----|----|----|-------|
+| broker_execution | US | Alpaca | 5 | 4 | 5 | 4 | 5 | 2 | 87 |
+| broker_execution | US | Interactive Brokers | 4 | 3 | 2 | 4 | 3 | 3 | 66 |
+| broker_execution | IN | Zerodha Kite | 5 | 4 | 2 | 3 | 4 | 3 | 75 |
+| broker_execution | IN | Upstox | 4 | 4 | 3 | 3 | 4 | 3 | 72 |
+| eod_bars, instrument_master | US | Massive | 5 | 4 | 5 | 4 | 3 | 3 | 85 |
+| eod_bars, instrument_master | US | Alpaca Market Data | 3 | 4 | 5 | 3 | 5 | 3 | 74 |
+| eod_bars | US | FMP | 3 | 2 | 4 | 2 | 4 | 3 | 58 |
+| eod_bars | US | Finnhub | 2 | 3 | 4 | 2 | 3 | 2 | 52 |
+| eod_bars, instrument_master | IN | Zerodha Kite | 3 | 3 | 4 | 2 | 4 | 3 | 62 |
+| eod_bars | IN | Upstox | 3 | 4 | 2 | 2 | 5 | 3 | 62 |
+| corporate_actions | US | Alpaca Market Data | 4 | 4 | 5 | 3 | 5 | 3 | 80 |
+| corporate_actions | US | Massive | 4 | 2 | 5 | 3 | 3 | 3 | 68 |
+| fundamentals | US | SEC EDGAR | 5 | 1 | 2 | 5 | 5 | 3 | 71 |
+| fundamentals | US | FMP | 4 | 2 | 4 | 2 | 4 | 3 | 64 |
+| fundamentals | US | Finnhub (free) | 3 | 3 | 4 | 2 | 5 | 2 | 62 |
+| news | US | Alpaca News | 4 | 4 | 5 | 3 | 5 | 2 | 78 |
+| news | US | Finnhub | 3 | 3 | 4 | 3 | 5 | 2 | 65 |
+| macro | none | FRED | 4 | 4 | 5 | 5 | 5 | 3 | 86 |
+| llm | none | DeepSeek | 5 | 4 | 4 | 3 | 5 | 2 | 81 |
+| llm | none | OpenAI | 5 | 4 | 4 | 4 | 4 | 3 | 84 |
+
+Arithmetic, one row shown in full: Alpaca broker = (30x5 + 20x4 + 15x5 + 15x4 + 10x5 + 10x2) / 5
+= (150 + 80 + 75 + 60 + 50 + 20) / 5 = 435 / 5 = 87.
+
+Notes on the scores:
+- India daily bars tie at 62. Zerodha wins the tie: it adds no account and no second daily
+  token.
+- The LLM scores differ by 3 points in OpenAI's favour (a dated snapshot against an alias that
+  is re-pointed). STACK-1 fixes DeepSeek as primary; the matrix does not overrule it. The
+  difference is recorded, not acted on.
+- SEC EDGAR's score rests on SECONDARY evidence for C1 and C4. It is shown so that the
+  comparison exists; the capability is BLOCKED either way.
+- Not scored, because no fact was verified: NSE Data & Analytics (India end-of-day licence), any
+  India source for corporate actions, fundamentals, news or sector taxonomy, FBIL.
+
+### 6.3 Selection
+
+Status values: SELECTED (ready to specify a client), PROVISIONAL (chosen; a named question must
+close before code), BLOCKED (chosen; cannot be used until a named item is resolved), UNFILLED
+(no provider can be named from verified facts).
+
+| ID | Capability | Market | Primary | Backup | Status | Open items |
+|----|------------|--------|---------|--------|--------|------------|
+| SEL-1 | broker_execution | US | Alpaca Trading API | none integrated; cold alternate Interactive Brokers | PROVISIONAL | OQ-33, OQ-34, OQ-35 |
+| SEL-2 | broker_execution | IN | Zerodha Kite Connect | none integrated; cold alternate Upstox | PROVISIONAL | OQ-27, OQ-28, OQ-29, OQ-31 |
+| SEL-3 | eod_bars | US | Massive, Developer plan | Alpaca Market Data, Basic plan, `feed=sip` | PROVISIONAL | OQ-38, OQ-36 |
+| SEL-4 | eod_bars | IN | Zerodha Kite Connect historical | Upstox historical | BLOCKED | OQ-39, OQ-30 |
+| SEL-5 | instrument_master | US | Massive tickers (class, listing status) with Alpaca assets (tradability) | none | PROVISIONAL | OQ-38 |
+| SEL-6 | instrument_master | IN | Zerodha instrument dump | none | PROVISIONAL | OQ-30, OQ-40 |
+| SEL-7 | corporate_actions | US | Alpaca Market Data | Massive | PROVISIONAL | OQ-36, OQ-38 |
+| SEL-8 | corporate_actions | IN | none | none | UNFILLED | OQ-40 |
+| SEL-9 | fundamentals | US | SEC EDGAR | FMP | BLOCKED | OQ-41, OQ-47 |
+| SEL-10 | fundamentals | IN | none | none | UNFILLED | OQ-40 |
+| SEL-11 | news | US | Alpaca News | Finnhub | PROVISIONAL | OQ-37, OQ-50 |
+| SEL-12 | news | IN | none | none | UNFILLED | OQ-40 |
+| SEL-13 | sector_taxonomy | US | none | none | UNFILLED | OQ-41, OQ-38 |
+| SEL-14 | sector_taxonomy | IN | none | none | UNFILLED | OQ-40 |
+| SEL-15 | calendar | US | NYSE published calendar, entered as a reviewed file | none | PROVISIONAL | OQ-36 |
+| SEL-16 | calendar | IN | none | none | UNFILLED | OQ-49 |
+| SEL-17 | macro | none | FRED | none | PROVISIONAL | OQ-42 |
+| SEL-18 | fx_reference | none | none | none | UNFILLED | OQ-22 |
+| SEL-19 | llm | none | DeepSeek, model `deepseek-flash` | OpenAI, model `gpt-4o-mini-2024-07-18` | PROVISIONAL | OQ-43, OQ-44 |
+| SEL-20 | streaming quotes at order time | US | not selected; P3.2 decides whether it is needed | none | UNFILLED | OQ-36 |
+| SEL-21 | streaming quotes at order time | IN | not selected; P3.2 decides whether it is needed | none | UNFILLED | OQ-31 |
+
+SEL-20 and SEL-21 are recorded so that P3.2 finds the question; they are not `Capability`
+values in section 8 and have no client.
+
+No row is SELECTED. Seven capability rows are UNFILLED and two are BLOCKED. Five of the seven
+UNFILLED capability rows and one BLOCKED row are India rows: the India data side is the weakest
+part of the design, and INV-10 forbids going forward with the US side only.
+
+Known recurring cost of the selection, from verified prices only: Massive Developer USD 79 per
+month; Kite Connect INR 500 per month; Alpaca Basic data USD 0; FRED USD 0; LLM cost is per
+token and is P0.3's to compute from F-57 and F-60. Unknown and therefore not totalled: the India
+end-of-day licence, FMP, any India news, fundamentals or corporate-actions source.
+
+Edge cases of the selection rules:
+- A backup is promoted: this is ADR-07 T-3 (a data vendor changes for a model input). New
+  entries in that market stop until a model trained on the backup's data is promoted. A backup
+  for a model input is therefore a continuity-of-history measure, not a hot failover.
+- Primary and backup disagree on a value: neither is averaged. The value from the primary is
+  stored; the disagreement is recorded as a data-quality event; the instrument is quarantined
+  (HITL-12) if the difference exceeds a threshold that P2.2 owns.
+- The primary is down and the backup is up, for a non-model input (calendar, reporting rate):
+  the backup may be used the same day, and the record says which source supplied the value.
+- A provider is renamed or re-hosted (F-49): the base URL is a config value changed through
+  HITL-5; the provider identity in `ProviderId` does not change.
+
+## 7. What breaks if this provider dies at 09:31
+
+09:31 is taken as one minute after the US open (09:31 `America/New_York`) for US providers and
+09:31 `Asia/Kolkata`, sixteen minutes after the India open, for India providers. Under HP-1 to
+HP-4 the decision was made after the previous close and the day's orders are already working.
+
+| Provider | State at 09:31 | What breaks | What still works | Fail-closed action |
+|----------|----------------|-------------|------------------|--------------------|
+| Alpaca Trading | Entry limit orders working at the broker; `gtc` stops resting | No cancel, no replace, no new order, no fill events. A fill that happens is not seen, so the new position has no stop until the API returns. If the broker itself is down, resting stops may not execute. | Orders already at the venue, if only the API is down. | No new US orders. On return: reconcile over REST before anything else (D-14), then place missing stops (REC-4 order). The kill switch cannot flatten; the manual path is the broker's own console. |
+| Alpaca Market Data | Not on the 09:31 path | Nothing at 09:31. After the close: no cross-check bars, no US corporate actions, no US news. Without corporate actions, tomorrow's orders cannot be confirmed against the share basis. | Orders and stops. | If corporate actions for the session are missing at the decision cycle: no US entries for the next session (INV-6). |
+| Zerodha Kite | Entry limit orders working; GTTs held by Zerodha | As Alpaca Trading, and worse: a GTT is evaluated by Zerodha, so a Zerodha outage disables every India stop. A fill that occurs has no GTT until the API returns. | Orders already at the exchange. | No new India orders. HTTP 502 or 503, or `NetworkException`: treated as broker down. On return: reconcile, then place missing GTTs. Manual path: Kite web, which needs the same broker to be up. |
+| Zerodha session (token invalidated, not an outage) | Same | Every authenticated call returns 403 `TokenException`. Identical to "no login" in [DEFAULT-6] from that moment. | Orders at the exchange and existing GTTs. | India disabled; alert; HITL-7. No automated re-login. |
+| Upstox | Not integrated | Nothing. | Everything. | None. |
+| Interactive Brokers | Not integrated | Nothing. | Everything. | None. |
+| Massive | Not on the 09:31 path | Nothing at 09:31. After the close: no US daily bars. | Orders and stops. | No US decision cycle for that session (ADR-13 edge case: no decision on D-1's bar). The backup is not switched in automatically, because that is T-3. |
+| Finnhub | Not on the 09:31 path | Nothing; it is a backup. | Everything. | None. |
+| FMP | Not on the 09:31 path | Nothing; it is a backup. | Everything. | None. |
+| SEC EDGAR | Blocked | Nothing. | Everything. | None. |
+| FRED | Not on the 09:31 path | Nothing at 09:31. A macro series not updated by the decision cycle is missing data. | Orders and stops. | Features that need the series are absent; P2.6 owns whether the regime gate denies entries. A stale value is never reused as current (INV-6). |
+| News (Alpaca News) | Not on the 09:31 path | The LLM packet for tonight's US candidates has no news. | The deterministic path. | The LLM is not called with an empty packet presented as "no news"; the candidate is handled as P4.2 decides for an unavailable LLM input. |
+| DeepSeek | Not on the 09:31 path | The gated LLM step in tonight's cycle. | Everything deterministic. INV-1 and INV-2 mean no order depends on the LLM alone. | One attempt within our deadline (PE-14), then the fallback once, then the candidate proceeds or is dropped as P4.2 decides. |
+| OpenAI | Not on the 09:31 path | Nothing unless DeepSeek is also down. | Everything. | If both are down: the LLM step is unavailable for the cycle; never retried in a loop. |
+| NSE or BSE (exchange halt) | Session interrupted | No fills; GTTs do not trigger outside market hours; resting orders may be purged by the exchange. | Nothing in that market. | India disabled until the exchange resumes and reconciliation passes. |
+
+## 8. Typed form
+
+Entities this spec defines: the provider and capability vocabularies, a rate-limit fact, a
+client throttle, a provider selection, the internal order reference, and the provider error
+classes. Provider request and response objects are the providers' own; section 5 lists their
+verified fields, and the client phases (P2.1, P3.1, P4.2) define the models that wrap them.
+
+### 8.1 Models
+
+`Market` is the P0.1 type. It is re-declared in the block only so the block runs alone.
+
+```python
+from datetime import date
+from enum import StrEnum
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+
+class Market(StrEnum):
+    US = "US"
+    IN = "IN"
+
+
+class ProviderId(StrEnum):
+    ALPACA_TRADING = "alpaca_trading"
+    ALPACA_DATA = "alpaca_data"
+    IBKR = "ibkr"
+    ZERODHA_KITE = "zerodha_kite"
+    UPSTOX = "upstox"
+    MASSIVE = "massive"
+    FINNHUB = "finnhub"
+    FMP = "fmp"
+    SEC_EDGAR = "sec_edgar"
+    FRED = "fred"
+    NSE_DATA = "nse_data"
+    DEEPSEEK = "deepseek"
+    OPENAI = "openai"
+
+
+class Capability(StrEnum):
+    BROKER_EXECUTION = "broker_execution"
+    EOD_BARS = "eod_bars"
+    INSTRUMENT_MASTER = "instrument_master"
+    CORPORATE_ACTIONS = "corporate_actions"
+    FUNDAMENTALS = "fundamentals"
+    NEWS = "news"
+    SECTOR_TAXONOMY = "sector_taxonomy"
+    CALENDAR = "calendar"
+    MACRO = "macro"
+    FX_REFERENCE = "fx_reference"
+    LLM = "llm"
+
+
+MARKETLESS = frozenset({Capability.MACRO, Capability.FX_REFERENCE, Capability.LLM})
+
+
+class SelectionStatus(StrEnum):
+    SELECTED = "SELECTED"
+    PROVISIONAL = "PROVISIONAL"
+    BLOCKED = "BLOCKED"
+    UNFILLED = "UNFILLED"
+
+
+class VerificationLevel(StrEnum):
+    PRIMARY_FULL = "PRIMARY_FULL"
+    PRIMARY_EXTRACT = "PRIMARY_EXTRACT"
+    SEARCH_EXCERPT = "SEARCH_EXCERPT"
+    SECONDARY = "SECONDARY"
+
+
+class LimitBasis(StrEnum):
+    DOCUMENTED = "DOCUMENTED"
+    EMPIRICAL = "EMPIRICAL"
+
+
+class ProviderErrorClass(StrEnum):
+    AUTH_EXPIRED = "AUTH_EXPIRED"
+    IP_NOT_ALLOWED = "IP_NOT_ALLOWED"
+    RATE_LIMITED = "RATE_LIMITED"
+    INVALID_REQUEST = "INVALID_REQUEST"
+    INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS"
+    INSUFFICIENT_HOLDINGS = "INSUFFICIENT_HOLDINGS"
+    ORDER_REJECTED = "ORDER_REJECTED"
+    BACKEND_DOWN = "BACKEND_DOWN"
+    SERVER_ERROR = "SERVER_ERROR"
+    UNKNOWN_OUTCOME = "UNKNOWN_OUTCOME"
+    MALFORMED_RESPONSE = "MALFORMED_RESPONSE"
+    BALANCE_EXHAUSTED = "BALANCE_EXHAUSTED"
+
+
+ClientOrderRef = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Z0-9]{20}$")]
+OpenItemRef = Annotated[str, StringConstraints(strict=True, pattern=r"^(OQ|BQ|UP)-[1-9][0-9]*$")]
+HttpsUrl = Annotated[str, StringConstraints(strict=True, pattern=r"^https://[^\s]+$")]
+ScopeText = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=120)]
+
+
+class RateLimitFact(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    provider: ProviderId
+    scope: ScopeText
+    max_count: int = Field(ge=1)
+    window_seconds: int = Field(ge=1)
+    basis: LimitBasis
+    verification: VerificationLevel
+    source_url: HttpsUrl
+    retrieved_on: date
+
+
+class ClientThrottle(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    provider: ProviderId
+    scope: ScopeText
+    documented_max_count: int = Field(ge=1)
+    client_max_count: int = Field(ge=1)
+    window_seconds: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _headroom(self) -> "ClientThrottle":
+        if self.client_max_count * 2 > self.documented_max_count:
+            raise ValueError("client budget must be at most half the documented limit")
+        return self
+
+
+class ProviderSelection(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    capability: Capability
+    market: Market | None
+    primary: ProviderId | None
+    backup: ProviderId | None
+    status: SelectionStatus
+    blocked_by: tuple[OpenItemRef, ...] = ()
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "ProviderSelection":
+        if (self.market is None) != (self.capability in MARKETLESS):
+            raise ValueError("market is None if and only if the capability is market-less")
+        if (self.status is SelectionStatus.UNFILLED) != (self.primary is None):
+            raise ValueError("primary is None if and only if status is UNFILLED")
+        if self.primary is None and self.backup is not None:
+            raise ValueError("a backup without a primary is not a selection")
+        if self.primary is not None and self.primary == self.backup:
+            raise ValueError("primary and backup must differ")
+        if (self.status is SelectionStatus.SELECTED) != (len(self.blocked_by) == 0):
+            raise ValueError("blocked_by is empty if and only if status is SELECTED")
+        return self
+```
+
+Evidence: the block was executed on 2026-10-13 with Python 3.11.9 and Pydantic 2.13.5. Accepted:
+a market-less SELECTED row, a BLOCKED row with one open item, an UNFILLED row with one open
+item, a `RateLimitFact` for the Kite order limit, a `ClientThrottle` of 100 against a documented
+200, and the reference `A1B2C3D4E5F6G7H8J9K0`. Rejected as expected: a market on a market-less
+capability; no market on a per-market capability; SELECTED with no primary; a backup with no
+primary; primary equal to backup; SELECTED with open items; BLOCKED with none; a lower-case open
+item reference; a plain string for `primary`; `max_count` of 0; an `http` URL; a float count; a
+string date; a client budget of 101 against 200; a client budget of 1 against 1; order
+references that are lower case, 19 or 21 characters long, contain a hyphen, or end in a newline;
+assignment after construction. Not run on Python 3.12 or later (R-4).
+
+### 8.2 Fields
+
+No field is nullable unless the table says so. Only `retrieved_on` carries a date; none carries
+a time of day.
+
+| Model.field | Type | Unit | Timezone | Nullable | Valid range | A violation means |
+|-------------|------|------|----------|----------|-------------|-------------------|
+| RateLimitFact.provider | ProviderId | none | none | no | a member of `ProviderId` | a limit recorded for a provider this spec did not examine; rejected (E-9) |
+| RateLimitFact.scope | str | none | none | no | 1 to 120 characters | an unscoped limit cannot be applied to an endpoint; rejected (E-9) |
+| RateLimitFact.max_count | int | requests, or orders where the scope says so | none | no | at least 1 | a limit of zero would be a prohibition, which is recorded as a legal fact, not a limit; rejected (E-9) |
+| RateLimitFact.window_seconds | int | seconds | none | no | at least 1; a per-day limit is 86,400 | rejected (E-9) |
+| RateLimitFact.basis | LimitBasis | none | none | no | `DOCUMENTED` or `EMPIRICAL` | a limit of unknown origin is a guess; rejected (E-9) |
+| RateLimitFact.verification | VerificationLevel | none | none | no | one of four levels | rejected (E-9) |
+| RateLimitFact.source_url | str | none | none | no | starts with `https://`, no whitespace | a fact with no source breaks RULE-2; rejected (E-9) |
+| RateLimitFact.retrieved_on | date | calendar date | `Asia/Kolkata` [DEFAULT-12] | no | a `date` object | a string or datetime was passed; rejected (E-9) |
+| ClientThrottle.documented_max_count | int | requests per window | none | no | at least 1; equals a `RateLimitFact.max_count` for the same provider and scope | E-10 |
+| ClientThrottle.client_max_count | int | requests per window | none | no | at least 1 and at most half of `documented_max_count`, rounded down | the client could run closer to the limit than [DEFAULT-31] allows; rejected (E-10). A documented limit of 1 per window has no valid client count in that window: the window is doubled instead (THR-3) |
+| ClientThrottle.window_seconds | int | seconds | none | no | at least 1 | E-10 |
+| ProviderSelection.capability | Capability | none | none | no | a member of `Capability` | E-11 |
+| ProviderSelection.market | Market or None | none | none | yes | None exactly when the capability is `macro`, `fx_reference` or `llm` | a per-market capability with no market is "US-only by accident" (INV-10); rejected (E-11) |
+| ProviderSelection.primary | ProviderId or None | none | none | yes | None exactly when status is `UNFILLED` | E-11 |
+| ProviderSelection.backup | ProviderId or None | none | none | yes | None, or a provider different from the primary; None for `broker_execution` (ADR-10) | E-11; a broker backup is additionally rejected by the check in E-12 |
+| ProviderSelection.status | SelectionStatus | none | none | no | one of four values | E-11 |
+| ProviderSelection.blocked_by | tuple of str | none | none | no | empty exactly when status is `SELECTED`; each item `OQ-n`, `BQ-n` or `UP-n` | a selection that claims to be ready while a question is open, or blocked with no reason; rejected (E-11) |
+| ClientOrderRef | str | none | none | no | exactly 20 characters from `A-Z0-9` | the reference would be truncated or rejected by Kite (`tag` max 20, alphanumeric); the order is not sent (E-13) |
+
+`ClientOrderRef` edge cases: it must be unique for the life of the system, not per day, because
+Alpaca treats `client_order_id` as unique and a `gtc` order lives 90 days. 36^20 values exist;
+how the 20 characters are generated (random, or derived from the audit record) is P3.1's
+decision. A replacement order gets a new reference. Kite GTTs carry no `tag` in the documented
+GTT order fields (F-10), so a GTT is matched by its `trigger_id`, stored at creation.
+
+### 8.3 Client throttles ([DEFAULT-31])
+
+| ID | Provider and scope | Documented limit | Basis | Client budget |
+|----|--------------------|------------------|-------|---------------|
+| THR-1 | Kite, order placement | 10 per second; 400 per minute; 5,000 per day (F-7) | DOCUMENTED | Governed by [DEFAULT-5]: one order per 3 seconds, at most 20 per minute. Far inside every Kite limit. |
+| THR-2 | Kite, historical candles | 3 per second (F-7) | DOCUMENTED | 1 per second |
+| THR-3 | Kite, quote | 1 per second (F-7) | DOCUMENTED | 1 per 2 seconds |
+| THR-4 | Kite, all other endpoints | 10 per second (F-7) | DOCUMENTED | 5 per second |
+| THR-5 | Alpaca Trading, all endpoints | 200 per minute per account (F-36, SEARCH_EXCERPT) | DOCUMENTED | 100 per minute |
+| THR-6 | Alpaca Market Data, Basic, historical | 200 per minute (F-27) | DOCUMENTED | 100 per minute |
+| THR-7 | Massive, paid plans | "unlimited" (F-48) | none stated | 5 per second [ASSUMPTION A-41]; OQ-38 |
+| THR-8 | FRED | none stated (F-55) | none stated | 1 per second [ASSUMPTION A-41]; OQ-42 |
+| THR-9 | Finnhub, free | 60 per minute; 30 per second overall (F-52, F-53) | DOCUMENTED | 30 per minute |
+| THR-10 | FMP, Starter | 300 per minute (F-54) | DOCUMENTED | 150 per minute |
+| THR-11 | DeepSeek | concurrency 2,500 (`deepseek-flash`) (F-57, F-58) | DOCUMENTED | 1 concurrent request |
+| THR-12 | OpenAI, `gpt-4o-mini` | 5,000 requests per minute at the lowest listed tier (F-60) | DOCUMENTED | 1 concurrent request |
+
+Edge cases:
+- Two processes share one account's limit (the trading process and the kill switch, both on
+  Alpaca's 200 per minute or Kite's 10 per second). The kill switch has its own credentials
+  ([DEFAULT-4]) but not its own limit, because limits are per account. The trading process's
+  budget is half the documented limit precisely so the other half is left for the kill switch.
+- A provider answers 429 although the client is inside its budget: the budget for that scope is
+  halved for the rest of the session and an alert is raised; the documented fact is re-checked
+  (PE-3).
+- `X-RateLimit-Remaining` (Alpaca data, F-28) reports less than the client's own count: the
+  header wins.
+- Windows are measured on the monotonic clock (NB-10).
+- THR-7 and THR-8 are our pace, not the provider's limit. They may only be loosened after the
+  open question is answered with a documented number.
+
+## 9. Error paths
+
+Each row is a provider failure and what the client does. "Order call" means place, modify or
+cancel. No row permits a default or substituted value (INV-6).
+
+| # | Condition | Seen as | Class | Fail-closed behaviour |
+|---|-----------|---------|-------|-----------------------|
+| PE-1 | Kite session expired or invalidated | HTTP 403, `TokenException` (F-8) | AUTH_EXPIRED | India disabled from that moment ([DEFAULT-6]). No automatic re-login. Alert. HITL-7. Orders at the exchange and GTTs are left as they are. |
+| PE-2 | Alpaca or other key rejected | HTTP 401 or 403 on a non-order call | AUTH_EXPIRED | That provider is unavailable. No retry with the same key. Alert; HITL-14. A 403 on an Alpaca order call is PE-5, not this row. |
+| PE-3 | Rate limit hit | HTTP 429 (Kite, Alpaca, Finnhub, DeepSeek, IBKR) | RATE_LIMITED | Data call: wait until the window resets (the `X-RateLimit-Reset` time where given, otherwise one full window), then at most 3 retries [ASSUMPTION A-42]; after that the job fails and the data is missing. Order call: not retried inside the session's order job; the order is recorded as not sent; alert. Budget halved (section 8.3). |
+| PE-4 | Order placed from an unregistered address | Kite: rejection, body not verified (OQ-29). Upstox: `UDAPI1154` | IP_NOT_ALLOWED | India order path disabled; alert. Not retried. The fix is a human change to the IP registration, limited to one per week (UP-15). |
+| PE-5 | Insufficient funds or shares | Alpaca HTTP 403 on an order; Kite `MarginException`, `HoldingException` | INSUFFICIENT_FUNDS, INSUFFICIENT_HOLDINGS | The order is not sent again. It means our cash or position state disagrees with the broker's: reconciliation runs before any further order in that market (HITL-8 if a difference remains). |
+| PE-6 | Request rejected as invalid | Alpaca HTTP 422 or code `42210000`; Kite `InputException`, HTTP 400; Upstox `UDAPI10xx` | INVALID_REQUEST | Not retried. Recorded with the full response. It is a defect in our code or a stale tick size: the instrument is denied new entries until the instrument master is refreshed. Counts toward RISK-10 ([DEFAULT-5]) and toward Kite's 10 per second (F-16). |
+| PE-7 | Order accepted, later rejected by the exchange or risk system | Alpaca status `rejected`; Kite status `REJECTED` with `status_message` | ORDER_REJECTED | Recorded. An entry is not re-sent in that session. A stop or GTT that is rejected leaves a position unprotected: placing the stop is retried once with corrected parameters if the reason is machine-readable, otherwise the position is escalated at once. |
+| PE-8 | No response, or connection dropped, after an order call was sent | timeout | UNKNOWN_OUTCOME | Never re-sent blind. The order book is read and matched on `ClientOrderRef` (Alpaca `client_order_id`, Kite `tag`). Found: adopt it. Not found after the book is read successfully: the order was not placed; whether it is sent again is P3.1's rule, with a new audit record. Book unreadable: the market is disabled until it is readable. |
+| PE-9 | India GTT triggered but its limit order did not fill | GTT status `triggered`; resulting order `OPEN` or `CANCELLED` at the close | ORDER_REJECTED | The position has no stop. A new GTT cannot fire again for the old one (single use). The system does not watch prices inside the session (HP-4), so it learns this only at reconciliation. Escalated; what is done next is P3.4's rule and OQ-27. |
+| PE-10 | India market or `SL-M` order with protection did not fill | order `OPEN`, then `CANCELLED` at the close | ORDER_REJECTED | An emergency exit in India is not assumed complete until the fill is read back. An unfilled exit is escalated. |
+| PE-11 | A resting stop or GTT is cancelled by the broker (90-day expiry at Alpaca, 365-day expiry or corporate action at Zerodha) | Alpaca status `expired` or `canceled`; GTT status `expired`, `cancelled`, `disabled` | ORDER_REJECTED | Every session, before entries: each open position is checked for a live stop; a missing one is placed first (REC-4 order). Stops are re-placed ahead of expiry: at 60 days for Alpaca and at 300 days for a GTT [ASSUMPTION A-42]. |
+| PE-12 | Broker backend down | Kite HTTP 502, `NetworkException`; any HTTP 503 or 504 | BACKEND_DOWN | That market disabled. Reads are retried with backoff; order calls are not. On recovery: reconcile first. |
+| PE-13 | Response does not match the documented shape: missing field, wrong type, unknown status or enum value | validation failure in our client | MALFORMED_RESPONSE | The value is not used. For an order or account response: the market is disabled and reconciliation is required. For data: the record is rejected and the instrument has no data for that session. An unknown status string is never mapped to the nearest known one. |
+| PE-14 | LLM does not answer in time | our deadline of 120 seconds per call passes [ASSUMPTION A-42]; DeepSeek may hold a connection up to 10 minutes (F-58) | SERVER_ERROR | The connection is closed. One call to the fallback under the same deadline. Then the LLM step is unavailable for that candidate. No order depends on it (INV-2). |
+| PE-15 | LLM account out of credit | DeepSeek HTTP 402 | BALANCE_EXHAUSTED | No retry. Fallback used for the rest of the cycle; alert; a human tops up (HITL-14 class of action). |
+| PE-16 | A data provider returns an empty result for a session that the calendar says was open | empty `bars`, empty candle list | MALFORMED_RESPONSE | Empty is not zero volume and is not "no change". The bar is missing: no decision for that instrument (ADR-13 edge case). If more than a threshold of the universe is missing, the whole cycle is skipped; the threshold is P2.2's. |
+
+Errors of the models in section 8:
+
+| # | Condition | Detected by | Fail-closed behaviour |
+|---|-----------|-------------|-----------------------|
+| E-9 | A `RateLimitFact` field is missing, of the wrong type or out of range | Pydantic `ValidationError` | The fact is not recorded. A throttle cannot be built from it. |
+| E-10 | A `ClientThrottle` budget exceeds half the documented limit | the model validator | The client process does not start. |
+| E-11 | A `ProviderSelection` is inconsistent | the model validator | The selection table does not load. No client is constructed for any provider. |
+| E-12 | A client is constructed for a selection whose status is not `SELECTED`, or a backup is given for `broker_execution` | a start-up check in each client phase's code | The process does not start. This is why no client can go live while section 6.3 has open items. |
+| E-13 | A `ClientOrderRef` fails its pattern | Pydantic `ValidationError` | The order is not sent. |
+| E-14 | A served LLM model version differs from the one recorded at the last promotion | comparison of the response's model field with the stored value | The LLM output is not used for that call; alert; treated as a T-3 event for the LLM path (P4.2 owns the rule). |
+
+## 10. Documentation that could not be verified
+
+Pages that were needed and were not read, or were reached and did not contain the fact. Nothing
+from these is stated as fact anywhere above.
+
+| # | URL or document | What was needed | Why it is unverified |
+|---|-----------------|-----------------|----------------------|
+| 1 | https://www.sec.gov/os/accessing-edgar-data and https://www.sec.gov/search-filings/edgar-application-programming-interfaces | EDGAR fair-access rate, `User-Agent` rule, endpoint list | Not requested: Owner's pause on SEC hosts |
+| 2 | https://data.sec.gov (submissions and company-facts endpoints) | Field names and types | Not requested: same pause |
+| 3 | https://kite.trade/docs/connect/v3/gtt/ and the Zerodha GTT article | Whether a GTT can place anything but a limit order | The two Zerodha pages disagree |
+| 4 | Kite Connect terms and conditions (URL not located) | Automated login, data storage, redistribution | Page not located |
+| 5 | https://kite.trade/forum/discussion/16212/batch-automating-kite-login and https://kite.trade/forum/discussion/9770/automating-retrieval-of-request-token | Staff statement on daily manual login | Search excerpt only |
+| 6 | https://kite.trade/docs/connect/v3/historical/ | Adjustment of candles, range per request, history depth | Reached; not stated on the page |
+| 7 | https://kite.trade/docs/connect/v3/websocket/ | Reconnect and replay behaviour | Reached; not stated |
+| 8 | https://kite.trade/docs/connect/v3/orders/ | Zone of order timestamps; the place-order path; `guid` semantics; rejection list | Reached; not stated |
+| 9 | https://alpaca.markets/support/usage-limit-api-calls | Trading API throttle of 200 per minute | Search excerpt only |
+| 10 | https://files.alpaca.markets/disclosures/library/BrokFeeSched.pdf | Fee schedule | Search excerpt only |
+| 11 | https://docs.alpaca.markets/reference/getaccount-1 | A settled-cash field | Reached; no such field described |
+| 12 | https://docs.alpaca.markets/reference/patchaccountconfig-1 | Meaning of `max_margin_multiplier` = `"1"` | Reached; description absent |
+| 13 | https://docs.alpaca.markets/docs/websocket-streaming and https://docs.alpaca.markets/docs/streaming-market-data | Heartbeat, connection limit, replay after reconnect | Reached; not stated |
+| 14 | Alpaca references for cancel, replace, list orders, get order by client order id, positions, calendar, clock | Paths and fields | Not fetched in this run |
+| 15 | https://alpaca.markets/support/countries-alpaca-is-available | Whether India is supported | Reached; the page has no list |
+| 16 | Alpaca documentation sets "Alpaca India - Domestic" and "Alpaca India - GIFT City" (under docs.alpaca.markets) | What they offer an Indian resident | Seen only as names in page metadata |
+| 17 | Alpaca customer agreement and market-data agreement | Automated trading, storage, redistribution, news text use | Not located |
+| 18 | https://massive.com/docs (splits, dividends, ticker types, grouped daily, authentication, WebSocket) | Fields and behaviour | Not fetched; two pages were read |
+| 19 | Massive terms and the "non-pros only" page | Individual-use restriction, storage | Not read |
+| 20 | https://finnhub.io/docs/api (company-news endpoint) and Finnhub terms | Fields, storage and commercial-use terms | Not fetched |
+| 21 | https://site.financialmodelingprep.com/developer/docs (statement endpoints) | Fields, filing dates, India coverage, Starter price | Pricing page read; price ambiguous; endpoints not fetched |
+| 22 | https://fred.stlouisfed.org/docs/api/fred/ (errors and limits) | Numeric rate limit | Not stated on the two pages read |
+| 23 | https://api-docs.deepseek.com (first call, chat completion reference, terms) | Base URL, auth header, model aliases, data terms | Not fetched; three pages were read |
+| 24 | https://developers.openai.com/api/docs (deprecations, rate limits, data controls) | Shutdown date, tier limits, retention | Not fetched; one page was read |
+| 25 | https://www.interactivebrokers.com/campus/ibkr-api-page/web-api-trading/ | Authentication detail, 2FA, order types | Reached by extraction; direct fetch returned HTTP 403; page dated 2024-12-17 |
+| 26 | https://upstox.com/developer/api-documentation/v3/place-gtt-order/ | GTT v3 page | HTTP 404; the non-v3 path was read instead |
+| 27 | Upstox terms; sandbox documentation | Unattended TOTP login, sandbox scope | Not fetched |
+| 28 | https://www.nseindia.com/static/nse-terms-of-use | Exact clause on automated collection | Fetch timed out; search excerpt only |
+| 29 | https://www.nseindia.com/static/market-data/eod-historical-data-subscription and https://www.nseindia.com/static/market-data/nse-data-policy | Price, licence, delisted coverage | Search excerpt only |
+| 30 | https://www.nseindia.com/static/market-data/market-timings and https://www.nseindia.com/resources/exchange-communication-holidays | Session times and holidays | Search excerpt only; holiday list not seen |
+| 31 | https://www.bseindia.com (trading hours, holidays, data products) | BSE equivalents | Not fetched |
+| 32 | https://nsearchives.nseindia.com/content/circulars/INVG67858.pdf | NSE circular of 2025-05-05 on retail algo trading | Not fetched; cited by Upstox |
+| 33 | SEBI circular SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013 at sebi.gov.in | Full text (OQ-1) | Not fetched |
+| 34 | https://www.fbil.org.in (reference rates) | USD/INR reference rate and its publication time (OQ-22) | Not fetched |
+| 35 | Broker and vendor status pages (Alpaca, Zerodha, Massive, DeepSeek, OpenAI) | Outage history and maintenance windows | Not fetched |
+| 36 | Exchange and broker settlement pages | T+1 settlement in both markets (A-27) | Not fetched |
+
+## 11. Non-blocking details resolved in this spec
+
+| # | Detail | Resolution |
+|---|--------|------------|
+| NB-28 | Money and price types from providers | Kite returns prices as JSON numbers (`float64`); Alpaca returns strings. Both are parsed into `Decimal` from the response text, never through a binary float (NB-3). A JSON parser is configured to read numbers as `Decimal`. |
+| NB-29 | Kite WebSocket prices | Integers in paise; divided by 100 as `Decimal`. Not used by any decision in v1. |
+| NB-30 | Timestamps | Alpaca: RFC 3339; examples are UTC; a timestamp without an offset is rejected (PE-13). Kite candles: `+0530`. Kite order timestamps: zone not documented; treated as `Asia/Kolkata` [ASSUMPTION A-39]. Massive `t`: Unix milliseconds, UTC by definition of Unix time. All are stored as UTC instants plus the exchange session date (NB-4). |
+| NB-31 | Daily bar identity | A daily bar is keyed by market, instrument and session date, never by the vendor's timestamp, because vendors stamp daily bars differently (start of window, midnight UTC, midnight IST). |
+| NB-32 | Request date bounds | Alpaca `start` and `end` are inclusive. Upstox `to_date` is inclusive. Kite `from` and `to`: inclusiveness not stated (OQ-30); the client requests one extra day on each side and discards rows outside the range. |
+| NB-33 | Pagination | Alpaca `limit` counts points across all symbols, not per symbol; the client pages until `next_page_token` is null and treats a missing token field as PE-13. |
+| NB-34 | Tick size | US: 2 decimals at or above USD 1.00, 4 below (F-21); a price is rounded to the tick toward the passive side (down for a buy limit, down for a sell stop). India: `tick_size` per instrument from the dump; same rounding rule. The rounding direction for a stop is confirmed by P3.4. |
+| NB-35 | Lot size | India cash equities: `lot_size` from the dump is read, not assumed to be 1. Quantity is a multiple of it, rounded down (NB-22). |
+| NB-36 | Alpaca `opg` and `cls` windows | Not used. Entries are `limit`, `day` orders submitted before the open ([RISK-13], HP-2). The 09:28 ET cutoff therefore does not apply. |
+| NB-37 | GTC expiry arithmetic | 90 days are calendar days from creation; the cancel runs at 16:15 ET on the expiry date. Re-placement at 60 days leaves 30 calendar days of margin. |
+| NB-38 | Kite token boundary | Expiry at 06:00 `Asia/Kolkata`; India has no daylight saving. A token obtained at 05:59 lasts one minute. Login is accepted by our system only after 06:00. |
+| NB-39 | India evening window | A token obtained in the morning is valid until 06:00 the next day, so after the 15:30 close there are 14 hours 30 minutes in which the same token works. Whether next-session entries are placed in that window as after-market orders is P3.2's decision; it would not remove the morning login, because stops for new fills need a valid session during the next session. |
+| NB-40 | DST and the LLM price windows | DeepSeek peak windows are fixed in UTC; the US close moves between 20:00 and 21:00 UTC with daylight saving; both are off-peak. |
+| NB-41 | Percent units in fees | Fees are recorded as written by the provider (0.1% is stored as 0.1 under A-4); the SEC fee is a multiplier of trade value (0.0000206), stored as a rate with its unit stated. |
+| NB-42 | Fee rounding | Alpaca rounds regulatory fees up to the cent (F-37). P5.3 models that, not half-even. |
+| NB-43 | API keys in URLs | Where a provider accepts a key as a query parameter or as a header (Finnhub; FRED takes it only as a parameter), the header is used when available; for FRED the URL is never logged with its query string. |
+| NB-44 | 09:31 | Read as local exchange time of the provider's market (section 7). |
+
+## DECISIONS MADE
+
+| # | Decision | Rationale | Reversible? | Blast radius if wrong |
+|---|----------|-----------|-------------|-----------------------|
+| D-11 | Selections SEL-1 to SEL-21 as in section 6.3; none is SELECTED; the spec stays DRAFT. | ADR-11: a phase is not frozen for one market. Facts are missing, mostly for India. | Yes. | Every client phase. |
+| D-12 | US daily bars come from Massive (Developer plan, 10 years), with Alpaca Market Data as backup. | INV-10 requires a data provider separate from the broker; highest score; point-in-time ticker reference. | Yes; a switch is a T-3 event. | P2.1, P2.3, P5.x. |
+| D-13 | Raw bars and corporate actions are stored separately; adjustment is ours. Requests use `adjusted=false` (Massive) and `adjustment=raw` (Alpaca). | [DEFAULT-26]; point-in-time integrity; vendor restatements must not move stored values. | Costly after data is stored. | P2.1, P2.4. |
+| D-14 | No WebSocket stream is a system of record. State is read over REST after every disconnect and at least once per session. | No provider documents replay of missed events (F-12, F-30, F-31, F-44). | Yes. | P3.1, P5.5. |
+| D-15 | No order call is retried blind. An unknown outcome is resolved by reading the order book and matching `ClientOrderRef`. | Kite has no idempotency key; Alpaca's duplicate behaviour is unverified. | Yes. | P3.1. |
+| D-16 | Credentials are sent in headers wherever the provider accepts them. | A key in a URL reaches logs. | Yes. | P6.2. |
+| D-17 | Before India goes live, the recovery host's address is registered as Zerodha's secondary static IP. | UP-15: one IP change per calendar week against an RTO of 4 hours. | Yes. | P6.4, ADR-10. |
+| D-18 | LLM model identifiers are `deepseek-flash` and `gpt-4o-mini-2024-07-18`; the served model version is recorded with every call. | UP-18. | Yes. | P4.2, P0.3. |
+| D-19 | The India resting stop is a single-leg sell GTT ([DEFAULT-22]); the US resting stop is a `stop`, `gtc` order ([DEFAULT-23]); whole shares only ([DEFAULT-24]). | F-9, F-10, F-21, F-23. | Yes. | P2.10, P3.4. |
+| D-20 | Interactive Brokers and Upstox are cold alternates: documented here, not integrated, not funded. | ADR-10; UP-19. | Yes, by new ADR. | None while unused. |
+| D-21 | SEC EDGAR is not contacted and no client for it is written until the Owner lifts the pause and names the contact identity for the `User-Agent`. | Owner's instruction; [DEFAULT-28]. | Yes. | US fundamentals features. |
+| D-22 | Client request budgets are at most half of each documented limit (THR-1 to THR-12). | [DEFAULT-31]; the kill switch shares the account limit. | Yes. | Backfill duration. |
+| D-23 | The decision matrix of section 6.1 (six criteria, weights 30/20/15/15/10/10) is the selection method; a constitution-fixed provider is primary regardless of score. | The prompt requires a weighted matrix; INV-10 and STACK-1 are not open to redesign. | Yes. | Selections. |
+
+## ASSUMPTIONS
+
+| # | Assumption | Why I had to assume it | How to verify | Impact if false |
+|---|------------|------------------------|---------------|-----------------|
+| A-37 | The PRIMARY_EXTRACT facts in section 3 state their source pages accurately. | They were read through automated extraction, not line by line. | Full read by the phase named in the register. | Any field name, limit or fee in section 5. |
+| A-38 | [DEFAULT-22] to [DEFAULT-31] as given in section 1. | Each is a fork with no Owner ruling. | Owner reviews BQ-11 to BQ-20. | As stated per row in section 1. |
+| A-39 | Kite order and trade timestamps without an offset are `Asia/Kolkata`. | The page does not state the zone. | OQ-30. | Fill times wrong by 5 hours 30 minutes in the audit trail. |
+| A-40 | A request to `GET /v2/account/configurations` style paths and the Kite place-order path follow the patterns shown in section 5. | Derived from reference page names and sibling paths, not read. | OQ-31, OQ-34. | Client code fails at first call; no trading risk. |
+| A-41 | Client pace of 5 requests per second for Massive and 1 per second for FRED. | No numeric limit is published on the pages read. These are our pace, not a claimed limit. | OQ-38, OQ-42. | A 429 or a block during backfill. |
+| A-42 | Three retries on a data 429; LLM deadline 120 seconds; stops re-placed at 60 days (Alpaca) and 300 days (GTT). | No data to derive them; chosen inside the documented lifetimes (90 and 365 days, 10-minute server timeout). | P3.4, P4.2, P6.1 after paper trading. | Slow cycles, or a stop that lapses if the re-placement job fails for 30 or 65 consecutive days. |
+| A-43 | DeepSeek's `$` prices are US dollars. | The page gives no currency code. | OQ-43. | LLM budget in P0.3. |
+| A-44 | The 10 orders per second threshold and the static-IP rule apply to this account as an individual client running its own logic. | Read from broker pages, not from the SEBI or NSE circular. | OQ-51, OQ-1. | Registration requirements in P6.3. |
+| A-45 | Alpaca's Trading API limit is 200 requests per minute per account. | Seen only as a search excerpt of Alpaca's support article. | Read the article; OQ-34. | THR-5. |
+| A-46 | Zerodha's static-IP requirement took effect on 1 April 2026. | The article says 2026; the FAQ says 2025; the staff forum post is dated late March with a 1 April deadline. | OQ-29. | None for a system going live after both dates. |
+
+A-33 and A-27 of P0.1 remain assumptions (OQ-48). A-26 is confirmed for the regular-session
+times of NYSE (PRIMARY_EXTRACT) and NSE (SEARCH_EXCERPT).
+
+## OPEN QUESTIONS
+
+| # | Question | Who/what answers it | Exact query or doc to check | Blocks which phase |
+|---|----------|---------------------|-----------------------------|--------------------|
+| OQ-27 | UP-11: does the Owner accept a single-use, limit-order GTT as the India "resting stop", and can a Kite API GTT place a market order with protection? | Owner; Zerodha | Ruling on UP-11. kite.trade/docs/connect/v3/gtt (order_type); Kite forum, search "GTT market order API" | P2.10, P3.4, India go-live |
+| OQ-28 | Do Kite Connect's terms prohibit automated login, and what is the exchange rule requiring a daily manual login? | Zerodha | Kite Connect terms on developers.kite.trade; forum threads 16212 and 9770 read in full | P3.1 |
+| OQ-29 | Zerodha static IP: effective date; response to an order from an unregistered address; whether GTT, modify and cancel calls are IP-checked. | Zerodha | support.zerodha.com article "static-ip"; kite.trade/forum/discussion/15912 | P3.1, P6.4 |
+| OQ-30 | Kite historical data: are daily candles adjusted for splits, bonus issues and dividends; maximum range per request; history depth; inclusiveness of `from`/`to`; zone of order timestamps. | Zerodha | kite.trade/docs/connect/v3/historical; Kite forum FAQ thread 4732 | P2.1 |
+| OQ-31 | Kite: place-order path confirmation; `guid` semantics; is a duplicate `tag` rejected; WebSocket reconnect and replay; after-market order behaviour. | Zerodha | kite.trade/docs/connect/v3/orders and /websocket; pykiteconnect source | P3.1, P3.2 |
+| OQ-32 | Kite: list of order rejection reasons (`status_message`); outage history and maintenance windows. | Zerodha | Kite forum; Zerodha status and bulletin pages | P3.1, P3.4 |
+| OQ-33 | Alpaca (rest of OQ-15): which field or method gives settled cash; what `max_margin_multiplier="1"` does; can an account be cash-only (UP-21); how a same-day stop exit is treated under the intraday margin framework. | Alpaca | docs.alpaca.markets: account, account configurations, margin; Alpaca support | P2.8, P2.9 |
+| OQ-34 | Alpaca Trading API: paths and fields for cancel, replace, list, get-by-client-order-id, positions; response to a duplicate `client_order_id` and its charset; 429 body and headers; stream heartbeat and replay; treatment of a `gtc` stop on a split; minimum and maximum quantity; complete rejection codes; IP allowlisting. | Alpaca | docs.alpaca.markets/reference (orders, positions); alpaca.markets/support/usage-limit-api-calls | P3.1, P3.4 |
+| OQ-35 | Alpaca and India (OQ-6, OQ-14 widened): is an Indian resident eligible for a US live account; what are "Alpaca India - Domestic" and "Alpaca India - GIFT City"; do they change the LRS analysis in UP-4? | Alpaca; a qualified adviser | Alpaca support; docs.alpaca.markets India documentation sets | US go-live, P6.3 |
+| OQ-36 | Alpaca Market Data: are bars served for delisted symbols; corporate-actions history depth; calendar and clock endpoint fields; how the daily bar session is defined. | Alpaca | docs.alpaca.markets/reference (stock bars, corporate actions, calendar) | P2.1 |
+| OQ-37 | May Alpaca bars and news be stored indefinitely, and may news text be sent to DeepSeek or OpenAI for processing? | Alpaca; Benzinga | Alpaca market data agreement; Alpaca customer agreement | P2.1, P4.1 |
+| OQ-38 | Massive: bars for delisted tickers; `active=false`; ticker `type` codes for common stock, ETF and depositary receipt; split and dividend endpoints; whole-market daily endpoint; daily bar zone; fair-use behind "unlimited"; 429 behaviour; auth header; non-professional and storage terms; sector or SIC field. | Massive | massive.com/docs/rest/stocks; massive.com terms; the "non-pros only" page | P2.1, P2.3 |
+| OQ-39 | India whole-market daily history including delisted stocks: product, price, licence and format from NSE Data & Analytics; the BSE equivalent (part of OQ-19). | NSE Data & Analytics; BSE | nseindia.com/static/market-data/eod-historical-data-subscription; NSE data policy; bseindia.com data products | P0.3, P2.1, P2.3, P5.x |
+| OQ-40 | India sources, with licence, for corporate actions, fundamentals, news, sector classification and ISIN mapping. | NSE, BSE, data vendors | NSE and BSE corporate-filings data products; vendor coverage pages (FMP Ultimate, Finnhub) | P2.1, P2.3, P4.1 |
+| OQ-41 | SEC EDGAR: will the Owner lift the pause; which contact identity goes in the `User-Agent`; then the primary facts (rate, endpoints, fields, SIC as a sector source). | Owner; SEC | Owner decision; then sec.gov "Accessing EDGAR Data" and the EDGAR API page | P2.1, P2.3 |
+| OQ-42 | FRED: numeric rate limit and 429 body; representation of a missing observation; whether storing observations is permitted; a source for India macro series. | Federal Reserve Bank of St. Louis; RBI | fred.stlouisfed.org/docs/api/fred (errors); FRED terms read in full; RBI database pages | P2.1 |
+| OQ-43 | DeepSeek: base URL and auth header; is `deepseek-chat` still accepted; can a dated version be pinned; default output limit; currency of prices; data retention, training use and processing location. | DeepSeek | api-docs.deepseek.com: first API call, chat completion reference, model list; DeepSeek terms and privacy policy | P0.3, P4.2 |
+| OQ-44 | OpenAI: shutdown date of `gpt-4o-mini`; the account's usage tier; data retention terms; 429 body. | OpenAI | developers.openai.com/api/docs: deprecations, rate limits, data controls | P0.3, P4.2 |
+| OQ-45 | Interactive Brokers: 2FA and daily login for the gateway; session lifetime; customer order id; order types and time in force; API permissions for Indian residents. | Interactive Brokers | IBKR Campus Web API pages | Only if the alternate is activated |
+| OQ-46 | Upstox: may the TOTP token endpoint be called unattended; maximum GTTs; `extended_token` validity; sandbox scope; adjustment and delisted coverage of historical candles. | Upstox | upstox.com/developer/api-documentation: get-token, sandbox, expired instruments; Upstox terms | P2.1 for the history backup; otherwise only if activated |
+| OQ-47 | FMP: Starter price (USD 19 or USD 49); Ultimate price; India coverage; do statements carry filing and acceptance dates; endpoint fields. | FMP | site.financialmodelingprep.com pricing and developer docs | P0.3, P2.1 |
+| OQ-48 | Settlement cycle in both markets (A-27); is a same-day buy and sell under `CNC` charged and taxed as intraday (A-33). | Exchanges; Zerodha | NSE and BSE settlement pages; a US clearing or FINRA page on T+1; zerodha.com/charges; Zerodha support | P2.8, P5.3 |
+| OQ-49 | NSE and BSE: exact pre-open order-collection close; holiday and special-session lists for 2026 and 2027; BSE session times (rest of OQ-26). | NSE, BSE | nseindia.com/resources/exchange-communication-holidays; bseindia.com trading holidays | P2.1 |
+| OQ-50 | Finnhub: company-news endpoint fields; what "Personal Use" permits; storage; India coverage. | Finnhub | finnhub.io/docs/api/company-news; finnhub.io terms of service | P4.1 |
+| OQ-51 | Rest of OQ-1: for an unregistered client strategy under 10 orders per second, who generates the exchange order tag and does the client send anything; is the threshold counted per exchange, per segment or per client. | NSE; SEBI; Zerodha | NSE circular INVG67858 (2025-05-05) and INVG69255 (2025-07-22); the NSE retail-algo FAQ of 2025-11-03; SEBI circular text | P2.9, P6.3 |
+
+Upstream questions answered or narrowed by this spec:
+- OQ-7: answered in substance (F-6; F-20 as excerpt). The terms text remains OQ-28.
+- OQ-11: answered. US: `stop`, `gtc`, 90 days. India: no resting stop order; GTT, 365 days,
+  with the limits in UP-11.
+- OQ-15: partly answered. No borrowing-prevention setting is described beyond
+  `max_margin_multiplier` and `no_shorting`; no settled-cash field; fractional orders are `day`
+  only. The rest is OQ-33.
+- OQ-1: partly answered (10 orders per second per client; static IP for order placement). The
+  rest is OQ-51.
+- OQ-19: narrowed to OQ-38 (US) and OQ-39 (India). The counts of listed and delisted stocks
+  were not obtained.
+- OQ-26: NYSE answered; NSE by excerpt; BSE and settlement open (OQ-48, OQ-49).
+- OQ-22: not addressed; still open.
+- OQ-6, OQ-14: not answered; widened by OQ-35.
+
+## CONTRACTS EXPORTED
+
+| Name | Kind (type/table/event/endpoint/config key) | Signature or schema | Consumers |
+|------|---------------------------------------------|---------------------|-----------|
+| F-6..F-64 | external fact identifier | Section 3 row, cited as `F-n`, with its verification level | every later spec that states a provider fact |
+| DEFAULT-22..DEFAULT-31 | provisional default identifier | Section 1, cited as `[DEFAULT-n]`; not a ruling | P2.1, P2.8, P2.10, P3.1, P3.4, P0.3 |
+| ProviderId | type | `StrEnum`, 13 members, section 8.1 | P1.1, P2.1, P3.1, P4.2, P6.1 |
+| Capability | type | `StrEnum`, 11 members, section 8.1 | P2.1, P3.1, P4.1, P6.1 |
+| SelectionStatus | type | `StrEnum`: `SELECTED`, `PROVISIONAL`, `BLOCKED`, `UNFILLED` | every client phase (start-up check E-12) |
+| VerificationLevel | type | `StrEnum`: `PRIMARY_FULL`, `PRIMARY_EXTRACT`, `SEARCH_EXCERPT`, `SECONDARY` | X3 merge; later fact registers |
+| LimitBasis | type | `StrEnum`: `DOCUMENTED`, `EMPIRICAL` | P3.1, P6.1 |
+| ProviderErrorClass | type | `StrEnum`, 12 members, section 8.1; mapping in section 9 | P1.4 (audit event field), P3.1, P3.4, P6.1 |
+| ClientOrderRef | type | strict `str`, pattern `^[A-Z0-9]{20}$` | P1.1, P1.4, P3.1, P5.5 |
+| RateLimitFact | type | frozen Pydantic v2 model, 8 fields, section 8.2 | P3.1, P6.1 |
+| ClientThrottle | type | frozen Pydantic v2 model, 5 fields; client budget at most half the documented limit | P2.1, P3.1, P4.2 |
+| ProviderSelection | type | frozen Pydantic v2 model, 6 fields, validator in section 8.1 | P0.3, P2.1, P3.1, P4.1, P4.2 |
+| SEL-1..SEL-21 | selection identifier | Section 6.3 row | P0.3 and every client phase |
+| THR-1..THR-12 | client throttle identifier | Section 8.3 row | P2.1, P3.1, P4.2, P6.1 |
+| PE-1..PE-16 | provider error path identifier | Section 9 row: condition, class, fail-closed behaviour | P3.1, P3.4, P2.10, P5.5 |
+| `massive.base_url`, `alpaca.trading_base_url`, `alpaca.data_base_url`, `kite.base_url` | config key | `str`, an `https://` URL; changed only through HITL-5 | P1.3, P2.1, P3.1 |
+| `llm.primary_model`, `llm.fallback_model` | config key | `str`; decided values `deepseek-flash`, `gpt-4o-mini-2024-07-18` (D-18) | P1.3, P4.2 |
+| `stops.us_replace_after_days`, `stops.in_gtt_replace_after_days` | config key | `int`, days; decided values 60 and 300 [ASSUMPTION A-42]; valid range 1 to 89 and 1 to 364 | P1.3, P3.4 |
+
+PART 1 OUTPUT - your own earlier output, in full, follows:
+
+## BLOCKING QUESTIONS (resolved with defaults, proceeding)
+
+| # | Question | Options | Recommended default | What breaks if wrong |
+|---|----------|---------|---------------------|----------------------|
+| BQ-48 | Does the Upstox free tier permit commercial use and publication of derived signals, or is that gated behind Upstox Plus or a separate licence? | (a) Free tier covers commercial derived-signal publication; (b) only Plus/enterprise does; (c) no tier does without a negotiated agreement | **[DEFAULT-59]** (c) is the conservative reading: treat the free API as **not** licensed for commercial signal publication until a written licence is obtained. Mark SEL-4 UPSTOX_HISTORY as BLOCKED on a licence question, not on technical access. | If (a) is true, we delayed a free path unnecessarily. If (c) is true and we assumed (a), we publish signals on unlicensed data — a BO-1/MB-AC-14 violation. The blast radius of publishing unlicensed is regulatory, not technical. |
+| BQ-49 | Is Fyers history adjusted for splits/bonus/dividends, and does it serve delisted or renamed symbols? | (a) Adjusted, delisted served; (b) adjusted, listed-only; (c) unadjusted, listed-only; (d) not established | **[DEFAULT-60]** Treat Fyers history as **unadjusted and listed-only** until the vendor answers. This means it cannot serve as the primary backtest spine for India without a corporate-actions source we do not have. Mark Fyers INTRADAY_HISTORY as PROVISIONAL with OQ-67 open. | If Fyers is adjusted and serves delisted, we under-used a free spine. If it is unadjusted and we assumed adjusted, every India backtest is wrong on every split. The second failure is worse. |
+| BQ-50 | Does an API login count as "activity" for NSE/BSE dormancy, or does a dormant trading account block the data API entirely? | (a) API login counts, data unaffected; (b) API login does not count, dormant account loses API; (c) dormant account loses only order APIs, data survives | **[DEFAULT-61]** Assume (b): a dormant account loses the data API. This forces a human heartbeat (a login or a small non-trading action) at least every 11 months per broker account. Record as a HITL item, not an automation. | If (a) is true, we added an unnecessary human step. If (b) is true and we assumed (a), the India data spine dies silently after 12 months of no trading — and a signals-only v1 never trades. The dormancy risk is acute precisely because Model B removes trading activity. |
+| BQ-51 | What does Upstox mean by "1 decade per request" for daily candles — is the range inclusive, and does a request for 2000-01-01 to 2009-12-31 return 10 calendar years or 10 years of trading sessions? | (a) Calendar years, inclusive endpoints; (b) trading years; (c) not established | **[DEFAULT-62]** Request one calendar decade at a time (2000-01-01 to 2009-12-31, then 2010-01-01 to 2019-12-31, etc.), treat `to_date` as inclusive, and discard any row outside the requested range. Do not assume a session count. | A one-session off-by-one at a decade boundary is recoverable by re-requesting the overlap; a missing decade is a silent hole in the spine. Requesting the overlap costs one extra call. |
+| BQ-52 | Does the Fyers 100-day-per-request limit for 1–240 minute candles mean calendar days or trading days, and what happens at the boundary of the 3 July 2017 history start? | (a) Calendar days, inclusive; (b) trading days; (c) not established | **[DEFAULT-63]** Treat as **calendar days, inclusive**, and clamp the first request to start no earlier than 2017-07-03. If the API rejects a boundary, step back one day. | A rejected first request is visible and correctable. Assuming trading days when the vendor means calendar days over-fetches and may trigger a 429; assuming calendar when the vendor means trading under-fetches and leaves holes. |
+
+## NON-BLOCKING DETAILS RESOLVED
+
+| # | Detail | Resolution |
+|---|--------|------------|
+| NB-63 | Upstox rate-limit page structure | The recorded figure "50 req/s OHLC and quotes (landing page)" is **not confirmed** on the rate-limiting page retrieved. The rate-limiting page shows order-placement limits (10/s regular, 50/s registered) and states "Other Standard APIs (holdings, positions, funds, historical candles etc.)" without showing the numeric limit in the retrieved excerpt . The 50/s figure comes from the landing page, not the rate-limiting page. Record as SEARCH_EXCERPT-level for the 50/s claim; the order-path 10/s regular limit is PRIMARY_FULL. |
+| NB-64 | Upstox historical candle data is confirmed to exist at V3 path `/v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}`  | The path is confirmed. The recorded ranges (daily from Jan 2000, 1 decade/request; intraday from Jan 2022, 1 month/request for 1–15m) are **not confirmed** on the retrieved page excerpt, which shows only a 15-minute example. Recorded figures remain the #68 values, with a note that the V3 reference page does not display the range table in the retrieved text. OQ-67 widened. |
+| NB-65 | Fyers rate limits are **not** unlimited in any sense | The recorded #68 figure said "unlimited symbols per day." The retrieved Fyers plans page states Standard Data APIs: **5 req/s, 50 req/min, 5,000 req/day**; Prime: 10 req/s, 500 req/min, 500,000 req/day . The "unlimited symbols" phrasing may refer to symbols-per-request rather than requests-per-day. This is a **contradiction** with the #68 record if "unlimited symbols" was read as "unlimited calls." Record both: symbols per request may be broad; requests per day are capped at 5,000 on Standard. |
+| NB-66 | Fyers rate-limit change effective 2026-10-16 | Fyers published a notice on 2026-10-15/16 revising limits effective **16 October 2026** . The plans page retrieved shows the post-change limits (5/50/5,000 Standard). Any earlier #68 figure predates this change. The v0.2 client throttle must be built against the post-16-Oct-2026 limits. |
+| NB-67 | Fyers 429 behaviour is documented | Error code **-429**; exceeding the per-minute limit more than **3 times in a day** blocks the user for the rest of the day . This is a hard behavioural constraint: a retry loop on a Fyers 429 is actively dangerous. The client must stop on the first 429 and not retry until the window resets, and must never exceed the per-minute limit three times. |
+| NB-68 | Fyers `oiFlag` and `contFlag` field names | The retrieved Fyers MCP market-data page shows parameter names `oiFlag` and `contFlag` (camelCase) for `get_chart_data` . The #68 record listed `oi_flag`, `cont_flag`. The V3 API parameter naming is not confirmed; treat the MCP-page names as indicative, not as the V3 REST contract. OQ-67 covers the V3 field names. |
+| NB-69 | Upstox OAuth token expiry at 03:30, not 06:00 | The v0.1 fact sheet (section 5.4) records Upstox token expiry as "3:30 AM the following day" (F-40). This is **03:30 IST**, not 06:00. Zerodha's expiry is 06:00 IST (F-6). These are different human-login windows. Do not conflate them. |
+| NB-70 | SEC EDGAR data API host | `data.sec.gov` is the JSON API host; `www.sec.gov` hosts the index files . The recorded submissions fields from #68 are consistent with a `data.sec.gov/submissions/CIK{10-digit}.json` shape, but the pause means none of this is verified in this run. Record as SECONDARY with the pause noted. |
+| NB-71 | Benzinga TCP push is real and documented | Benzinga's TCP streaming service is documented as a persistent TCP connection delivering JSON messages for news and market data, requiring credentials obtained from Benzinga support . The v0.1 record said "Benzinga offers TCP push, not only REST pull" — this is **confirmed at PRIMARY_EXTRACT level**. |
+| NB-72 | Benzinga headline volume and article volume | Alpaca's own blog post announcing the News API states: "130-160 full-length articles, with images" and "600-900 real-time headlines per day," history to 2015 . This is Alpaca's page, not Benzinga's. The v0.1 correction attributed the 2010/600-900 figure to Benzinga's product page; the retrieved evidence is Alpaca's blog. Record the figures with the **source being Alpaca's announcement**, not Benzinga's own page. If Benzinga's page states 2010, that remains unverified in this run. |
+| NB-73 | Alpaca's bundle carries Benzinga content | Alpaca's documentation states "All news data is currently provided directly by Benzinga" , and the blog states "news data is only provided by Benzinga" . The Alpaca News API is a Benzinga feed. Whether Alpaca's bundle carries the **headline stream** (600-900/day) separately from full articles is **not established**: Alpaca's docs describe "news articles" (130+ per day) and do not state that the high-frequency headline stream is included. Record as NOT ESTABLISHED, not as confirmed. |
+
+---
+
+## FILE: SPEC-P0.2-PROVIDERS v0.2 (AMENDMENT)
+
+---
+id: SPEC-P0.2-PROVIDERS
+version: 0.2
+status: DRAFT
+phase: P0.2 (amendment run)
+depends_on: [SPEC-P0.2-PROVIDERS v0.1, MODEL-B-DECISION v0.3, DECISIONS.md issue #68]
+produces: [ProviderId v0.2, Capability v0.2, SelectionStatus v0.2, ProviderSelection v0.2, F-65..F-77, DEFAULT-59..DEFAULT-63, SEL-22..SEL-26, THR-13, PE-17, OQ-67..OQ-72, A-76..A-80, D-39..D-42, NB-63..NB-73, BQ-48..BQ-52]
+---
+
+# SPEC-P0.2 — Provider and Broker Due Diligence, v0.2
+
+**Amendment run.** This file contains only changed sections and a change log. Sections not repeated are unchanged from v0.1 and remain in force. The v0.1 text is not rewritten; this file is appended and supersedes only where a row below says so.
+
+**Date:** 2026-10-30. **Author:** integration engineer, amendment run. **Status:** DRAFT, and it cannot be frozen: five India capability rows remain UNFILLED or BLOCKED, and the Upstox and Fyers licence questions are now the binding constraint on the India data spine.
+
+**Governing inputs consumed:** `SPEC-P0.2-PROVIDERS.md` v0.1 (full text supplied), `MODEL-B-DECISION.md` v0.3 (full text supplied), and the Owner decisions recorded in `DECISIONS.md` issue #68 (summarised in the prompt). The SEC host pause remains in force: no request was made to `sec.gov`, `data.sec.gov`, or `efts.sec.gov`. Every SEC statement below is SECONDARY or sourced from a non-SEC page.
+
+---
+
+## CHANGE LOG
+
+| # | Section affected | v0.1 text | v0.2 change | Reason | Reversible? |
+|---|------------------|-----------|-------------|--------|-------------|
+| C-1 | Fact sheets (new 5.15, 5.16, 5.17) | Upstox and Fyers had partial or broker-only treatment; SEC EDGAR was a single paragraph under 5.9 | **Added** complete P0.2-granularity fact sheets for Upstox (data role), Fyers (new), and SEC EDGAR (expanded, all SECONDARY, pause noted) | Task 1 | Yes |
+| C-2 | Evidence register | 59 rows, F-6..F-64 | **Added** F-65..F-77: Upstox data-path facts, Fyers facts, Benzinga TCP, Benzinga volume, Alpaca-Benzinga relationship, Fyers rate-limit change | Tasks 1, 2, 3 | Yes |
+| C-3 | Capabilities (section 4) | 11 capabilities | **Added** `intraday_history` as a capability (Model B needs the event window for intraday anomaly detection; the Owner's #68 record names Fyers for it) | Task 4: "Add intraday history as a capability if the design now needs it." Model B's LLM gating includes "statistically anomalous conditions" (INV-3), and the P2N.13 correction concerns event data. The design now needs it. | Yes, but removing it after P2.1 builds a client is costly |
+| C-4 | Decision matrix (section 6.2) | 20 rows | **Added** intraday_history rows (US: none needed; IN: Fyers, Upstox); **changed** eod_bars IN primary from Zerodha to Upstox (per Owner #68 RATIFIED); **changed** eod_bars IN backup from Upstox to Fyers? No — Upstox is primary for daily, Fyers is for intraday. **Changed** SEL-4 status from BLOCKED to PROVISIONAL with licence open; **added** SEL-22 (Upstox daily history) and SEL-23 (Fyers intraday history). | Task 2 (Owner RATIFIED Upstox daily, Fyers intraday); Task 4 (re-score and re-select) | Yes |
+| C-5 | Selections (section 6.3) | SEL-1..SEL-21, none SELECTED | **Changed** SEL-4: primary is Upstox (not Zerodha), backup is Fyers? No — Fyers does not serve daily bars at the same depth per #68 (366 days/request for 1D). **SEL-4** primary Upstox, backup Zerodha (retained as technical fallback, still listed-only). Status PROVISIONAL. **Added** SEL-22 (Upstox daily history, PROVISIONAL, licence open), SEL-23 (Fyers intraday history, PROVISIONAL, adjustment open), SEL-24 (Benzinga direct TCP/REST as news backup, PROVISIONAL, licence open), SEL-25 (intraday_history US, UNFILLED), SEL-26 (intraday_history IN backup, Upstox, PROVISIONAL). | Task 4; Task 2 Owner RATIFIED | Yes |
+| C-6 | Typed models (section 8) | ProviderId 13 members; Capability 11 | **Changed** `ProviderId`: added `FYERS = "fyers"`, `BENZINGA = "benzinga"`. **Changed** `Capability`: added `INTRADAY_HISTORY = "intraday_history"`. **Changed** `MARKETLESS` unchanged. **Added** field/validator implications: `ProviderSelection` for `intraday_history` must accept market IN and US; US row is UNFILLED. | Task 5 (typed models) | No after client phases import; version bump required |
+| C-7 | Client throttles (section 8.3) | THR-1..THR-12 | **Added THR-13** (Upstox: historical 50/s? — see note: the rate-limiting page does not display the historical figure; use 10/s ASSUMPTION until confirmed), **THR-14** (Fyers data APIs: 2/s, 25/min, 2,500/day — half of Standard), **THR-15** (Benzinga: no documented numeric rate limit in the retrieved pages; 1/s ASSUMPTION until licence). | Task 5; NB-65, NB-66 | Yes |
+| C-8 | Error paths (section 9) | PE-1..PE-16 | **Added PE-17** (dormant-account rejection: permanent until human acts, never retry), **PE-18** (Fyers 429 third-strike day-block), **PE-19** (Upstox "temporary suspension" on rate breach), **PE-20** (Benzinga TCP disconnect: no replay documented). | Task 5 | Yes |
+| C-9 | What breaks at 09:31 (section 7) | 13 rows | **Added** Upstox data (not on 09:31 path; backtest spine only), Fyers data (not on 09:31 path; event window only), Benzinga (news backup; same as Finnhub). | Task 5 | Yes |
+| C-10 | Unverified documentation (section 10) | 36 rows | **Added** rows 37–41: Upstox historical range table (not displayed on V3 page), Fyers V3 history parameters, Fyers adjustment/delisted, Benzinga own-page volume claim (2010, 600–900), Benzinga terms. | Task 5 | Yes |
+| C-11 | Block B tables | D-11..D-23, A-37..A-46, OQ-27..OQ-51, contracts | **Added** D-39..D-42, A-76..A-80, OQ-67..OQ-72, new contracts. | Task 5, 6 | Yes |
+| C-12 | Owner conflict section (new section 12) | none | **Added** explicit statement of conflicts with Model B and Owner decision #68. | Task 6 | Yes |
+
+---
+
+## SECTION 4 (AMENDED): CAPABILITIES
+
+The v0.1 capability table is unchanged except for one addition:
+
+| Capability | Why it is needed | Market scope | Frequency |
+|------------|------------------|--------------|-----------|
+| intraday_history | Event-window anomaly detection for the gated LLM path (INV-3: "statistically anomalous conditions"); the P2N.13 correction concerns intraday news timing; Model B's LLM packet needs a pre-event price window to distinguish a news reaction from a pre-existing move. | IN (Fyers primary); US (none needed for v1, P2N.13 is US-only) | Per decision cycle where an anomaly candidate is identified |
+
+**Edge case:** an intraday anomaly candidate on a US instrument in v1 would need US intraday history. No US intraday history provider is selected (SEL-25 UNFILLED). The deterministic path does not depend on it; the LLM gate for US anomaly candidates is therefore **unavailable** until SEL-25 is filled. This is declared, not worked around.
+
+---
+
+## SECTION 5 (AMENDED): ADDITIONS TO FACT SHEETS
+
+### 5.15 Upstox — India daily history (the backtest spine)
+
+**Role in v1 (Model B):** read-only daily OHLCV history for the India backtest spine and point-in-time feature construction. **No order path.** The v0.1 Upstox fact sheet (5.4) covered orders and GTT for the cold-alternate broker role; those rows remain DEFERRED under MB-8 and are not relied upon here.
+
+**Auth (inherited from F-40, unchanged).** OAuth with a daily token expiring at **03:30 IST** the following day. TOTP endpoint exists. Whether the TOTP endpoint may be called unattended under Upstox terms is **NOT VERIFIED** (OQ-46, unchanged). For a data-only role, a human login once per day at a time convenient to the operator is the fail-closed default: if no token, no data request, and the backtest spine is stale for that session. No automation of the login.
+
+**Endpoints needed (data role only).**
+
+| Purpose | Method and path | Verified fields | Source | Level |
+|---------|-----------------|-----------------|--------|-------|
+| Historical candles V3 | `GET https://api.upstox.com/v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}` | Candle array `[timestamp, open, high, low, close, volume, open_interest]`; timestamp ISO 8601 with `+05:30`; `unit` in `minutes`, `hours`, `days`, `weeks`, `months` (per v0.1 F-43; the V3 page retrieved shows a 15-minute example only)  | F-43, F-65 | Path PRIMARY_EXTRACT; range table NOT VERIFIED |
+| Instrument keys | From the Upstox instruments file (JSON), keyed by `instrument_key` format `<segment>|<trading_symbol>`  | `instrument_key`, `segment`, `name`, `exchange`, `latency` fields for global instruments; equity instrument file structure not read in this run | F-65 | PRIMARY_EXTRACT (global instruments only) |
+
+**Rate limits (data role).** The #68 record says "50 req/s OHLC and quotes (landing page)." The **rate-limiting page retrieved does not display a numeric limit for "Other Standard APIs"** in the extracted text; it shows the order-placement table and says the other APIs have limits but omits the number in the excerpt . The 50/s figure is **not confirmed at PRIMARY_FULL** on the rate-limiting page. It is recorded as **SEARCH_EXCERPT / landing-page-only** until a full read of the rate-limiting page resolves it (OQ-67). The order-path 10/s regular limit is PRIMARY_FULL and unchanged.
+
+**What this means for the client throttle:** THR-13 uses **10 requests per second** for Upstox historical, which is at most half of the recorded 50/s if it is true, and at most the documented order-path limit if the 50/s is wrong. A throttle of 10/s is safe under either reading. It is not "half of 50" (which would be 25/s) because the 50/s figure is unconfirmed.
+
+**WebSocket.** Not needed for the data role. The v0.1 market-feed facts (F-44) remain for the cold-alternate broker role, deferred.
+
+**Adjusted vs unadjusted.** **NOT VERIFIED (OQ-67).** Upstox help-centre pages mention that average price is updated for bonus and splits, but this is a portfolio-accounting behaviour, not a statement about the historical candle API . Do not assume the candle API returns adjusted data. The design stores raw bars and applies our own adjustment ([DEFAULT-26], D-13 unchanged). If Upstox candles are vendor-adjusted, `adjusted=false` is not available as a parameter and the raw-plus-our-adjustment rule cannot be satisfied from this source alone. This is a **blocking data-integrity question** for P2.1, not a preference.
+
+**Corporate actions.** No Upstox corporate-actions endpoint is verified. The India corporate-actions capability (SEL-8) remains UNFILLED. Upstox daily bars therefore cannot be adjusted by our code without an external corporate-actions source. This is the same gap that made v0.1 DRAFT, now sharper: the Owner's RATIFIED daily spine has no verified corporate-actions companion.
+
+**Survivorship and delisted coverage.** **NOT VERIFIED (OQ-67).** Upstox's global-instruments announcement concerns indices and indicators, not delisted equities . No delisted-equity statement exists in the pages retrieved. Treat as **listed-only** until proven otherwise (fail-closed for backtest integrity: any India backtest on Upstox data is labelled survivorship-biased unless OQ-67 says otherwise).
+
+**Tick and lot size.** From the Upstox instrument file for the equity segment; not verified in this run. No constant assumed.
+
+**Timestamps.** Candle timestamps ISO 8601 with `+05:30` (F-43). Stored as UTC instants plus the exchange session date (NB-31 unchanged). The daily-bar session definition (which timestamp a "day" candle carries) is **NOT VERIFIED**.
+
+**Failure modes.** HTTP error codes not re-read in this run. The v0.1 Upstox error code `UDAPI1154` (static IP) and `UDAPI1158` (market orders not allowed) are order-path, deferred. For the data path: a 401/403 from an expired token is PE-1 class (AUTH_EXPIRED) with the human-login remedy. A 429 is PE-3 class, but the "temporary suspension" language on the rate-limiting page means a 429 is not a transient throttle: **treat any Upstox 429 as a suspension risk and stop the batch for the rest of the session, not just back off** (PE-19).
+
+**Cost.** APIs free (F-45, SEARCH_EXCERPT). Whether commercial derived-signal publication is covered by the free tier is **NOT VERIFIED** (BQ-48, [DEFAULT-59]).
+
+**Legal.** Terms on automated access, storage, redistribution, and derived products: **NOT READ** (OQ-68). BO-1 applies: a free individual API is not assumed to permit commercial signal publication.
+
+---
+
+### 5.16 Fyers — India intraday history (the event window)
+
+**Role in v1 (Model B):** read-only intraday OHLCV history for India event-window features. **No order path.** Fyers is not a broker candidate in Model B; it is a data source only.
+
+**Auth.** Not fully verified in this run. The v0.1 spec did not cover Fyers. The Owner decision records Fyers as a free data provider; the auth mechanism, token lifetime, refresh, and whether a daily human step is needed are **NOT VERIFIED (OQ-69)**. Fail-closed: no Fyers client is built until auth is documented and read.
+
+**Endpoints needed.** `GET /data/history` (per the Fyers AI-skills market-data page) . Parameters per the MCP page: `symbol`, `resolution`, `dateFormat`, `rangeFrom`, `rangeTo`, `oiFlag`, `contFlag` . The V3 REST parameter names may differ (snake_case vs camelCase; the #68 record says `oi_flag`, `cont_flag`). **OQ-67** covers the V3 names. Candle fields: time, open, high, low, close, volume, optional open interest (per the AI-skills page, not a V3 reference read) .
+
+**Recorded ranges from #68 (to be confirmed against Fyers' current page):**
+- Intraday from **3 July 2017**.
+- **100 days per request** for 1 to 240 minutes.
+- **366 days per request** for 1D, 1W, 1M.
+- Unlimited symbols per day.
+- Sub-minute **5S to 45S** for **30 trading days**.
+- `oi_flag`, `cont_flag`.
+
+**Confirmation status in this run:** the Fyers plans-and-limits page retrieved shows **rate limits** (Standard Data APIs: 5 req/s, 50 req/min, 5,000 req/day; Prime: 10/500/500,000) and the 429/day-block behaviour . It does **not** display the per-request date ranges. The historical-market-data guide states that span limits exist and differ by resolution and plan, without giving the numbers in the retrieved text . **The recorded #68 ranges are therefore unconfirmed at PRIMARY_FULL in this run.** They are retained as the working figures but marked with OQ-67.
+
+**Rate limits (confirmed post-2026-10-16).** Standard: **5 requests/second, 50 requests/minute, 5,000 requests/day** for Data APIs . A notice dated 2026-10-15/16 announced the revision effective **16 October 2026** . Any #68 figure predating this change is stale. THR-14 uses **2 requests/second, 25 requests/minute, 2,500 requests/day** — at most half of Standard on every dimension.
+
+**429 behaviour.** Error code **-429**. Exceeding the **per-minute** limit more than **3 times in a day** blocks the user for the **rest of the day** . This is not a transient throttle. PE-18: on the first 429, stop the batch for the rest of the session; do not retry; count the strike; a third strike means no Fyers data until the next calendar day. A retry loop on Fyers 429 is a self-inflicted day-block.
+
+**WebSocket.** Not needed for the data role. Not verified.
+
+**Adjusted vs unadjusted.** **NOT VERIFIED (OQ-67).** A Fyers community question asks whether the history API provides adjusted close for splits and dividends ; the answer is not in the retrieved excerpt. Treat as **unadjusted** until proven otherwise ([DEFAULT-60]). If unadjusted, Fyers intraday candles cannot be compared across a split without our own corporate-actions adjustment, and the India corporate-actions source is still UNFILLED (SEL-8).
+
+**Corporate actions.** None verified.
+
+**Survivorship and delisted coverage.** A community post on the Upstox forum (not a Fyers official page) asks whether the Fyers History API serves delisted/merged securities (HDFC Ltd) and pre-split history for renamed symbols; the post is a question, not an answer . **NOT VERIFIED.** Treat as **listed-only** until Fyers documents otherwise.
+
+**Tick and lot size.** From the Fyers symbol master; not verified.
+
+**Timestamps.** Convert to `Asia/Kolkata` when applying session rules, per the Fyers AI-skills page . Stored as UTC instants.
+
+**Cost.** Zero (Owner #68, RATIFIED). Plan tiers: Standard vs Prime; Prime expands limits . The recorded "free" refers to API access; whether Prime is needed for the intraday ranges or history depth is **NOT VERIFIED** (OQ-67).
+
+**Legal.** Terms on automated access, storage, redistribution, derived products: **NOT READ** (OQ-68). BO-1 applies.
+
+---
+
+### 5.17 SEC EDGAR — US fundamentals and filings (PAUSED, all SECONDARY)
+
+**The pause is in force.** No request was made to any SEC host. The v0.1 fact sheet (5.9) recorded figures from third-party pages; this amendment re-records them without contacting SEC and states plainly that they are **not confirmed against the vendor's current page** because the Owner's instruction forbids the request.
+
+**What is retained from the v0.1 / #68 record, marked SECONDARY:**
+- **10 requests per second** per user (SEC fair-access guideline; widely repeated by third-party mirrors; **not verified at SEC in this run**).
+- **Declared `User-Agent` required**, naming the requester and a contact address; requests without it are commonly answered 403 (third-party mirrors).
+- **Dissemination cutoffs 17:30 ET**, and **22:00 ET** for Forms 3, 4, 5 (recorded in historical specs from a primary read before the pause; retained as SECONDARY for this run).
+- **Propagation latency after acceptance not published.**
+- **Full and quarterly indexes rebuilt weekly early Saturday** (the `full-index` directory exists and is documented as a bridge; the rebuild cadence is from the historical record, not re-verified) .
+- **History from 1994/1995.**
+- **Submissions fields:** `acceptanceDateTime`, `accessionNumber`, `act`, `core_type`, `fileNumber`, `filingDate`, `filmNumber`, `form`, `isInlineXBRL`, `isXBRL`, `isXBRLNumeric`, `items`, `primaryDocDescription`, `primaryDocument`, `reportDate`, `size`.
+
+**What is NOT established and must not be coded:** the exact JSON shape of the submissions endpoint; whether the fields above are top-level or nested; the pagination of older filings; the XBRL company-facts endpoint shape; the SIC code's presence and format; the 429 body. OQ-70.
+
+**Conflict with Model B.** SEL-9 (US fundamentals, SEC EDGAR primary) is **BLOCKED** by the pause and by the `User-Agent` identity choice (OQ-41, unchanged). Under Model B, US fundamentals are a P2.4 input; without them, US fundamental features are absent, not defaulted. This is declared, not worked around.
+
+---
+
+### 5.18 Benzinga (corrections from SPEC-P2N.13 F-1)
+
+The v0.1 spec did not have a Benzinga fact sheet; Benzinga was reached through Alpaca News (5.2). The P2N.13 correction concerns two claims. This amendment records what the retrieved pages support and what they do not.
+
+**Claim 1: "Benzinga history from 2010; 600 to 900 real-time headlines a day in addition to 130 to 160 full-length articles."**
+
+- **130–160 full-length articles** and **600–900 real-time headlines per day**: **CONFIRMED** at Alpaca's own blog announcing the News API, which states "130-160 full-length articles, with images" and "600-900 real-time headlines per day," history to 2015 . The source is **Alpaca**, not Benzinga's own product page. The claim is true of **Alpaca's Benzinga-sourced bundle**, not independently verified at Benzinga.
+- **History from 2010**: **NOT CONFIRMED** in this run. Alpaca's blog and docs both say **2015** . A third-party dataset page says January 2016 . No retrieved page states 2010. If Benzinga's own product page says 2010, that page was not reached in this run. Record the 2010 claim as **UNVERIFIED**, not as a correction that supersedes Alpaca's 2015.
+- **Does Alpaca's bundle carry the headline stream?** Alpaca's documentation describes "news articles" (130+ per day) ; the blog announces the headline volume as a feature of the same API . Whether the high-frequency headline stream is a distinct feed in Alpaca's API, or whether the 600–900 figure describes the editorial output from which Alpaca selects articles, is **NOT ESTABLISHED**. Alpaca's `/v1beta1/news` endpoint (v0.1 F-35) returns articles with `headline`, `summary`, `content`; no separate "headlines-only" endpoint is described. The safe reading: Alpaca's endpoint serves **articles**, and the 600–900 headline figure describes Benzinga's editorial volume, not a guaranteed API feed. OQ-71.
+
+**Claim 2: "Benzinga offers TCP push, not only REST pull."**
+
+**CONFIRMED at PRIMARY_EXTRACT.** Benzinga's TCP streaming documentation describes a persistent TCP connection delivering JSON messages for news and market events (option alerts, press releases, trading halts, analyst ratings, block trades), with credentials obtained from Benzinga support . This is a distinct delivery mechanism from the REST API and from Alpaca's WebSocket. It is **not** what Alpaca's bundle provides; Alpaca provides REST plus a WebSocket of its own, sourced from Benzinga . SEL-24 records Benzinga direct as a news backup candidate, PROVISIONAL, licence
