@@ -1,11 +1,12 @@
 ---
 id: SPEC-P1.3-CONFIG
-version: 0.1
+version: 0.1.1
 status: FROZEN
 phase: P1.3 — Configuration & Policy DSL
 depends_on: [SPEC-P1.1-DOMAIN v0.2, SPEC-P1.2-STORAGE v0.1, SPEC-P0.1-DECISIONS v0.3, SPEC-P0.2-PROVIDERS v0.5, SPEC-P0.3-BUDGET v0.5, STAGE-0-FREEZE v1.1]
 produces: [config/policy.yaml, src/config/loader.py, class.PolicyLoader, class.PolicyGate, class.PolicyDocument, class.Rule, class.EffectiveConfig, class.PolicyVerdict, class.VaultRef, enum.RuleAction, enum.RuleMode, enum.RuleScope, enum.Comparison, enum.Severity, enum.KillScope, enum.Layer, fn.content_hash, fn.canonical_bytes, fn.verify_signature, fn.merge_layers, fn.assert_change_authorised, fn.lint_no_env_risk_reads, fn.infra_env, const.INFRA_ENV_ALLOWLIST, const.ACTION_PRECEDENCE, RULE-IDS EXP-001..LLM-003]
 frozen_by: STAGE-1-FREEZE.md (2026-08-31)
+reopened: v0.1 -> v0.1.1, logged re-open at the closure of condition 12 (SPEC-P1.3.1 §6, §10 item 8, Q-P1.3.1-9); §5.3 and §5.4 item 3 only
 ---
 
 # SPEC-P1.3 — Configuration & Policy DSL
@@ -204,39 +205,76 @@ built entirely on that statement.
 
 ### 5.3 Who may change what — the two-person rule
 
-| Direction | Approvals | Authority |
+| Direction of a change | Approvals | Authority |
 |---|---|---|
-| **Tighten** a limit | **0** — automatic | ADR-09 row 3: "tightening is always safe" |
-| **Loosen** a limit | **2 distinct identities** | This spec, §5.3 |
-| **Undecidable** — the diff cannot prove the direction | **2 distinct identities** | SPEC-P1.3.1 §3, `[CONST-6]` |
+| **Tightens** | **0** — automatic | ADR-09 row 3: "tightening is always safe" |
+| **Neutral** | **0** | SPEC-P1.3.1 §3 |
+| **Loosens** | **2 distinct identities** | This spec, §5.3; Owner Ruling 12 (DECISIONS.md, 2026-10-16) |
+| **Undecidable** — the diff cannot prove a direction | **2 distinct identities** | Owner Ruling 12: UNDECIDABLE fails closed to LOOSENS |
 | **Override a risk DENY** | **Impossible. No approver, no code path** | ADR-09 final row, invariant I2 |
 
-**The change list is derived, never declared.** `assert_policy_change_authorised(old, new,
-approvers)` computes the change list itself with `diff_policies()` over the two **effective**
-(merged) documents, for every (market, environment) combination that will be loaded
-(SPEC-P1.3.1). A caller cannot omit a change by not mentioning it. `assert_change_authorised()`
-and `LimitChange` are superseded for authorisation and must not be called on the approval path.
+A policy change is every difference between the version in force and the version proposed, in
+every (market, environment) combination, and it needs the largest approval count that any one of
+those differences needs.
 
-**Every field is classified** LOOSENS, TIGHTENS, NEUTRAL or UNDECIDABLE by the rules in
-SPEC-P1.3.1 §3: comparison and threshold judged jointly on the pass set; `action` on the
-KILL > DENY > MODIFY > ALLOW lattice; `mode` enforce → monitor is a loosening; `scope` by
-coverage; removing a rule is a loosening; and every leaf outside `rules` by
-`CONFIG_KEY_DIRECTIONS`.
+**The change list is derived, never declared.** `assert_policy_change_authorised()`
+(SPEC-P1.3.1 §5) derives the combinations from the policy files and the changes from the
+effective documents. A caller cannot leave a change or a combination out by not mentioning it.
+`assert_change_authorised()` and `LimitChange` are not on the approval path; `loosens_for()`
+remains only as a test oracle.
 
-**The two-person rule applies to every LOOSENS and every UNDECIDABLE change.** UNDECIDABLE is
-treated as a loosening because a change that cannot be proven to tighten does not get the
-tightening path ([CONST-6]).
+**Every field is classified, by Owner Ruling 12.** A change loosens when it widens the permitted
+set.
 
-**A smaller pass set is not a tightening on a rule that can block an exit.** On an
-exemption-granting rule, a `pre_exit` rule, or a rule in `LIQUIDATION_PATH_RULES`, a change
-that would otherwise tighten is UNDECIDABLE. "Tightening is always safe" (ADR-09 row 3) holds
-only for rules that cannot stand between the book and a risk-reducing exit.
+- **Threshold:** direction depends on the comparison. Raising an `lte` or `lt` bound loosens;
+  raising a `gte` or `gt` bound tightens. Any change of an `eq` bound is undecidable.
+- **Action:** moving down `KILL > HALT_ENTRIES > DENY > MODIFY > ALLOW` loosens.
+- **Mode:** `enforce` → `monitor` loosens, always.
+- **Comparison:** any change is undecidable.
+- **Scope:** narrowing loosens and widening tightens, on the order SPEC-P1.3.1 §3.3 defines; a
+  pair that order cannot rank is undecidable.
+- **Removing** a rule loosens, always. **Adding** a rule is itself never a loosening. What an
+  added or changed rule does to *other* rules is recorded against them: an exemption it grants
+  loosens the exempted rule's scope, and a kill it can take ahead of an existing GLOBAL kill
+  (§4.2's lowest-id binding) is undecidable for that GLOBAL rule (SPEC-P1.3.1 §3.6).
+- **Severity** never loosens on its own; changed together with the action, it takes the
+  action's direction.
 
-**The approval count is the active version's.** `min_approvals_to_loosen` is read from the
+Every other rule field, every key outside `rules`, and every layer file is classified by
+SPEC-P1.3.1 §3, which ends in UNDECIDABLE for anything it does not name.
+
+**UNDECIDABLE is a fourth outcome, not an error, and it is never passed as neutral.** For
+approval it counts as a loosening (`[CONST-6]`).
+
+**The approval count is the version in force's.** `min_approvals_to_loosen` is read from the
 version being replaced, never from the version being approved.
 
-**Two distinct *identities*, not two approvals.** Unchanged from v0.1: normalised and
-de-duplicated; `["js", "JS "]` is one person.
+**Two distinct *identities*, not two approvals.** Each approval is an Ed25519 signature over a
+domain-tagged digest of the request id, the request time, and the exact old and new content
+hashes of every combination. The signing identity must be listed, with its key reference and a pin of that key, in
+the policy version in force; nobody supplies keys at approval time. Identities are normalised and
+de-duplicated (`["js", "JS "]` is one person), and two identities with the same raw key are one
+approver.
+
+**An approval is valid only for the version it was given against, only for 24 hours, and only
+once.** It is applied only if, in the transaction that records the new in-force version:
+
+- every combination's in-force hash, read from storage and never from the caller, equals the
+  hash the change was diffed against. A combination that exists only because this change adds
+  its environment file is compared through its (market, no environment) combination, which is
+  the same document;
+- the candidate still hashes to what was approved;
+- no more than 24 hours have passed since the request, by the database clock (ADR-09 row 2);
+- its request has not been used before, even if the version it was given against has returned.
+
+Otherwise the request is denied and must be re-diffed and re-approved. Until a frozen spec
+defines where the in-force hash of each combination is stored, in a store that itself refuses an
+out-of-sequence row (SPEC-P1.3.1 B6), no policy change can be applied by this path.
+
+**The constitution is also pinned in code.** `tests/verify_p13_policy_diff.py` pins the
+`threshold`, `action`, `mode`, `comparison` and `scope` of every rule whose authority cites
+`[CONST]` or `IMMUTABLE`, and the `scope` and `mode` of every rule. Changing a pinned value also
+needs a reviewed code change (ADR-09 row 10), whatever its direction.
 
 **This is stricter than a FROZEN ADR, and that is why it is permitted.** ADR-09 row 2 authorises
 the Owner *alone* to increase a limit. Requiring two is a tightening of that control, and ADR-09
@@ -244,10 +282,14 @@ row 3 says tightening is always safe and needs no approval — so no constitutio
 required and **none has been made**.
 
 > **Operational consequence, stated rather than discovered.** At team size 1 (`[DEFAULT-3]` of
-> P0.1) this makes limit increases **impossible** until a second approver is enrolled. That is
-> deliberate and it is safe: every emergency action available to a single operator is a tightening
-> or a kill, and both remain unblocked. If the Owner needs to raise a limit, the process is to
-> enrol a second approver first — which is the correct process, not an obstacle to it.
+> P0.1), every LOOSENS and every UNDECIDABLE change is **impossible** until a second approver is
+> enrolled. That includes any comparison change, any edit to a config key SPEC-P1.3.1 does not
+> name, any new layer file, and any change to a rule that can take a non-GLOBAL kill ahead of a
+> GLOBAL one. No approver is listed in the policy today, and the Owner has ruled that there is no
+> enrolment path for now (SPEC-P1.3.1 B7), so neither the first approver nor the second can be
+> added through this path. Tightenings
+> that change no other rule, and the kill switch, remain unblocked as decisions; applying any
+> change waits on the in-force record (B6).
 
 ### 5.4 How a live change propagates — and deliberately does not
 
@@ -256,8 +298,9 @@ required and **none has been made**.
 1. `RunContext.config_hash` is bound at **run start** and is a foreign key to
    `config_version.config_hash` (SPEC-P1.2 §6.9).
 2. Every audit event in that run carries that `run_id`, and therefore that config hash.
-3. A new signed policy version is written to `config_version` and takes effect at the **next run
-   boundary**.
+3. A new signed policy version takes effect at the **next run boundary**, and only if it is the
+   in-force version of that run's (market, environment), recorded in the one transaction that
+   inserts or reuses its `config_version` row (SPEC-P1.3.1 B6). A backtest may bind an older version.
 4. ADR-14 already freezes the order list at pipeline time; re-reading policy at placement time
    would reintroduce the intraday decision path ADR-13 forecloses.
 
@@ -488,8 +531,8 @@ a minimum of three letters in a family name.
 | `RuleOutcome` | model | Per-rule record incl. the fail-closed reason — the audit payload | P1.4 |
 | `ACTION_PRECEDENCE` | constant | `(KILL, DENY, MODIFY, ALLOW)` | P2.9 |
 | `content_hash()` / `canonical_bytes()` | functions | The bytes the signature covers | P1.4, P6.4 |
-| `assert_change_authorised()` | function | The two-person rule | P6.2, P6.4 |
-| `loosens_for()` | function | Direction relative to a rule's comparison | P6.2 |
+| `assert_change_authorised()` | function | The v1 count over a caller's list. Not on the approval path (SPEC-P1.3.1 §5.2) | Tests |
+| `loosens_for()` | function | Direction relative to a rule's comparison. Not on the approval path: a test oracle only | Tests |
 | `merge_layers()` | function | Layering with the operator deny-list | P6.4 |
 | `VaultRef` | model | `vault://<mount>/<path>#<key>` | P6.2 |
 | `lint_no_env_risk_reads()` / `assert_no_env_risk_reads()` | functions | The §7 lint | **CI**, P6.4 |
@@ -499,4 +542,4 @@ a minimum of three letters in a family name.
 
 ---
 
-**END OF SPEC-P1.3-CONFIG v0.1**
+**END OF SPEC-P1.3-CONFIG v0.1.1**

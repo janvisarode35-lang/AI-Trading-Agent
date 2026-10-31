@@ -1,0 +1,1394 @@
+You are a principal engineer on an autonomous equities trading platform. You are contributing
+one component to a system that will eventually move real money. Treat every output as something
+that will be audited by a regulator and blamed after a loss.
+
+PROJECT INVARIANTS — these are decided, not open for redesign. If your work conflicts with one,
+stop and say so explicitly rather than quietly working around it.
+
+1.  The risk engine is deterministic and always overrides every AI output. No exceptions.
+2.  LLMs never: size positions, place/cancel/modify orders, change risk limits, set stops,
+    or issue a final trade decision without a deterministic gate downstream.
+3.  LLMs are GATED - invoked only for top-N candidates or statistically anomalous conditions.
+4.  LLMs never receive raw external content. All news/filings/social text passes through a
+    sanitizer and is presented as tagged, untrusted DATA - never as instructions.
+5.  Every decision is written to an append-only, cryptographically verifiable audit trail
+    before it takes effect. If the audit write fails, the action does not happen.
+6.  Fail-closed everywhere. Missing data, stale data, an exception, an ambiguous state -> DENY.
+    Never synthesise, impute, interpolate, or default a missing market value.
+7.  Kill switch is infrastructure-level, independent of the AI path, automatic + manual,
+    and requires a human to re-enable.
+8.  No self-modifying code. No autonomous leverage. No "trade lost -> change the strategy".
+    Strategy changes are offline, backtested, and champion/challenger validated.
+9.  Compliance is built in from day one: SEBI circular SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013
+    (unique strategy ID per order, OPS caps, kill switch, static IP, live-like testing) and
+    US PDT / wash-sale / best-execution handling.
+10. Two markets: US (NYSE/NASDAQ, broker Alpaca, separate market-data provider) and
+    India (NSE/BSE, broker Zerodha Kite). Nothing may be US-only by accident.
+
+FIXED STACK - do not propose alternatives unless the phase explicitly asks:
+Python 3.12+, FastAPI, PostgreSQL + TimescaleDB, Redis, Pydantic v2, XGBoost/LightGBM,
+scikit-learn, DeepSeek (primary LLM) + GPT-4o-mini (fallback), HashiCorp Vault,
+Prometheus + Grafana, Docker on a single VM. No Kubernetes, no Airflow, no vector DB,
+no orchestration framework, no new dependency that ten lines of stdlib would cover.
+
+HARD RISK NUMBERS (defaults; configurable but never by the AI):
+position <= 5% NAV | sector <= 20% NAV | gross <= 2x equity | net <= 1x equity |
+daily loss <= 2% | weekly loss <= 5% | max drawdown <= 10% (trips kill switch) |
+risk per trade 1% | liquidity cap 1% of ADDV | <=20 orders/min global, <=10 per strategy |
+stop = entry - 2.5 * ATR(14) at entry | limit orders default, market only for emergency exit.
+
+BEHAVIOURAL RULES:
+- Never invent a fact, an API field, a rate limit, a fee, or a regulation. If you do not know,
+  write it in the OPEN QUESTIONS table with the exact query needed to resolve it.
+- Every number you state gets a source or is labelled ASSUMPTION.
+- Prefer boring and deterministic over clever. Fewest moving parts that satisfies the spec.
+- Precision over hedging. No "you might consider" - state the choice and the rationale.
+- Call out anything in the upstream spec that is wrong, unimplementable, or internally
+  contradictory. That is a required part of your output, not a courtesy.
+
+ROLE: Adversarial reviewer. You did not write this and you do not trust it. Assume it will
+run unattended against a live brokerage account.
+
+INPUTS: the frozen spec, and the code drop.
+
+REVIEW IN THIS ORDER and report findings ranked by severity:
+  1 SPEC CONFORMANCE: every requirement present, correct, and complete. List requirements
+    that are missing, partially implemented, or subtly different.
+  2 CONSTITUTION VIOLATIONS: any path where an LLM influences sizing or execution, any path
+    that reaches a broker without a risk verdict, any fail-open, any silent default of a
+    market value, any risk number read from somewhere other than the policy loader.
+  3 CORRECTNESS: off-by-one, boundary conditions at every threshold, float used for money,
+    naive datetimes, timezone bugs, DST, rounding, integer division, mutable default arguments,
+    shared mutable state.
+  4 CONCURRENCY: races on portfolio headroom, double-spend of exposure, TOCTOU between check
+    and act, non-atomic read-modify-write, lock ordering, async blocking calls.
+  5 FAILURE HANDLING: every exception path, every timeout, every retry, every partial failure.
+    Ask "what if this returns None / times out / returns stale data / returns twice" for every
+    external call.
+  6 RESOURCE AND PERFORMANCE: unbounded memory, N+1 queries, missing index, unbounded retry,
+    unbounded queue.
+  7 SECURITY: injection, secret in a log, secret in an error message, unvalidated external
+    input, unsafe deserialisation.
+  8 TESTS: do they actually test the risky paths, or only the happy path? Name the specific
+    missing test cases.
+  9 SIMPLICITY: what can be deleted. Reinvented stdlib, speculative abstraction, an interface
+    with one implementation, config for a constant.
+
+PER FINDING: severity (BLOCKER/HIGH/MEDIUM/LOW), file and line, the concrete failure scenario
+with specific inputs, and the minimal fix. No vague concerns - if you cannot state the input
+that breaks it, do not report it.
+
+END WITH: a verdict - SHIP / FIX-THEN-SHIP / REJECT - and, if REJECT, the single reason.
+
+TASK. Apply the X2 role above, as a DELTA review. An earlier X2 of src/config/policy_diff.py found 1 BLOCKER, 4 HIGH, 1 MEDIUM and 5 LOW (X2H-1 to X2H-11, included below). The author has now changed the code, the test suite and two mutation harnesses. Your inputs are those findings, the unified diffs of all four files, and the spec sections the changes touch. The spec is SPEC-P1.3.1 v0.3.4, FROZEN, and is the only authority: if it and the code disagree, the code is wrong unless the spec is unimplementable.
+
+Review, in this order:
+1. For each of X2H-1 to X2H-11: is it actually closed, not merely addressed? State the input that would still break it, or say closed.
+2. Did any fix introduce a new defect or a fail-open path? In particular: _identity and _members; _kind and the new order inside _config_value; the _leaves refusal of keys holding ".", "[" or "]", and its effect on any legitimate key; the `else` that replaced the explicit C-02 branch in _threshold_record; _load catching Exception; the single try around the three store reads.
+3. Do the new tests and harness changes prove what they claim? Name any test that could not fail, and any harness path that could still report KILLED or CAUGHT wrongly.
+
+Rules. You cannot run anything here, so do not claim you did. If you cannot state the concrete input that breaks something, do not report it. Per finding: severity (BLOCKER, HIGH, MEDIUM, LOW), function and line of the diff, the failure scenario with specific inputs, and the minimal fix. You have the diffs, not the whole files: if a claim depends on code you cannot see, say so and put it in OPEN QUESTIONS rather than guessing. End with a verdict: SHIP, FIX-THEN-SHIP or REJECT, and if REJECT the single reason.
+
+INPUT - the X2 findings, full text follows:
+
+## New findings
+
+### X2H-1 — BLOCKER — a dotted key hides a real change
+
+**Where.** `policy_diff.py` l. 780–791 (`_leaves`), used at l. 826–827. Spec §3.7: "Every leaf outside
+`rules` is classified".
+
+**Cause.** `_leaves` flattens by joining keys with dots, so the top-level key
+`"kill_switch.auto_re_enable_permitted"` and the nested key `auto_re_enable_permitted` under
+`kill_switch` get one path. A later key overwrites the earlier one in the flat dict, and the diff
+compares the survivor. `PolicyDocument` is `extra="allow"`, so the loader accepts this.
+
+**Failure, measured.**
+
+```yaml
+kill_switch:
+  auto_re_enable_permitted: true        # was false
+"kill_switch.auto_re_enable_permitted": false    # added at the end of the file
+```
+
+| Check | Result |
+|---|---|
+| `diff_policies` records | `[]` |
+| Content hash | Changes |
+| `portfolio.max_position_pct` 0.05→0.50 by the same trick | `required_approvals` 0, nothing gated; the loader's effective value is 0.5 |
+| `verify_p13_policy_diff.py` on the kill-switch edit | exit 0 |
+| `verify_p13_config.py` on the kill-switch edit | exit 0 |
+
+So a change that lets the kill switch re-enable itself needs zero approvals, passes both suites and
+leaves no record. That breaks invariant 7 and `[CONST-6]`, and it is the same class as X2S-1. Any key in
+the table can be hidden this way. A trailing dot, `"max_position_pct."`, reaches the same path through
+`rstrip`.
+
+**Fix.** In `_leaves`, raise `PolicyDiffError` on any mapping key that is not a string or contains a dot.
+The real file has none (measured), so nothing legitimate is refused. Tests: this exact edit is refused,
+on both sides of a diff. New mutation: the check removed.
+
+### X2H-2 — HIGH — a type change produces no record
+
+**Where.** l. 391–407 (`_canon`), l. 410 (`_as_set`), l. 845–846. Spec C-39: "a type change … UNDECIDABLE".
+§2 row 7 compares set members by canonical string, which only works if that string is injective.
+
+**Cause.** `_canon(False)` and `_canon("False")` are both `"False"`, `_canon(1)` and `_canon("1")` are both
+`"1"`, and `["a,b"]` and `["a", "b"]` both give `[a,b]`. `same` is then true and no record is written.
+
+**Failure, measured.**
+
+| Change | Records |
+|---|---|
+| `fx.system_may_convert`: `false` → `"False"`, a truthy string | none |
+| `kill_switch.auto_re_enable_permitted`: `false` → `"False"` | none |
+| `account.enforce_settled_cash`: `true` → `"True"` | none |
+| `portfolio.max_position_pct`: `0.05` → `"0.05"` | none |
+| `portfolio.max_position_pct`: `0.05` → `"0.050"` | NEUTRAL, where C-39 says UNDECIDABLE |
+| `turnover.max_new_entries_per_session`: `4` → `"4"` | none |
+| Unlisted key `["a","b"]` → `["a,b"]`, or `1` → `"1"` | none |
+| DATA-002 `allowed_values`: `[true]` → `["True"]` | none |
+| `not_in` set: `[1, …]` → `["1", …]` | none |
+
+Committed to the real file, `fx.system_may_convert: "False"` and the DATA-002 edit each leave both suites
+green (measured). `if policy["fx"]["system_may_convert"]:` is then true in Python, so an off switch becomes
+on with zero approvals. LLM-001's identical edit is stopped only by its pin.
+
+**Fix.** Give comparison an injective form, tagging the type of each scalar, for both `same` and `_as_set`,
+keeping `_canon` for display. In `_config_value`, require both sides to be one kind (bool, number or
+string) before any direction, otherwise C-39. `"5.00"` → `"1.00"` stays C-37: both are strings. Add these
+rows to §7.4's C-39 tests.
+
+### X2H-3 — HIGH — the suite does not prove what it covers
+
+§7.1 rule 3: "A test counts only if it fails when the thing it tests is broken". I wrote 43 mutants not in
+the harness and ran the full suite on each, against a green baseline. **39 survived.** F38, F39, F40 and F43
+were killed, which shows the method reaches the code.
+
+**The code as written handles every one of these correctly.** This is a finding about the tests. The first
+group has measured end-to-end effects:
+
+| Mutant | Effect, measured or read | Survived? |
+|---|---|---|
+| **F01** keys read from the NEW version | **Measured:** a candidate listing two keys the requester holds is authorised by those keys, `required` 2. This reopens X2D-2 | Yes |
+| **F04** digest omits `request_id` | **Measured:** signatures for one request are accepted for another, which defeats `request_used` (X2F-1) | Yes |
+| **F05** digest omits `old_content_hash` | **Measured:** signatures over one base are accepted on another | Yes |
+| **F03** approval count uses `min` | **Measured:** two approvals pass where the US document requires three | Yes |
+| **F08** TRUE_LOOSENS inverted | **Measured:** `fx.system_may_convert` false→true becomes TIGHTENS | Yes |
+| **F14** C-40 ignores `allowed_values_ref` | **Measured:** C-40 is lost, so a free change displaces a GLOBAL kill | Yes |
+| F02 count from (None, None) only | As F03 | Yes |
+| F06, F07 digest omits `new_content_hash`, or market and environment | Approval no longer binds that field | Yes |
+| F09 bool guard removed | `requires_human_to_re_enable: "no"` reads as TIGHTENS | Yes |
+| F10, F11 a non-numeric or non-list value is NEUTRAL | C-39 is lost | Yes |
+| F12, F13 a key moved to the wrong direction list | **Any** direction in the table can be wrong: only about 12 of 72 are tested | Yes |
+| F15 no C-41 for `policy.override.yaml` | Layer record lost | Yes |
+| F20 C-29 on a non-`_pct` target | UNDECIDABLE becomes TIGHTENS | Yes |
+| F29 anchor accepts any `LAYER_ADDED` | Weakens X2E-1's condition | Yes |
+| F30 key source is the US document | A market layer could carry the map | Yes |
+| F24, F25, F26 model checks removed | §4 checks and §8's basis row are unproven | Yes |
+
+Survivors that fail closed or change only records or errors, listed for completeness: F16, F17, F18, F19,
+F21, F22, F23, F27, F28, F31, F32, F33, F34, F35, F36, F37, F41, F42. F18 and F19 still matter: a NEUTRAL edit
+to LOSS-003 needing two people would pass unnoticed.
+
+**Fix, smallest set.**
+
+1. A known-answer digest test: fixed inputs, a literal hex result. That catches F04 to F07 in one test.
+2. Pin all 72 keys against a literal table in the test file. That catches F08, F12 and F13.
+3. Signatures: a fixture whose new document lists different keys, refused (F01, F30). §7.4 already says "Keys
+   come from the old document".
+4. Counts: a market layer raising the count (F02, F03).
+5. Cases for F09, F10, F11, F14, F15, F20, F24 to F26, F29, and for F18, F19.
+6. Add these to `mutate_policy_diff_code.py` as M-31 onward, so the gain is held.
+
+### X2H-4 — HIGH — the code harness reports CAUGHT with no baseline
+
+**Where.** `mutate_policy_diff_code.py` l. 240–253.
+
+`run_one` only asks whether the named test is in the `FAILED` lines. Nothing checks that the test passes on
+unmutated source.
+
+**Failure, measured.** I made `t_replay` fail unconditionally and gave M-26 an edit with no effect
+(`is True` added to the check). The harness reports it **CAUGHT**. If a named test is broken or flaky, every
+mutation naming it gets credit. §10 item 3 requires the suite to pass separately, so a full evidence set would
+expose this. The harness alone does not.
+
+The negative control cannot find this. Stubbing the named test removes it from `FAILED`, so `want <= plain` is
+false by construction. It confirms only that attribution reads names.
+
+**Fix.** Before any mutation, run the suite on unmutated source in both modes and exit non-zero unless it is
+green. Do the same in `mutate_x5r_g9.py`. Better still, after each mutation require that the named test
+passes in a run with the mutation reverted, or at least compare with that baseline.
+
+### X2H-5 — HIGH — the sweep passes with nothing tested
+
+**Where.** `mutate_x5r_g9.py` l. 226–227. §7.5: "486 loadable, 486 KILLED"; §10 item 5.
+
+`INVALID` is not counted in the sweep, and the exit test is `counts[wanted] == len(mutations) - INVALID`. When
+everything is INVALID, that is `0 == 0`.
+
+**Failure, measured.** A base policy with one duplicate rule id, so that nothing loads:
+
+```text
+--sweep                       exit 0   generated 589, loadable 0: {'INVALID': 589}
+--sweep --negative-control    exit 0   generated 589, loadable 0: {'INVALID': 589}
+```
+
+A smaller loss is just as silent: any regression that makes 100 of the 486 unloadable still exits 0.
+
+**Fix.** In sweep mode, exit non-zero unless the loadable count equals a literal 486, the value in §7.5.
+#17's reviewed edit changes the literal with the policy, as it does the pins.
+
+### X2H-6 — MEDIUM — exceptions escape as undocumented types
+
+**Where.** l. 988–994 (`_load` catches only `PolicyError`), l. 1009 (outside the `try`), l. 1247–1252. §8: "Any
+other exception during derivation or classification" becomes `PolicyDiffError`.
+
+**Failure, measured.**
+
+| Input | Raised by `diff_policy_dirs` | Raised at apply |
+|---|---|---|
+| `policy.yaml` without `layering` | `KeyError` | `KeyError` |
+| `layering: null` | pydantic `ValidationError` | not run; same path |
+| A mapping with int and str keys | `TypeError` | not run; same path |
+| `policy.yaml` not UTF-8 | `UnicodeDecodeError` | `UnicodeDecodeError` |
+
+All fail closed, because nothing is written. But `assert_authorisation_current` documents three exceptions and a
+writer catching those would crash instead of refusing, and §8's row for a candidate that no longer loads says
+`StaleAuthorisationError`. `t_digest_and_load_failures` tries only a YAML error.
+
+**Fix.** Make `_load` catch `Exception` and raise `PolicyDiffError`, chained. Step 5 to 7's existing handler
+then gives `StaleAuthorisationError`. Add these four inputs as tests.
+
+### X2H-7 — LOW — tests for undocumented code paths
+
+`t_conn_reaches_only_the_store_adapter` and the binding scan hold. Two branches have no test: the naive-clock
+refusal (F27) and the unknown-layer wrapper in `_compare_anchor` (F28). Add a case for each, or X2H-6's fix makes
+them worth one line.
+
+### X2H-8 — LOW — `P13_PINS_ONLY` leaks into the main suite
+
+Set in the environment, it makes the whole suite run 27 tests and exit 0 (measured). It also skips
+`t_every_basis_is_exercised`. `_env` and `_failed` inherit it from `os.environ`, so a stray export turns §10 item
+3's evidence hollow. Clear it in `_failed` and `_env(False)`, and have the suite print that it is in pins-only
+mode so the evidence shows it.
+
+### X2H-9 — LOW — adapter errors and harness decoding
+
+1. An adapter that raises reaches the caller raw (measured, `RuntimeError`). It fails closed. Wrap it as
+   `InForceAnchorError`, or list it in the docstring.
+2. Both harnesses call `subprocess.run(text=True)` without an encoding. The suite writes UTF-8, and this machine's
+   locale is cp1252, under which `”` (bytes `E2 80 9D`) raises `UnicodeDecodeError` (measured). A failure message
+   holding it crashes the harness. It is loud, not wrong. Pass `encoding="utf-8"`.
+
+### X2H-10 — LOW — the suite does not run the production parser
+
+The suite replaces `yaml.safe_load` with a memoising `CSafeLoader`, and the loader under test goes through it.
+`t_fast_yaml_parser_agrees` proves agreement on the real file only, not on layers or fixtures. A CI build without
+libyaml also crashes. Time-saving is real, and the author disclosed it. Fall back to the Python loader if the C one
+is missing, and keep one test that loads through the unpatched parser.
+
+### X2H-11 — LOW — dead code and cost
+
+`Mutation.drop_threshold` is unused. `_threshold_record`'s last `else` and `_compare_anchor`'s `base not in stored`
+branch are unreachable: (m, None) is always in the set and is checked first. `_US_IN` duplicates `MARKETS`. Step 7
+reloads what steps 5 and 7 already loaded (13 loads for one apply). That is acceptable for a rare operation, but
+caching within one call would shorten the lock.
+
+mypy strict is still unverified, as the author says, and so is Python 3.12 (condition 15).
+
+INPUT - frozen spec section 3.7 (configuration keys) follows:
+
+### 3.7 Non-rule configuration
+
+Every leaf outside `rules` is classified by `CONFIG_KEY_DIRECTIONS`: an ordered table of **exact
+dotted keys** whose last entry is `("**", UNDECIDABLE)`. There is no other wildcard (X2S-11): a key
+that does not exist yet, even under a known prefix such as `turnover.`, gets no direction until a
+reviewed change lists it. The table below lists the 72 directed keys at today's file (v0.2's 71 plus
+`holding.min_sessions`).
+
+| Basis | Change | Direction |
+|---|---|---|
+| **C-37** | Value change on a listed key | By its `KeyDirection`; a same-number re-representation NEUTRAL |
+| **C-38** | Key added or removed | Added: UNDECIDABLE, unless listed `NEUTRAL`. Removed: **LOOSENS**, unless listed `NEUTRAL` |
+| **C-39** | An unlisted key, a type change, a set changed by both adding and removing, or a numeric key turned non-numeric or `null` | UNDECIDABLE |
+
+| Kind | Exact keys |
+|---|---|
+| NEUTRAL (9) | `policy_version`, `metadata.description`, `metadata.authored_by`, `metadata.authored_at`, `cost.verified_monthly_usd.paper`, `cost.verified_monthly_usd.live`, `cost.vm_monthly_usd`, `cost.backup_monthly_usd`, `cost.total_operating_is_complete` |
+| TRUE_LOOSENS (5) | `governance.risk_deny_override_permitted`, `hitl.risk_deny_override_permitted`, `kill_switch.auto_re_enable_permitted`, `fx.system_may_convert`, `llm.may_receive_portfolio_state` |
+| FALSE_LOOSENS (8) | `kill_switch.requires_human_to_re_enable`, `risk_evaluation.evaluate_per_pool`, `risk_evaluation.evaluate_consolidated`, `risk_evaluation.stricter_binds`, `llm.replay_requires_approval`, `llm.replay_offpeak_only`, `account.enforce_settled_cash`, `account.enforce_day_trades` |
+| LOWER_LOOSENS (25) | `governance.min_approvals_to_loosen`, `account.pdt_equity_floor_usd`, `portfolio.min_cash_pct`, `decision.min_edge_multiple_of_cost`, `cost.assumed_round_trip_bps.US`, `cost.assumed_round_trip_bps.IN`, `holding.time_stop_min_return_pct`, **`holding.min_sessions`**, `storage.records_retention_years`, `promotion.min_wf_windows`, `promotion.min_closed_trades`, `promotion.shadow_min_sessions`, `promotion.dsr_threshold`; for each of `US` and `IN`: `universe.<m>.min_addv_position_multiple`, `universe.<m>.min_sessions_history`, `universe.<m>.min_reported_quarters`; `universe.US.min_market_cap_usd`, `universe.US.min_addv_usd_floor`, `universe.US.min_price_usd`, `universe.IN.min_market_cap_inr`, `universe.IN.min_addv_inr_floor`, `universe.IN.min_price_inr` |
+| HIGHER_LOOSENS (23) | `account.pdt_max_day_trades_5d`, `portfolio.max_position_pct`, `portfolio.forced_trim_pct`, `turnover.max_new_entries_per_session`, `turnover.max_nav_traded_pct_per_session`, `holding.time_stop_sessions`, `holding.hard_max_sessions`, `llm.gate_width`, `llm.max_concurrency`, `llm.spend_alarm_warn_usd_month`, `llm.spend_alarm_critical_usd_month`, `latency.exit.stale_bar_critical_seconds`, `dr.rpo_state_seconds`, `dr.rto_safe_minutes`, `dr.rto_operational_hours`, `storage.disk_warn_pct`, `storage.disk_critical_pct`; for each of `US` and `IN`: `universe.<m>.max_instruments`, `universe.<m>.enter_rank`, `universe.<m>.exit_rank` |
+| SET_GROW_LOOSENS (1) | `instrument_allowlist.tradeable` |
+| SET_SHRINK_LOOSENS (1) | `instrument_allowlist.permanently_banned` |
+| UNDECIDABLE | `**` — everything else, last entry |
+
+`<m>` is notation in this table only; the constant lists both exact keys. `holding.min_sessions`
+duplicates HOLD-001 (`gte 3`) and is classified the same way under `[DEFAULT-B1]`; under B1 option
+(B) it returns to the catch-all.
+
+**ADR-09 row 7.** Adding *or removing* an `InstrumentType` needs Owner approval. Here, adding a
+type to `tradeable` is LOOSENS (two identities) and removing one is TIGHTENS (zero). The removal is
+a recorded departure from row 7 (DECISION 21): every applied policy version must carry a valid
+policy signature (SPEC-P1.3 §5.2), and at team size 1 the only enrolled signer is the Owner
+(ASSUMPTION 12). If a non-Owner signer is ever enrolled, P6.2 must require an Owner approval for any
+`instrument_allowlist` change.
+
+INPUT - frozen spec section 5.3 follows:
+
+### 5.3 Applying an authorisation (X2S-3, X2D-1, X2D-3)
+
+An authorisation is bound to four things:
+
+- the exact version it was diffed against, **as recorded in storage, not as a caller describes it**;
+- the exact version it approved;
+- a 24-hour window;
+- one use.
+
+`assert_authorisation_current(auth, conn, old_dir, candidate_dir)` must be called by the writer that
+inserts or reuses the `config_version` rows. It runs inside the same transaction (`conn`), after the
+writer has taken the lock that serialises policy changes. The writer and its lock belong to P1.2 /
+P6.4; this is a precondition they import. Using `conn`, the function itself, in this order:
+
+1. **Reads the store** (X2D-1). Through `IN_FORCE_STORE` (§4), by a fixed query, it reads the in-force
+   `config_hash` of every combination from the store B6 names, and the database clock. There is no
+   parameter through which a hash, lookup or time could be supplied. `IN_FORCE_STORE` is assigned only
+   by the B6 store's module, once a frozen spec defines it, and by tests. **None is assigned by
+   default.** Replacing it at run time is a code change (ADR-09 row 10), not a call argument. **Under
+   `[DEFAULT-B6]`, no frozen spec defines that store yet, so this step raises `InForceAnchorError` and
+   nothing is applied.** A store with no rows at all also raises `InForceAnchorError`: its first rows
+   are the genesis (B6), not an approved change.
+2. **Refuses a used request** (X2F-1, X2G-2). If `IN_FORCE_STORE.request_used(conn, auth.request_id)` is
+   true, it raises `StaleAuthorisationError`. An approval is spent once, even if the version it was given
+   against returns. This comes first, so a replay at any age writes nothing.
+3. **Checks expiry** (X2D-3, ADR-09 row 2, X2F-11), before any other comparison, so an unused request
+   past its 24 h is always recorded as expired, even if it is also stale. The clock is `clock_timestamp()`
+   on `conn`, read after the lock is held, never a caller's or a process clock.
+   `transaction_timestamp()` is not used, because it stands still for as long as a transaction is held
+   open.
+   - `requested_at` after that time raises `ApprovalExpiredError` with `reason` `FUTURE`. Nothing is
+     written, and the request may be retried.
+   - `requested_at` more than `APPROVAL_TTL_HOURS` before it raises `ApprovalExpiredError` with
+     `reason` `EXPIRED`, and the writer records an `APPROVAL_EXPIRED` event (§5.4): the request is
+     denied, not deferred. Exactly `APPROVAL_TTL_HOURS` is not "more than", so it passes.
+4. **Compares the anchor.**
+   - The set of combinations with a current in-force row, united with
+     `derive_combinations(candidate_dir, candidate_dir)`, must equal the authorisation's
+     combination set.
+   - A combination with a stored row must have that hash equal its `old_content_hash`.
+   - A combination (m, e) with no stored row, whose diff carries a `LAYER_ADDED` record for its own
+     env file `e`, is new in this change (X2E-1). It is anchored by the stored row of (m, None),
+     whose hash must equal its `old_content_hash`. This is exact: that env file does not exist in
+     the version in force, so the two are one effective document with one hash (measured).
+   - Any other combination with no stored row, or one the authorisation did not diff, raises
+     `StaleAuthorisationError`.
+5. **Checks the candidate.** The `content_hash` of every combination loaded from `candidate_dir`, with
+   `require_signature=False`, must equal `new_content_hash`.
+6. **Checks the digest.** `authorisation_digest(auth.diffs, auth.request_id, auth.requested_at)` must
+   equal `auth.digest`, or it raises `StaleAuthorisationError`.
+7. **Re-derives the authorisation** (X2F-3). **Step 4 is the anchor; this step is a coherence check.**
+   Every combination loaded from `old_dir` must hash to its `old_content_hash`, which step 4 has proved
+   equal to the store. `_derive_authorisation(old_dir, candidate_dir, auth.approvals, auth.request_id,
+   auth.requested_at)` (§5.2, without its clock check) then runs, and its result must equal `auth`.
+   X2D-1 stays closed: the anchor comes only from the store, and `old_dir` cannot change it. `old_dir` is
+   checked for its effective documents, not its file set: an empty layer file does not change the hash.
+   That can cost only C-41's record, because the effective documents are still fully classified, so a
+   loosening inside a new layer stays gated. Binding the file set would need a stored list of layer
+   names, which this does not justify (X2G-4).
+
+Any `PolicyError` or `PolicyDiffError` from steps 5 to 7, and any difference at step 7, raises
+`StaleAuthorisationError`.
+
+On any failure, no `config_version` row, in-force row or `CONFIG_CHANGED` event is written. For
+`reason` `EXPIRED`, the writer writes and commits `APPROVAL_EXPIRED` (§5.4) and nothing else; every
+other failure writes nothing at all. That event means an authorisation was **presented after its expiry**.
+It is not proof that a real request was refused: step 3 runs before anything authenticates `requested_at`
+(X2G-2). `ApprovalExpiredError` is a `StaleAuthorisationError`, so the
+writer must catch it first. The candidate must then be re-diffed and re-approved against the version
+now in force. With a stored anchor, the measured X2S-3 pattern fails at step 4. That pattern is two
+proposals built on one base, where B's writer passes v1's directory after A is applied. Without a
+stored anchor, nothing is applied at all.
+
+INPUT - frozen spec section 8 follows:
+
+## 8. Error paths
+
+| Condition | Exception / outcome | Fail-closed behaviour |
+|---|---|---|
+| Old or new effective document fails `PolicyDocument` validation, or the loader raises any `PolicyError` | `PolicyDiffError` | No change list; nothing authorised |
+| A document uses `HALT_ENTRIES` before `RuleAction` has it | `PolicyDiffError` (validation) | As above |
+| A market layer for a market not in `MARKETS`, or an invalid env layer name | `PolicyDiffError` | Nothing authorised |
+| `changes` or `diffs` out of canonical order, or duplicated; a `requested_at` that is not a real time | Model validation error → `PolicyDiffError` | Nothing authorised |
+| **Any other exception during derivation or classification** (for example a `TypeError` from an unexpected value shape) | `PolicyDiffError`, chained to the original | Nothing authorised |
+| An action value missing from `ACTION_LADDER` | UNDECIDABLE (C-10) | Two-person; CI already fails by `t_every_action_is_ranked` |
+| A scope value missing from the scope table | UNDECIDABLE (C-13) | Two-person |
+| A bound is a token on one side and a number on the other | UNDECIDABLE (C-05) | Two-person |
+| A set-valued key is not a list on one side; a numeric key turns non-numeric or `null`; an unlisted key | UNDECIDABLE (C-39) | Two-person |
+| A `PolicyChange` whose `basis` is not a row of this spec | Model validation error → `PolicyDiffError` | Nothing authorised |
+| A `Rule` field with no row | Impossible at runtime: `t_every_rule_field_is_classified` fails CI first | — |
+| An approval by an identity not listed in the in-force `governance.signature.approver_key_refs`, a reference that does not resolve (including "no Vault client yet"), a non-Ed25519 key, or a signature that does not verify | `PolicyGovernanceError` | Change refused |
+| No B6 in-force store adapter installed (today, under `[DEFAULT-B6]`), or the store has no rows at all | `InForceAnchorError` (a `StaleAuthorisationError`) | Nothing applied |
+| `requested_at` older than `APPROVAL_TTL_HOURS` by the database clock | `ApprovalExpiredError`, `reason` `EXPIRED` (a `StaleAuthorisationError`) | Request denied; `APPROVAL_EXPIRED` written and committed, nothing else; nothing applied |
+| `requested_at` ahead of the database clock | `ApprovalExpiredError`, `reason` `FUTURE` (a `StaleAuthorisationError`) | Nothing written; the request may be retried |
+| `auth.request_id` already used by an in-force row (X2F-1) | `StaleAuthorisationError` | Nothing written; a new request is needed |
+| A digest mismatch, a candidate that no longer loads, or an authorisation that does not re-derive to itself (X2F-3) | `StaleAuthorisationError` | Nothing written; re-diff and re-approve |
+| Fewer distinct approvers (identity and key) than the version in force requires, with any gated change | `PolicyGovernanceError` | Change refused |
+| At apply time, the **stored** in-force hash or the candidate hash of any combination differs from the authorisation (a combination new in the change compares through its (m, None) row), a row is missing for a combination the in-force files derive, or the combination set differs | `StaleAuthorisationError` | No `config_version` row, in-force row or `CONFIG_CHANGED` written; re-diff and re-approve against the version in force |
+| Every change TIGHTENS or NEUTRAL, with no C-36/C-40/C-41 record | `PolicyAuthorisation` with `required_approvals = "0"` | Caller writes `CONFIG_CHANGED` before the version takes effect (`[CONST-5]`) |
+| Audit write of the authorisation fails | — (caller) | The version does not take effect (`[CONST-5]`) |
+
+---
+
+INPUT - diff of src/config/policy_diff.py follows:
+
+@@ -302,7 +302,4 @@ RULE_FIELDS: Final[frozenset[str]] = frozenset({
+ })
+ 
+-_US_IN: Final[tuple[str, ...]] = ("US", "IN")
+-
+-
+ def _keys(direction: KeyDirection, names: Iterable[str]) -> list[tuple[str, KeyDirection]]:
+     return [(name, direction) for name in names]
+@@ -335,5 +332,5 @@ CONFIG_KEY_DIRECTIONS: Final[tuple[tuple[str, KeyDirection], ...]] = (
+         "storage.records_retention_years", "promotion.min_wf_windows",
+         "promotion.min_closed_trades", "promotion.shadow_min_sessions", "promotion.dsr_threshold",
+-        *(f"universe.{m}.{k}" for m in _US_IN for k in (
++        *(f"universe.{m}.{k}" for m in MARKETS for k in (
+             "min_addv_position_multiple", "min_sessions_history", "min_reported_quarters")),
+         "universe.US.min_market_cap_usd", "universe.US.min_addv_usd_floor",
+@@ -349,5 +346,5 @@ CONFIG_KEY_DIRECTIONS: Final[tuple[tuple[str, KeyDirection], ...]] = (
+         "dr.rpo_state_seconds", "dr.rto_safe_minutes", "dr.rto_operational_hours",
+         "storage.disk_warn_pct", "storage.disk_critical_pct",
+-        *(f"universe.{m}.{k}" for m in _US_IN for k in (
++        *(f"universe.{m}.{k}" for m in MARKETS for k in (
+             "max_instruments", "enter_rank", "exit_rank")),
+     )),
+@@ -374,5 +371,4 @@ _SCOPE_REASONS: Final[Mapping[frozenset[str], str]] = {
+ 
+ _MAX_VALUE: Final = Comparison.LTE, Comparison.LT
+-_MIN_VALUE: Final = Comparison.GTE, Comparison.GT
+ _NO_CONSTANT: Final = Comparison.IN, Comparison.NOT_IN, Comparison.EXISTS, Comparison.MULTIPLE_OF
+ _THRESHOLD_SOURCES: Final = "threshold", "threshold_ref", "threshold_input"
+@@ -409,7 +405,50 @@ def _canon(v: Any) -> str | None:
+ 
+ def _as_set(v: Iterable[Any] | None) -> frozenset[str] | None:
++    """For display in a record. Compare with `_members`."""
+     return None if v is None else frozenset(str(_canon(x)) for x in v)
+ 
+ 
++def _identity(v: Any) -> tuple[Any, ...]:
++    """An injective form of a value, for comparison.
++
++    `_canon` is for display and is not injective: False and "False", 1 and "1", or ["a,b"] and
++    ["a", "b"] each give one string. Comparing on it would hide a type change, so a real change
++    would produce no record at all (X2H-2).
++    """
++    if v is None:
++        return ("none",)
++    if isinstance(v, Enum):
++        return ("enum", v.value)
++    if isinstance(v, BaseModel):
++        return ("model", _identity(v.model_dump()))
++    if isinstance(v, bool):
++        return ("bool", v)
++    if isinstance(v, (int, float, Decimal)):
++        return ("number", str(Decimal(str(v))))
++    if isinstance(v, str):
++        return ("str", v)
++    if isinstance(v, Mapping):
++        return ("map", tuple(sorted(((repr(k), _identity(x)) for k, x in v.items()), key=repr)))
++    if isinstance(v, (list, tuple)):
++        return ("list", tuple(_identity(x) for x in v))
++    if isinstance(v, (set, frozenset)):
++        return ("set", tuple(sorted((_identity(x) for x in v), key=repr)))
++    return ("other", type(v).__name__, repr(v))
++
++
++def _members(v: Iterable[Any] | None) -> frozenset[tuple[Any, ...]] | None:
++    """Set members for comparison. Absent stays distinct from empty."""
++    return None if v is None else frozenset(_identity(x) for x in v)
++
++
++def _kind(v: Any) -> str:
++    """The scalar kind of a config value. A change of kind has no direction (C-39)."""
++    if isinstance(v, bool):
++        return "bool"
++    if isinstance(v, (int, float, Decimal)):
++        return "number"
++    return "string" if isinstance(v, str) else type(v).__name__
++
++
+ def _num(v: Any) -> Decimal | None:
+     if isinstance(v, bool) or v is None:
+@@ -421,11 +460,13 @@ def _num(v: Any) -> Decimal | None:
+ 
+ 
+-def _set_move(old: frozenset[str], new: frozenset[str], *, grow: Direction,
++def _set_move(old: Iterable[Any] | None, new: Iterable[Any] | None, *, grow: Direction,
+               shrink: Direction) -> Direction:
+-    if old == new:
++    """Direction of a set change, compared on `_members`."""
++    a, b = _members(old) or frozenset(), _members(new) or frozenset()
++    if a == b:
+         return Direction.NEUTRAL
+-    if new > old:
++    if b > a:
+         return grow
+-    if new < old:
++    if b < a:
+         return shrink
+     return Direction.UNDECIDABLE
+@@ -530,6 +571,6 @@ def _differs(old: Rule, new: Rule, field: str) -> bool:
+     a, b = getattr(old, field), getattr(new, field)
+     if field in _SET_FIELDS:
+-        return _as_set(a) != _as_set(b)
+-    return _canon(a) != _canon(b)
++        return _members(a) != _members(b)
++    return _identity(a) != _identity(b)
+ 
+ 
+@@ -554,9 +595,7 @@ def _threshold_record(old: Rule, new: Rule, out: _Records) -> None:
+         d = (Direction.LOOSENS if y > x else Direction.TIGHTENS if y < x else Direction.NEUTRAL)
+         out.add("threshold", a, b, d, "C-01", f"{comparison.value}: {x} -> {y}")
+-    elif comparison in _MIN_VALUE:
++    else:
+         d = (Direction.TIGHTENS if y > x else Direction.LOOSENS if y < x else Direction.NEUTRAL)
+         out.add("threshold", a, b, d, "C-02", f"{comparison.value}: {x} -> {y}")
+-    else:
+-        out.add("threshold", a, b, Direction.UNDECIDABLE, "C-04", "no ordered comparison")
+ 
+ 
+@@ -580,19 +619,20 @@ def _predicate_records(old: Rule, new: Rule, out: _Records) -> None:
+                     "the threshold source switched" if switched else what)
+     if _differs(old, new, "allowed_values"):
+-        a, b = _as_set(old.allowed_values) or frozenset(), _as_set(new.allowed_values) or frozenset()
++        a, b = old.allowed_values, new.allowed_values
+         if new.comparison is Comparison.IN:
+             d = _set_move(a, b, grow=Direction.LOOSENS, shrink=Direction.TIGHTENS)
+-            out.add("allowed_values", a, b, d, "C-20", "under `in` the set is the permitted set")
++            out.add("allowed_values", _as_set(a), _as_set(b), d, "C-20",
++                    "under `in` the set is the permitted set")
+         else:
+-            out.add("allowed_values", a, b, Direction.UNDECIDABLE, "C-21",
++            out.add("allowed_values", _as_set(a), _as_set(b), Direction.UNDECIDABLE, "C-21",
+                     f"{new.comparison.value} has no stated set semantics")
+     if _differs(old, new, "disallowed_values"):
+-        a, b = (_as_set(old.disallowed_values) or frozenset(),
+-                _as_set(new.disallowed_values) or frozenset())
++        a, b = old.disallowed_values, new.disallowed_values
+         if new.comparison is Comparison.NOT_IN:
+             d = _set_move(a, b, grow=Direction.TIGHTENS, shrink=Direction.LOOSENS)
+-            out.add("disallowed_values", a, b, d, "C-22", "the complement of the permitted set")
++            out.add("disallowed_values", _as_set(a), _as_set(b), d, "C-22",
++                    "the complement of the permitted set")
+         else:
+-            out.add("disallowed_values", a, b, Direction.UNDECIDABLE, "C-23",
++            out.add("disallowed_values", _as_set(a), _as_set(b), Direction.UNDECIDABLE, "C-23",
+                     f"{new.comparison.value} has no stated set semantics")
+     if _differs(old, new, "allowed_values_ref"):
+@@ -625,7 +665,8 @@ def _modify_records(old: Rule, new: Rule, action: Direction, out: _Records) -> N
+         out.add("modify.target", a.target, b.target, Direction.UNDECIDABLE, "C-30",
+                 "a different quantity")
+-    if _canon(a.to) != _canon(b.to):
+-        x, y = _num(a.to), _num(b.to)
+-        if x is not None and y is not None and a.target == b.target and a.target.endswith("_pct"):
++    if _identity(a.to) != _identity(b.to):
++        if (isinstance(a.to, Decimal) and isinstance(b.to, Decimal) and a.target == b.target
++                and a.target.endswith("_pct")):
++            x, y = a.to, b.to
+             d = (Direction.LOOSENS if y > x else Direction.TIGHTENS if y < x
+                  else Direction.NEUTRAL)
+@@ -667,7 +708,6 @@ def _rule_field_changes(old: Rule, new: Rule) -> list[PolicyChange]:
+         _modify_records(old, new, action_change, out)
+     if _differs(old, new, "allowed_values_emergency"):
+-        a = _as_set(old.allowed_values_emergency) or frozenset()
+-        b = _as_set(new.allowed_values_emergency) or frozenset()
+-        out.add("allowed_values_emergency", a, b,
++        a, b = old.allowed_values_emergency, new.allowed_values_emergency
++        out.add("allowed_values_emergency", _as_set(a), _as_set(b),
+                 _set_move(a, b, grow=Direction.LOOSENS, shrink=Direction.TIGHTENS), "C-24",
+                 "the permitted set for an emergency exit")
+@@ -779,12 +819,21 @@ def _displacement_records(old: Mapping[str, Rule], new: Mapping[str, Rule],
+ 
+ def _leaves(obj: Any, prefix: str = "") -> dict[str, Any]:
+-    """Flatten to dotted paths. A list of mappings flattens by index; a list of scalars is a leaf."""
++    """Flatten to dotted paths, one path per leaf. A list of mappings flattens by index, as
++    `a[0].b`; a list of scalars, or an empty container, is a leaf.
++
++    A path must name exactly one leaf. A key holding a dot or a bracket could collide with another
++    leaf's path, and the overwritten value would hide a real change with no record (X2H-1). The
++    loader accepts such a key, so it is refused here. No legitimate key has one.
++    """
+     out: dict[str, Any] = {}
+-    if isinstance(obj, Mapping):
++    if isinstance(obj, Mapping) and obj:
+         for k, v in obj.items():
++            if not isinstance(k, str) or not k or set(k) & set(".[]"):
++                raise PolicyDiffError(f"config key {k!r} under {prefix!r} cannot be classified: "
++                                      f"it must be a non-empty string without . [ or ]")
+             out.update(_leaves(v, f"{prefix}{k}."))
+     elif isinstance(obj, (list, tuple)) and any(isinstance(x, (Mapping, list, tuple)) for x in obj):
+         for i, v in enumerate(obj):
+-            out.update(_leaves(v, f"{prefix}{i}."))
++            out.update(_leaves(v, f"{prefix.rstrip('.')}[{i}]."))
+     else:
+         out[prefix.rstrip(".")] = obj
+@@ -797,16 +846,17 @@ def _config_value(path: str, old: Any, new: Any) -> tuple[Direction, str, str]:
+     if kind is KeyDirection.UNDECIDABLE:
+         return Direction.UNDECIDABLE, "C-39", "an unlisted key"
+-    if kind is KeyDirection.NEUTRAL:
+-        return Direction.NEUTRAL, "C-37", "informational key"
+     if kind in (KeyDirection.SET_GROW_LOOSENS, KeyDirection.SET_SHRINK_LOOSENS):
+         if not isinstance(old, (list, tuple)) or not isinstance(new, (list, tuple)):
+             return Direction.UNDECIDABLE, "C-39", "a set-valued key is not a list on both sides"
+-        a, b = _as_set(old) or frozenset(), _as_set(new) or frozenset()
+         grow_loosens = kind is KeyDirection.SET_GROW_LOOSENS
+-        d = _set_move(a, b, grow=Direction.LOOSENS if grow_loosens else Direction.TIGHTENS,
++        d = _set_move(old, new, grow=Direction.LOOSENS if grow_loosens else Direction.TIGHTENS,
+                       shrink=Direction.TIGHTENS if grow_loosens else Direction.LOOSENS)
+         if d is Direction.UNDECIDABLE:
+             return d, "C-39", "the set changed by both adding and removing"
+         return d, "C-37", kind.value
++    if _kind(old) != _kind(new):
++        return Direction.UNDECIDABLE, "C-39", f"a type change: {_kind(old)} -> {_kind(new)}"
++    if kind is KeyDirection.NEUTRAL:
++        return Direction.NEUTRAL, "C-37", "informational key"
+     if kind in (KeyDirection.TRUE_LOOSENS, KeyDirection.FALSE_LOOSENS):
+         if not isinstance(old, bool) or not isinstance(new, bool):
+@@ -843,6 +893,6 @@ def _config_changes(old: Mapping[str, Any], new: Mapping[str, Any]) -> list[Poli
+                                               KeyDirection.SET_SHRINK_LOOSENS)
+             both_lists = isinstance(a[path], (list, tuple)) and isinstance(b[path], (list, tuple))
+-            same = (_as_set(a[path]) == _as_set(b[path]) if set_key and both_lists
+-                    else _canon(a[path]) == _canon(b[path]))
++            same = (_members(a[path]) == _members(b[path]) if set_key and both_lists
++                    else _identity(a[path]) == _identity(b[path]))
+             if same:
+                 continue
+@@ -990,5 +1040,5 @@ def _load(directory: Path, market: str | None, environment: str | None) -> Effec
+         return PolicyLoader(directory).load(market=market, environment=environment,
+                                             require_signature=False)
+-    except PolicyError as exc:
++    except Exception as exc:  # noqa: BLE001 - §8: any failure here authorises nothing
+         raise PolicyDiffError(f"{directory} does not load for ({market}, {environment}): "
+                               f"{exc}") from exc
+@@ -1187,8 +1237,5 @@ def _compare_anchor(auth: PolicyAuthorisation,
+             anchor = stored[combo]
+         elif diff.environment is not None and _adds_own_env(diff):
+-            base = (diff.market, None)
+-            if base not in stored:
+-                raise StaleAuthorisationError(f"{combo}: no row for {base} to anchor it")
+-            anchor = stored[base]
++            anchor = stored.get((diff.market, None))
+         else:
+             raise StaleAuthorisationError(f"{combo}: no in-force row")
+@@ -1226,6 +1273,6 @@ def assert_authorisation_current(auth: PolicyAuthorisation, conn: Any, old_dir:
+     Postconditions: returns only if the request is unused and unexpired, every stored hash matches,
+     the candidate is what was approved, and the authorisation re-derives to itself.
+-    Raises: `InForceAnchorError` if no store is installed or it has no rows (always, until a frozen
+-    spec defines the store). `ApprovalExpiredError` on a future or expired request, which the
++    Raises: `InForceAnchorError` if no store is installed, it cannot be read, or it has no rows
++    (always, until a frozen spec defines the store). `ApprovalExpiredError` on a future or expired request, which the
+     writer catches first; only `reason == "EXPIRED"` writes an event. `StaleAuthorisationError`
+     otherwise. On any raise, the writer writes no version.
+@@ -1234,12 +1281,16 @@ def assert_authorisation_current(auth: PolicyAuthorisation, conn: Any, old_dir:
+         raise InForceAnchorError("no in-force store is installed (SPEC-P1.3.1 B6): nothing can "
+                                  "be applied by this path")
+-    stored = IN_FORCE_STORE.in_force_hashes(conn)
++    try:
++        stored = IN_FORCE_STORE.in_force_hashes(conn)
++        now = IN_FORCE_STORE.database_time(conn)
++        used = IN_FORCE_STORE.request_used(conn, auth.request_id)
++    except Exception as exc:  # noqa: BLE001 - an unreadable store applies nothing
++        raise InForceAnchorError("the in-force store could not be read") from exc
+     if not stored:
+         raise InForceAnchorError("the in-force store has no rows: its first rows are the genesis, "
+                                  "not an approved change")
+-    now = IN_FORCE_STORE.database_time(conn)
+     if now.tzinfo is None:
+         raise InForceAnchorError("the store returned a naive clock")
+-    if IN_FORCE_STORE.request_used(conn, auth.request_id):
++    if used:
+         raise StaleAuthorisationError(f"request {auth.request_id} has already been applied")
+     _check_age(auth.requested_at, now, auth.request_id)
+
+
+INPUT - diff of tests/mutate_x5r_g9.py follows:
+
+@@ -19,4 +19,9 @@ Each mutated policy must still LOAD. In the five-mutation run a policy that does
+ The sweep runs only the pin tests (P13_PINS_ONLY), because attribution reads nothing else and
+ 486 full runs in both modes would take hours. SPEC DEVIATION, recorded in the X1 notes.
++
++Every run first requires the suites to pass on the unmutated repository, in both modes: a suite that
++is already red kills every mutation and proves nothing. The sweep then requires the literal counts of
++§7.5, because a harness that exits 0 with nothing tested is worse than no harness. #17's reviewed edit
++changes these literals with the policy, as it does the pins.
+ """
+ from __future__ import annotations
+@@ -54,4 +59,8 @@ CONSTITUTIONAL = ("EXP-001", "EXP-002", "EXP-003", "EXP-004", "LOSS-001", "LOSS-
+ 
+ 
++SWEEP_GENERATED = 582
++SWEEP_LOADABLE = 486
++
++
+ @dataclass(frozen=True)
+ class Mutation:
+@@ -59,5 +68,4 @@ class Mutation:
+     field: str
+     value: object
+-    drop_threshold: bool = False
+ 
+     @property
+@@ -150,5 +158,6 @@ def _loads(dst: Path) -> bool:
+ 
+ def _env(pins_only: bool) -> dict[str, str]:
+-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
++    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
++    env.pop("P13_PINS_ONLY", None)
+     if pins_only:
+         env["P13_PINS_ONLY"] = "1"
+@@ -158,6 +167,6 @@ def _env(pins_only: bool) -> dict[str, str]:
+ def _killed_in(dst: Path, suite: str, m: Mutation, optimise: bool, pins_only: bool) -> bool:
+     cmd = [sys.executable] + (["-O"] if optimise else []) + [suite]
+-    r = subprocess.run(cmd, cwd=dst, capture_output=True, text=True, check=False,
+-                       env=_env(pins_only))
++    r = subprocess.run(cmd, cwd=dst, capture_output=True, text=True, encoding="utf-8",
++                       errors="replace", check=False, env=_env(pins_only))
+     if r.returncode == 0:
+         return False
+@@ -173,4 +182,15 @@ def _passes(dst: Path, suite: str, optimise: bool) -> bool:
+ 
+ 
++def baseline_is_green(suites: Sequence[str]) -> bool:
++    """Every suite must pass, in both modes, before a mutation can mean anything."""
++    ok = True
++    for suite in suites:
++        for optimise in (False, True):
++            if not _passes(ROOT, suite, optimise):
++                print(f"[BASELINE FAILED] {suite}{' -O' if optimise else ''}")
++                ok = False
++    return ok
++
++
+ def run_one(m: Mutation, args: argparse.Namespace, stub: Path | None) -> str:
+     """One of KILLED, SURVIVED, INVALID, or FAILS-MUST-PASS."""
+@@ -201,4 +221,6 @@ def main() -> int:
+     args = ap.parse_args()
+ 
++    if not baseline_is_green([args.must_fail, *args.must_pass]):
++        return 1
+     mutations = sweep_mutations() if args.sweep else list(FIVE)
+     with tempfile.TemporaryDirectory() as d:
+@@ -224,6 +246,10 @@ def main() -> int:
+     if counts.get("INVALID") and not args.sweep:
+         return 1
++    loadable = len(mutations) - counts.get("INVALID", 0)
++    if args.sweep and (len(mutations), loadable) != (SWEEP_GENERATED, SWEEP_LOADABLE):
++        print(f"[COUNT] expected {SWEEP_GENERATED} generated and {SWEEP_LOADABLE} loadable (§7.5)")
++        return 1
+     wanted = "SURVIVED" if args.negative_control else "KILLED"
+-    return 0 if counts.get(wanted, 0) == len(mutations) - counts.get("INVALID", 0) else 1
++    return 0 if counts.get(wanted, 0) == loadable else 1
+ 
+ 
+
+
+INPUT - diff of tests/mutate_policy_diff_code.py follows:
+
+@@ -12,4 +12,10 @@ nothing would report a test as proven when it proved nothing.
+ 
+ `--negative-control` stubs the named tests and exits 0 only if every mutation is reported uncaught.
++
++The suite must first pass on the unmutated source, in both modes. Without that, a test that always
++fails would give every mutation naming it a CAUGHT it did not earn.
++
++M-1 to M-30 are §7.7's table. M-31 onward are what the X2 of the code found: its mutants survived the
++first suite, so each is held here with the test that now kills it, and the rest guard its fixes.
+ """
+ from __future__ import annotations
+@@ -64,4 +70,83 @@ class CodeMutation:
+ 
+ 
++
++_SET_FIELDS_TEXT = ('_SET_FIELDS: Final = ("allowed_values", "allowed_values_emergency", "disallowed_values",\n'
++                    '                      "exempts", "inputs")')
++_DIGEST_FIELDS = ('"old_content_hash": d.old_content_hash, "new_content_hash": d.new_content_hash}\n'
++                  '            for d in diffs')
++_CHECKS = ("    for diff in auth.diffs:\n"
++           "        if _load(candidate_dir, diff.market, diff.environment).content_hash != diff.new_content_hash:\n"
++           "            raise StaleAuthorisationError(\n"
++           '                f"({diff.market}, {diff.environment}): the candidate changed after approval")\n')
++_DIGEST_CHECK = ("    if authorisation_digest(auth.diffs, auth.request_id, auth.requested_at) != auth.digest:\n"
++                 '        raise StaleAuthorisationError("the digest does not match the authorisation")\n')
++_FILES = ("    _compare_anchor(auth, stored, candidate_dir)\n    try:\n"
++          "        _check_files(auth, old_dir, candidate_dir)\n    except StaleAuthorisationError:\n"
++          "        raise\n    except PolicyError as exc:\n"
++          '        raise StaleAuthorisationError(f"the authorisation could not be re-checked: {exc}") from exc\n')
++_FILES_FIRST = ("    try:\n"
++                "        _check_files(auth, old_dir, candidate_dir)\n    except StaleAuthorisationError:\n"
++                "        raise\n    except PolicyError as exc:\n"
++                '        raise StaleAuthorisationError(f"the authorisation could not be re-checked: {exc}") from exc\n'
++                "    _compare_anchor(auth, stored, candidate_dir)\n")
++
++#: (name, edits, named tests). The X2 of the code wrote the first group as F01 to F43.
++_X2_MUTANTS: tuple[tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]], ...] = (
++    ("approver keys read from the NEW version", (("keys = _approver_map(_load(old_dir, None, None))", "keys = _approver_map(_load(new_dir, None, None))"),), ("t_keys_come_from_the_in_force_base",)),
++    ("approval count from (None, None) only", (("min_approvals_to_loosen for d in diffs)", "min_approvals_to_loosen for d in diffs[:1])"),), ("t_count_uses_every_old_document",)),
++    ("approval count takes the minimum", (("required = max(_load(old_dir, d.market", "required = min(_load(old_dir, d.market"),), ("t_count_uses_every_old_document",)),
++    ("digest omits request_id", (('        "request_id": request_id,\n        "requested_at": requested_at,', '        "requested_at": requested_at,'),), ("t_digest_known_answer",)),
++    ("digest omits old_content_hash", ((_DIGEST_FIELDS, '"new_content_hash": d.new_content_hash}\n            for d in diffs'),), ("t_digest_known_answer",)),
++    ("digest omits new_content_hash", ((_DIGEST_FIELDS, '"old_content_hash": d.old_content_hash}\n            for d in diffs'),), ("t_digest_known_answer",)),
++    ("digest omits market and environment", (('{"market": d.market or "", "environment": d.environment or "",\n             "old_content_hash"', '{\n             "old_content_hash"'),), ("t_digest_known_answer",)),
++    ("TRUE_LOOSENS inverted", (("loosens = new if kind is KeyDirection.TRUE_LOOSENS else not new", "loosens = not new"),), ("t_key_kind_directions",)),
++    ("bool guard on boolean keys removed", (('        if not isinstance(old, bool) or not isinstance(new, bool):\n            return Direction.UNDECIDABLE, "C-39", "a boolean key is not a bool on both sides"\n', ""),), ("t_c39",)),
++    ("a numeric key turned non-numeric is NEUTRAL", (('return Direction.UNDECIDABLE, "C-39", "a numeric key is not numeric on both sides"', 'return Direction.NEUTRAL, "C-37", "a numeric key is not numeric on both sides"'),), ("t_c39",)),
++    ("a set-valued key not a list is NEUTRAL", (('return Direction.UNDECIDABLE, "C-39", "a set-valued key is not a list on both sides"', 'return Direction.NEUTRAL, "C-37", "a set-valued key is not a list on both sides"'),), ("t_c39",)),
++    ("forced_trim_pct moved to LOWER_LOOSENS", (('"account.pdt_max_day_trades_5d", "portfolio.max_position_pct", "portfolio.forced_trim_pct",', '"account.pdt_max_day_trades_5d", "portfolio.max_position_pct",'), ('"governance.min_approvals_to_loosen", "account.pdt_equity_floor_usd",', '"governance.min_approvals_to_loosen", "account.pdt_equity_floor_usd", "portfolio.forced_trim_pct",'),), ("t_every_key_direction_is_pinned",)),
++    ("requires_human moved to TRUE_LOOSENS", (('"kill_switch.requires_human_to_re_enable", "risk_evaluation.evaluate_per_pool",', '"risk_evaluation.evaluate_per_pool",'), ('"governance.risk_deny_override_permitted", "hitl.risk_deny_override_permitted",', '"governance.risk_deny_override_permitted", "hitl.risk_deny_override_permitted", "kill_switch.requires_human_to_re_enable",'),), ("t_every_key_direction_is_pinned",)),
++    ("C-40 trigger 3 ignores allowed_values_ref", (("reads_config = rule.threshold_ref is not None or rule.allowed_values_ref is not None", "reads_config = rule.threshold_ref is not None"),), ("t_c40",)),
++    ("no C-41 record for policy.override.yaml", (('    out = [("policy.override.yaml", "layers.override")]\n', "    out: list[tuple[str, str]] = []\n"),), ("t_c41",)),
++    ("C-40 ignores the mode of R", (("return (rule.mode is RuleMode.ENFORCE and can_kill\n", "return (can_kill\n"),), ("t_c40",)),
++    ("C-40 takes G from the new version", (("if global_id in new and _global_kill(old[global_id]) and rule_id < global_id:", "if global_id in new and _global_kill(new[global_id]) and rule_id < global_id:"),), ("t_c40",)),
++    ("C-40 trigger 2 counts NEUTRAL records", (("if c.rule_id is not None and c.direction is not Direction.NEUTRAL\n", "if c.rule_id is not None\n"),), ("t_c40",)),
++    ("C-40 trigger 3 counts NEUTRAL config records", (("config_moved = any(c.kind in _CONFIG_KINDS and c.direction is not Direction.NEUTRAL\n", "config_moved = any(c.kind in _CONFIG_KINDS\n"),), ("t_c40",)),
++    ("C-29 applied to a non-pct target", (('and a.target.endswith("_pct")):', "):"),), ("t_c30",)),
++    ("non-Ed25519 guard removed", (('    if not isinstance(key, Ed25519PublicKey):\n        raise PolicyGovernanceError(f"approver {identity}: the key is not Ed25519")\n', ""),), ("t_key_must_be_ed25519",)),
++    ("FUTURE boundary includes now", (("    if then > now:\n", "    if then >= now:\n"),), ("t_expiry",)),
++    ("C-03 same number is UNDECIDABLE", (("        same = x == y\n", "        same = False\n"),), ("t_c03",)),
++    ("unknown basis accepted by the model", (('        if self.basis not in CLASSIFICATION_BASES:\n            raise ValueError(f"unknown classification basis {self.basis}")\n', ""),), ("t_models",)),
++    ("rule_id iff check removed", (('        if (self.kind in _RULE_KINDS) != (self.rule_id is not None):\n            raise ValueError("rule_id is set iff the change is about a rule")\n', ""),), ("t_models",)),
++    ("an addition may carry an old value", (('        if self.kind in added and self.old is not None:\n            raise ValueError("an addition has no old value")\n', ""),), ("t_models",)),
++    ("naive clock check removed", (('    if now.tzinfo is None:\n        raise InForceAnchorError("the store returned a naive clock")\n', ""),), ("t_store_failures",)),
++    ("unknown candidate layer not wrapped", (('    try:\n        candidate = set(derive_combinations(candidate_dir, candidate_dir))\n    except PolicyDiffError as exc:\n        raise StaleAuthorisationError(f"the candidate has an unknown layer: {exc}") from exc\n', "    candidate = set(derive_combinations(candidate_dir, candidate_dir))\n"),), ("t_store_failures",)),
++    ("anchor accepts a LAYER_ADDED for any layer", (("return any(c.kind is ChangeKind.LAYER_ADDED and c.path == path for c in diff.changes)", "return any(c.kind is ChangeKind.LAYER_ADDED for c in diff.changes)"),), ("t_anchor_needs_its_own_layer",)),
++    ("key source is the US document", (("keys = _approver_map(_load(old_dir, None, None))", 'keys = _approver_map(_load(old_dir, "US", None))'),), ("t_keys_come_from_the_in_force_base",)),
++    ("C-08 joint fields omit the refs", (('_PREDICATE_FIELDS: Final = (*_THRESHOLD_SOURCES, "allowed_values", "disallowed_values",\n                            "allowed_values_ref")', '_PREDICATE_FIELDS: Final = ("threshold", "allowed_values", "disallowed_values")'),), ("t_c08",)),
++    ("inputs compared as a list", ((_SET_FIELDS_TEXT, '_SET_FIELDS: Final = ("allowed_values", "allowed_values_emergency", "disallowed_values",\n                      "exempts")'),), ("t_order_is_not_a_change",)),
++    ("exempts and allowed_values compared as lists", ((_SET_FIELDS_TEXT, '_SET_FIELDS: Final = ("inputs",)'),), ("t_order_is_not_a_change",)),
++    ("a duplicate approver in the map tolerated", (("if name in out or not isinstance(entry, Mapping):", "if not isinstance(entry, Mapping):"),), ("t_approver_map_is_normalised",)),
++    ("identities in the map not normalised", (("    return identity.strip().lower()\n", "    return identity\n"),), ("t_approver_map_is_normalised",)),
++    ("same-number config change not NEUTRAL", (('    if x == y:\n        return Direction.NEUTRAL, "C-37", "same number, re-represented"\n', ""),), ("t_c37",)),
++    ("digest checked before the candidate", ((_CHECKS + _DIGEST_CHECK, _DIGEST_CHECK + _CHECKS),), ("t_check_order",)),
++    ("anchor compared after the files", ((_FILES, _FILES_FIRST),), ("t_first_env_layer",)),
++    ("approvals not re-verified at step 7", (("    derived = _derive_authorisation(old_dir, candidate_dir, auth.approvals, auth.request_id,\n                                    auth.requested_at)\n    if derived != auth:\n", "    derived = auth if not auth.approvals else _derive_authorisation(old_dir, candidate_dir, (), auth.request_id, auth.requested_at)\n    if derived != auth:\n"),), ("t_stripped_authorisation",)),
++    ("C-36 skipped for an existing grantor", (("before = set(old[grantor].exempts) if grantor in old else set()", "before = set(new[grantor].exempts) if grantor in old else set()"),), ("t_c26",)),
++    ("C-41 stops at the first layer removed", (("            out.append(PolicyChange(kind=ChangeKind.LAYER_REMOVED, path=path, rule_id=None,\n", "            return [PolicyChange(kind=ChangeKind.LAYER_REMOVED, path=path, rule_id=None,\n"), ('                                    reason="a layer file disappeared"))\n', '                                    reason="a layer file disappeared")]\n'),), ("t_c41",)),
++    ("a removed NEUTRAL key is LOOSENS", (("d = Direction.NEUTRAL if neutral else Direction.LOOSENS", "d = Direction.LOOSENS"),), ("t_c38",)),
++    ("the C-13 reason lost", (('return Direction.UNDECIDABLE, "C-13", _SCOPE_REASONS.get(frozenset((old, new)), "unranked")', 'return Direction.UNDECIDABLE, "C-13", "R1"'),), ("t_c13", "t_every_scope_pair_is_classified")),
++    # The fixes for X2H-1, X2H-2, X2H-6 and X2H-9.
++    ("the dotted-key refusal removed", (('            if not isinstance(k, str) or not k or set(k) & set(".[]"):\n                raise PolicyDiffError(f"config key {k!r} under {prefix!r} cannot be classified: "\n                                      f"it must be a non-empty string without . [ or ]")\n', ""),), ("t_dotted_keys_are_refused",)),
++    ("config values compared on the display string", (("else _identity(a[path]) == _identity(b[path]))", "else _canon(a[path]) == _canon(b[path]))"),), ("t_type_changes_are_recorded",)),
++    ("the type-change check removed", (("    if _kind(old) != _kind(new):\n", "    if False:\n"),), ("t_type_changes_are_recorded",)),
++    ("set members compared on the display string", (("    return None if v is None else frozenset(_identity(x) for x in v)\n", "    return None if v is None else frozenset((str(_canon(x)),) for x in v)\n"),), ("t_type_changes_are_recorded",)),
++    ("an empty mapping gives no leaf", (("    if isinstance(obj, Mapping) and obj:\n", "    if isinstance(obj, Mapping):\n"),), ("t_type_changes_are_recorded",)),
++    ("modify.to compared on the display string", (("    if _identity(a.to) != _identity(b.to):\n", "    if _canon(a.to) != _canon(b.to):\n"),), ("t_type_changes_are_recorded",)),
++    ("_load catches only PolicyError", (('    except Exception as exc:  # noqa: BLE001 - §8: any failure here authorises nothing\n        raise PolicyDiffError(f"{directory} does not load', '    except PolicyError as exc:\n        raise PolicyDiffError(f"{directory} does not load'),), ("t_loader_failures_are_refused",)),
++    ("an adapter failure escapes", (("    except Exception as exc:  # noqa: BLE001 - an unreadable store applies nothing\n", "    except KeyError as exc:\n"),), ("t_store_failures",)),
++)
++EXTRA = tuple(CodeMutation(f"M-{31 + i} {name}", edits, tests)
++              for i, (name, edits, tests) in enumerate(_X2_MUTANTS))
++
+ MUTATIONS = (
+     CodeMutation("M-1 requires_two_person excludes UNDECIDABLE", (
+@@ -119,9 +204,17 @@ MUTATIONS = (
+          'if n.startswith(("policy.env.",))'),), ("t_combinations_are_derived",)),
+     CodeMutation("M-15 the in-force reference read from a directory", (
+-        ("stored = IN_FORCE_STORE.in_force_hashes(conn)",
+-         "stored = {(d.market, d.environment): _load(old_dir, d.market, d.environment).content_hash"
+-         " for d in auth.diffs}"),
+-        ("    if IN_FORCE_STORE is None:\n        raise InForceAnchorError(",
+-         "    if False:\n        raise InForceAnchorError("),),
++        ("""    if IN_FORCE_STORE is None:
++        raise InForceAnchorError("no in-force store is installed (SPEC-P1.3.1 B6): nothing can "
++                                 "be applied by this path")
++    try:
++        stored = IN_FORCE_STORE.in_force_hashes(conn)
++        now = IN_FORCE_STORE.database_time(conn)
++        used = IN_FORCE_STORE.request_used(conn, auth.request_id)
++    except Exception as exc:  # noqa: BLE001 - an unreadable store applies nothing
++        raise InForceAnchorError("the in-force store could not be read") from exc
++""", """    stored = {(d.market, d.environment): _load(old_dir, d.market, d.environment).content_hash
++              for d in auth.diffs}
++    now, used = datetime.now(timezone.utc), False
++"""),),
+         ("t_anchor_stale_base", "t_no_adapter")),
+     CodeMutation("M-16 signature verification skipped", (
+@@ -176,5 +269,6 @@ MUTATIONS = (
+         ("t_conn_reaches_only_the_store_adapter",)),
+     CodeMutation("M-26 the request_used check removed", (
+-        ("if IN_FORCE_STORE.request_used(conn, auth.request_id):", "if False:"),), ("t_replay",)),
++        ("    if used:\n        raise StaleAuthorisationError(",
++         "    if False:\n        raise StaleAuthorisationError("),), ("t_replay",)),
+     CodeMutation("M-27 the re-derivation at step 7 removed", (
+         ("    derived = _derive_authorisation(old_dir, candidate_dir, auth.approvals, auth.request_id,\n"
+@@ -191,11 +285,12 @@ MUTATIONS = (
+          '        return Direction.UNDECIDABLE, "C-42"\n', ""),), ("t_c42",)),
+     CodeMutation("M-30 the used-request check moved after expiry", (
+-        ("    if IN_FORCE_STORE.request_used(conn, auth.request_id):\n"
++        ("    if used:\n"
+          '        raise StaleAuthorisationError(f"request {auth.request_id} has already been applied")\n'
+          "    _check_age(auth.requested_at, now, auth.request_id)\n",
+          "    _check_age(auth.requested_at, now, auth.request_id)\n"
+-         "    if IN_FORCE_STORE.request_used(conn, auth.request_id):\n"
++         "    if used:\n"
+          '        raise StaleAuthorisationError(f"request {auth.request_id} has already been applied")\n'),),
+         ("t_late_replay",)),
++    *EXTRA,
+ )
+ 
+@@ -229,6 +324,8 @@ def stub_tests(source: str, names: Sequence[str]) -> str:
+ def _failed(dst: Path, optimise: bool) -> set[str]:
+     cmd = [sys.executable] + (["-O"] if optimise else []) + [SUITE]
+-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+-    r = subprocess.run(cmd, cwd=dst, capture_output=True, text=True, check=False, env=env)
++    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONIOENCODING="utf-8")
++    env.pop("P13_PINS_ONLY", None)
++    r = subprocess.run(cmd, cwd=dst, capture_output=True, text=True, encoding="utf-8",
++                       errors="replace", check=False, env=env)
+     names = {line.split(":", 1)[0].removeprefix("FAILED ") for line in r.stdout.splitlines()
+              if line.startswith("FAILED ")}
+@@ -260,4 +357,9 @@ def main() -> int:
+     for m in MUTATIONS:  # every text must apply before anything runs
+         mutated_source(_read(ROOT / TARGET), m)
++    for optimise in (False, True):
++        red = _failed(ROOT, optimise)
++        if red:
++            print(f"[BASELINE FAILED]{' -O:' if optimise else ':'} {sorted(red)}")
++            return 1
+     with ThreadPoolExecutor(max_workers=os.cpu_count() or 2) as pool:
+         results = list(pool.map(lambda m: run_one(m, args.negative_control), MUTATIONS))
+
+
+INPUT - diff of tests/verify_p13_policy_diff.py follows:
+
+@@ -32,4 +32,6 @@ from pathlib import Path
+ 
+ import yaml
++from cryptography.hazmat.primitives.asymmetric.ec import SECP256R1
++from cryptography.hazmat.primitives.asymmetric.ec import generate_private_key as ec_key
+ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+@@ -39,4 +41,6 @@ sys.path.insert(0, str(ROOT / "src"))
+ 
+ _SLOW_YAML_LOAD = yaml.safe_load
++_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
++_YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+ _parsed: dict[str, object] = {}
+ 
+@@ -45,5 +49,5 @@ def _fast_yaml_load(text):
+     """The suite parses the same few files over a thousand times. Test speed only."""
+     if text not in _parsed:
+-        _parsed[text] = yaml.load(text, Loader=yaml.CSafeLoader)  # noqa: S506 - a safe loader
++        _parsed[text] = yaml.load(text, Loader=_YAML_LOADER)  # noqa: S506 - a safe loader
+     return copy.deepcopy(_parsed[text])
+ 
+@@ -391,5 +395,5 @@ def _dir(doc, **files):
+ 
+ def _dump(doc):
+-    return yaml.dump(doc, Dumper=yaml.CSafeDumper, sort_keys=False)
++    return yaml.dump(doc, Dumper=_YAML_DUMPER, sort_keys=False)
+ 
+ 
+@@ -411,5 +415,5 @@ class Key:
+ 
+ 
+-AB, JS, CD = Key("ab"), Key("js"), Key("cd")
++AB, JS, CD, ZZ = Key("ab"), Key("js"), Key("cd"), Key("zz")
+ 
+ 
+@@ -557,4 +561,5 @@ def t_c02():
+ def t_c03():
+     _expect(_edit("RECON-001", threshold=1), {"rules.RECON-001.threshold": (UN, "C-03")})
++    _expect(_edit("RECON-001", threshold=0.0), {"rules.RECON-001.threshold": (NE, "C-03")})
+     _expect(_edit("STOP-001", threshold=3.0), {"rules.STOP-001.threshold": (UN, "C-03")})
+ 
+@@ -592,4 +597,14 @@ def t_c08():
+              "rules.EXEC-001.allowed_values": (UN, "C-08"),
+              "rules.EXEC-001.disallowed_values": (UN, "C-08")})
++    _expect(_edit("UNIV-004", comparison="gt", threshold_ref="universe.{market}.min_reported_quarters"),
++            {"rules.UNIV-004.comparison": (UN, "C-08"),
++             "rules.UNIV-004.threshold_ref": (UN, "C-08")})
++    _expect(_edit("CASH-001", comparison="lt", threshold_input="intended_notional"),
++            {"rules.CASH-001.comparison": (UN, "C-08"),
++             "rules.CASH-001.threshold_input": (UN, "C-08")})
++    _expect(_edit("INST-001", comparison="not_in",
++                  allowed_values_ref="instrument_allowlist.permanently_banned"),
++            {"rules.INST-001.comparison": (UN, "C-08"),
++             "rules.INST-001.allowed_values_ref": (UN, "C-08")})
+ 
+ 
+@@ -808,4 +823,7 @@ def t_c30():
+     _expect(_edit("SIZE-001", modify={**m, "target": "other_quantity"}),
+             {"rules.SIZE-001.modify.target": (UN, "C-30")})
++    base = _edit("SIZE-001", modify={"target": "order_quantity", "to": 1})
++    new = _edit("SIZE-001", modify={"target": "order_quantity", "to": 2})
++    _expect(new, {"rules.SIZE-001.modify.to": (UN, "C-30")}, old=base)
+ 
+ 
+@@ -884,4 +902,6 @@ def t_c37():
+     # A set compares as a set: reordering is not a change (§2 row 7).
+     _expect(_set_key(_raw(), "instrument_allowlist.permanently_banned", list(reversed(banned))), {})
++    _expect(_set_key(_raw(), "cost.assumed_round_trip_bps.US", 25.0),
++            {"cost.assumed_round_trip_bps.US": (NE, "C-37")})
+ 
+ 
+@@ -891,4 +911,6 @@ def t_c38():
+     _expect(_set_key(_raw(), "universe.US.min_price_usd", _DROP),
+             {"universe.US.min_price_usd": (LO, "C-38")})
++    _expect(_set_key(_raw(), "metadata.description", _DROP),
++            {"metadata.description": (NE, "C-38")})
+ 
+ 
+@@ -902,4 +924,10 @@ def t_c39():
+     second = _set_key(copy.deepcopy(first), "turnover.min_sessions_between_reentry", 0)
+     _expect(second, {"turnover.min_sessions_between_reentry": (UN, "C-39")}, old=first)
++    key = "kill_switch.requires_human_to_re_enable"
++    _expect(_set_key(_raw(), key, "no"), {key: (UN, "C-39")}, old=_set_key(_raw(), key, "yes"))
++    key = "universe.US.min_price_usd"
++    _expect(_set_key(_raw(), key, "abc"), {key: (UN, "C-39")})
++    key = "instrument_allowlist.tradeable"
++    _expect(_set_key(_raw(), key, "ETF"), {key: (UN, "C-39")})
+ 
+ 
+@@ -914,4 +942,23 @@ def t_c40():
+     _expect(_raw(), {"rules.KILL-002.exempts": (TI, "C-26"),
+                      "rules.LOSS-004.kill_displaced_by.LOSS-003": (UN, "C-40")}, old=base)
++    # Trigger 3 reads allowed_values_ref too.
++    base = _edit("INST-001", action="KILL", kill_scope="POOL")
++    new = _set_key(copy.deepcopy(base), "portfolio.max_position_pct", 0.04)
++    _expect(new, {"portfolio.max_position_pct": (TI, "C-37"),
++                  "rules.LOSS-004.kill_displaced_by.INST-001": (UN, "C-40")}, old=base)
++    # A NEUTRAL config record is not a trigger.
++    new = _set_key(copy.deepcopy(base), "metadata.description", "reworded")
++    _expect(new, {"metadata.description": (NE, "C-37")}, old=base)
++    # A NEUTRAL record on the rule is not a trigger.
++    _expect(_edit("LOSS-003", severity="LOW"), {"rules.LOSS-003.severity": (NE, "C-14")})
++    # A monitor rule never binds, so it displaces nothing.
++    base = _edit("LOSS-003", mode="monitor")
++    new = _edit("LOSS-003", mode="monitor", threshold=0.08)
++    _expect(new, {"rules.LOSS-003.threshold": (TI, "C-01")}, old=base)
++    # G is judged on the OLD version: it was GLOBAL when this change was made.
++    new = _edit("LOSS-003", threshold=0.08)
++    _apply(new, "LOSS-004", {"kill_scope": "POOL"})
++    _expect(new, {"rules.LOSS-003.threshold": (TI, "C-01"), "rules.LOSS-004.kill_scope": (LO, "C-17"),
++                  "rules.LOSS-004.kill_displaced_by.LOSS-003": (UN, "C-40")})
+ 
+ 
+@@ -927,4 +974,17 @@ def t_c41():
+     require(not by[("US", None)].changes and not by[(None, None)].changes, "others must be empty")
+ 
++    # The override layer applies to every combination.
++    b = _dir(_raw(), override={"metadata": {"description": "an override"}})
++    for d in P.diff_policy_dirs(a, b):
++        paths = {c.path: (c.direction, c.basis) for c in d.changes}
++        require(paths.get("layers.override") == (UN, "C-41"), f"({d.market}, {d.environment}): {paths}")
++
++    # Two layers removed together give two records.
++    a = _dir(_raw(), market__IN={"metadata": {"description": "india"}},
++             env__paper={"metadata": {"authored_by": "someone"}})
++    by = {(d.market, d.environment): d for d in P.diff_policy_dirs(a, _dir(_raw()))}
++    gone = {c.path for c in by[("IN", "paper")].changes if c.basis == "C-41"}
++    require(gone == {"layers.market.IN", "layers.env.paper"}, f"layers removed: {gone}")
++
+ 
+ def t_c42():
+@@ -1192,4 +1252,5 @@ def t_expiry():
+     _current(auth, at(timedelta(hours=24) - timedelta(seconds=1)), a, b)
+     _current(auth, at(timedelta(hours=24)), a, b)
++    _current(auth, at(timedelta(0)), a, b)
+     e = raises(P.ApprovalExpiredError,
+                lambda: _current(auth, at(timedelta(hours=24, seconds=1)), a, b), "expired: ")
+@@ -1263,4 +1324,14 @@ def t_models():
+     raises(ValueError, lambda: auth(diffs=gated, gated_paths=(path,)), "0 with a gated path: ")
+     raises(ValueError, lambda: auth(required_approvals="5"), "non-0 with none gated: ")
++
++    def rule_change(**over):
++        base = dict(kind=P.ChangeKind.RULE_ADDED, path="rules.EXP-009", rule_id="EXP-009", field=None,
++                    old=None, new="EXP-009", direction=TI, basis="C-34", reason="added")
++        return P.PolicyChange(**{**base, **over})
++
++    rule_change()
++    raises(ValueError, lambda: rule_change(basis="C-99"), "unknown basis: ")
++    raises(ValueError, lambda: rule_change(rule_id=None), "a rule change with no rule_id: ")
++    raises(ValueError, lambda: rule_change(old="x"), "an addition with an old value: ")
+     raises(ValueError, lambda: auth(diffs=gated, gated_paths=(path,), required_approvals="2",
+                                     approvals=(ab,)), "too few approvals: ")
+@@ -1335,4 +1406,253 @@ def t_diff_agrees_with_loosens_for_on_every_ordinal_threshold():
+ 
+ 
++def t_dotted_keys_are_refused():
++    """A path must name one leaf, or an overwritten value hides a real change (X2H-1)."""
++    hidden = _set_key(_raw(), "kill_switch.auto_re_enable_permitted", True)
++    hidden["kill_switch.auto_re_enable_permitted"] = False
++    trailing = _raw()
++    trailing["portfolio"]["max_position_pct."] = 0.05
++    bracket = _raw()
++    bracket["hitl"]["actions[0]"] = {"action": "x"}
++    empty = _raw()
++    empty["portfolio"][""] = 1
++    for label, doc in (("dotted", hidden), ("trailing dot", trailing), ("bracket", bracket),
++                       ("empty", empty)):
++        raises(P.PolicyDiffError, lambda d=doc: P.diff_policies(RAW, d), f"{label}, new: ",
++               match="cannot be classified")
++        raises(P.PolicyDiffError, lambda d=doc: P.diff_policies(d, RAW), f"{label}, old: ",
++               match="cannot be classified")
++    mixed = _raw()
++    mixed["portfolio"][1] = "x"
++    raises(P.PolicyDiffError, lambda: P.diff_policies(RAW, mixed), "a non-string key: ")
++
++
++def t_type_changes_are_recorded():
++    """Every change of type gives a record (X2H-2). Each of these once gave none."""
++    for key, value in (("fx.system_may_convert", "False"),
++                       ("kill_switch.auto_re_enable_permitted", "False"),
++                       ("account.enforce_settled_cash", "True"),
++                       ("portfolio.max_position_pct", "0.05"),
++                       ("portfolio.max_position_pct", "0.050"),
++                       ("turnover.max_new_entries_per_session", "4")):
++        _expect(_set_key(_raw(), key, value), {key: (UN, "C-39")})
++    base = _set_key(_raw(), "schedule.extra", ["a", "b"])
++    _expect(_set_key(copy.deepcopy(base), "schedule.extra", ["a,b"]),
++            {"schedule.extra": (UN, "C-39")}, old=base)
++    base = _set_key(_raw(), "schedule.extra", 1)
++    _expect(_set_key(copy.deepcopy(base), "schedule.extra", "1"),
++            {"schedule.extra": (UN, "C-39")}, old=base)
++    _expect(_edit("DATA-002", allowed_values=["True"]),
++            {"rules.DATA-002.allowed_values": (UN, "C-21")})
++    base = _edit("REGIME-001", disallowed_values=[1, "UNKNOWN"])
++    _expect(_edit("REGIME-001", disallowed_values=["1", "UNKNOWN"]),
++            {"rules.REGIME-001.disallowed_values": (UN, "C-22")}, old=base)
++    m = _rule_raw(RAW, "EXP-006")["modify"]
++    _expect(_edit("EXP-006", modify={**m, "to": "0.04"}),
++            {"rules.EXP-006.modify.to": (UN, "C-30")})
++
++    # An empty mapping is a leaf, and a list of mappings cannot pose as an index-keyed mapping.
++    _expect(_set_key(_raw(), "kill_switch.extra", {}), {"kill_switch.extra": (UN, "C-38")})
++    swapped = _raw()
++    swapped["hitl"]["actions"] = {str(i): v for i, v in enumerate(RAW["hitl"]["actions"])}
++    d = P.diff_policies(RAW, swapped)
++    require(d.requires_two_person, "a list turned into a mapping must be gated")
++
++
++# Every directed key of §3.7, typed out here so that a key moved in the module fails this test.
++KEY_TABLE = {
++    "NEUTRAL": """policy_version metadata.description metadata.authored_by metadata.authored_at
++        cost.verified_monthly_usd.paper cost.verified_monthly_usd.live cost.vm_monthly_usd
++        cost.backup_monthly_usd cost.total_operating_is_complete""",
++    "TRUE_LOOSENS": """governance.risk_deny_override_permitted hitl.risk_deny_override_permitted
++        kill_switch.auto_re_enable_permitted fx.system_may_convert llm.may_receive_portfolio_state""",
++    "FALSE_LOOSENS": """kill_switch.requires_human_to_re_enable risk_evaluation.evaluate_per_pool
++        risk_evaluation.evaluate_consolidated risk_evaluation.stricter_binds
++        llm.replay_requires_approval llm.replay_offpeak_only account.enforce_settled_cash
++        account.enforce_day_trades""",
++    "LOWER_LOOSENS": """governance.min_approvals_to_loosen account.pdt_equity_floor_usd
++        portfolio.min_cash_pct decision.min_edge_multiple_of_cost cost.assumed_round_trip_bps.US
++        cost.assumed_round_trip_bps.IN holding.time_stop_min_return_pct holding.min_sessions
++        storage.records_retention_years promotion.min_wf_windows promotion.min_closed_trades
++        promotion.shadow_min_sessions promotion.dsr_threshold
++        universe.US.min_addv_position_multiple universe.IN.min_addv_position_multiple
++        universe.US.min_sessions_history universe.IN.min_sessions_history
++        universe.US.min_reported_quarters universe.IN.min_reported_quarters
++        universe.US.min_market_cap_usd universe.US.min_addv_usd_floor universe.US.min_price_usd
++        universe.IN.min_market_cap_inr universe.IN.min_addv_inr_floor universe.IN.min_price_inr""",
++    "HIGHER_LOOSENS": """account.pdt_max_day_trades_5d portfolio.max_position_pct
++        portfolio.forced_trim_pct turnover.max_new_entries_per_session
++        turnover.max_nav_traded_pct_per_session holding.time_stop_sessions holding.hard_max_sessions
++        llm.gate_width llm.max_concurrency llm.spend_alarm_warn_usd_month
++        llm.spend_alarm_critical_usd_month latency.exit.stale_bar_critical_seconds
++        dr.rpo_state_seconds dr.rto_safe_minutes dr.rto_operational_hours storage.disk_warn_pct
++        storage.disk_critical_pct universe.US.max_instruments universe.IN.max_instruments
++        universe.US.enter_rank universe.IN.enter_rank universe.US.exit_rank universe.IN.exit_rank""",
++    "SET_GROW_LOOSENS": "instrument_allowlist.tradeable",
++    "SET_SHRINK_LOOSENS": "instrument_allowlist.permanently_banned",
++}
++
++
++def t_every_key_direction_is_pinned():
++    want = {key: kind for kind, keys in KEY_TABLE.items() for key in keys.split()}
++    require(len(want) == 72, f"{len(want)} keys in the table")
++    have = {key: kind.value for key, kind in P.CONFIG_KEY_DIRECTIONS[:-1]}
++    for key in sorted(set(want) | set(have)):
++        require(have.get(key) == want.get(key),
++                f"{key} is {have.get(key)}; the table says {want.get(key)}")
++
++
++def t_key_kind_directions():
++    key = "fx.system_may_convert"
++    off, on = _set_key(_raw(), key, False), _set_key(_raw(), key, True)
++    _expect(on, {key: (LO, "C-37")}, old=off)
++    _expect(off, {key: (TI, "C-37")}, old=on)
++    key = "account.enforce_day_trades"
++    off, on = _set_key(_raw(), key, False), _set_key(_raw(), key, True)
++    _expect(off, {key: (LO, "C-37")}, old=on)
++    _expect(on, {key: (TI, "C-37")}, old=off)
++
++
++def t_digest_known_answer():
++    """The preimage is typed out here, so that any field leaving it fails this test."""
++    h1, h2 = "a" * 64, "b" * 64
++    diff = P.PolicyDiff(market="US", environment="paper", old_version="1.0.0", new_version="1.0.1",
++                        old_content_hash=h1, new_content_hash=h2, changes=())
++    preimage = (
++        b"SPEC-P1.3.1 approval v1\n"
++        b'{"combinations":[{"environment":"paper","market":"US",'
++        b'"new_content_hash":"' + h2.encode() + b'","old_content_hash":"' + h1.encode() + b'"}],'
++        b'"request_id":"' + REQUEST.encode() + b'","requested_at":"2026-10-31T06:30:00Z"}')
++    require(P.authorisation_digest((diff,), REQUEST, "2026-10-31T06:30:00Z")
++            == hashlib.sha256(preimage).hexdigest(), "the digest preimage changed")
++
++
++def t_keys_come_from_the_in_force_base():
++    a = _dir(_with_map(_raw(), (AB, JS)))
++    b = _dir(_with_map(_edit("LOSS-004", threshold=0.20), (CD, ZZ)))
++    with _vault(AB, JS, CD, ZZ):
++        raises(L.PolicyGovernanceError, lambda: _authorise(a, b, (CD, ZZ)), "the candidate's keys: ",
++               match="not listed")
++    # A market layer may carry a map. It is not the source of keys.
++    layer = {"governance": {"signature": {"approver_key_refs": {
++        k.name: {"ref": k.ref, "raw_key_sha256": k.pin} for k in (CD, ZZ)}}}}
++    base = _with_map(_raw(), (AB, JS))
++    a = _dir(base, market__US=layer)
++    b = _dir(_with_map(_edit("LOSS-004", threshold=0.20), (AB, JS)), market__US=layer)
++    with _vault(AB, JS, CD, ZZ):
++        raises(L.PolicyGovernanceError, lambda: _authorise(a, b, (CD, ZZ)), "a layer's keys: ",
++               match="not listed")
++
++
++def t_key_must_be_ed25519():
++    ec = ec_key(SECP256R1()).public_key().public_bytes(Encoding.PEM,
++                                                       PublicFormat.SubjectPublicKeyInfo)
++    a = _dir(_with_map(_raw(), (AB, JS)))
++    b = _dir(_with_map(_edit("LOSS-004", threshold=0.20), (AB, JS)))
++    with _vault(AB, pem={JS.ref: ec}):
++        raises(L.PolicyGovernanceError, lambda: _authorise(a, b, (AB, JS)), "EC key: ",
++               match="not Ed25519")
++
++
++def t_approver_map_is_normalised():
++    doc = _with_map(_raw(), (AB, JS))
++    refs = _approver_refs(doc)
++    refs["AB "] = refs.pop("ab")
++    a = _dir(doc)
++    new = _with_map(_edit("LOSS-004", threshold=0.20), (AB, JS))
++    _approver_refs(new)["AB "] = _approver_refs(new).pop("ab")
++    b = _dir(new)
++    with _vault(AB, JS):
++        _authorise(a, b, (AB, JS))
++    clash = _with_map(_raw(), (AB, JS))
++    _approver_refs(clash)["AB"] = dict(_approver_refs(clash)["ab"])
++    c = _dir(clash)
++    with _vault(AB, JS):
++        raises(L.PolicyGovernanceError, lambda: _authorise(c, c, (AB,)), "a duplicate: ",
++               match="not usable")
++
++
++def t_count_uses_every_old_document():
++    layer = {"governance": {"min_approvals_to_loosen": 3}}
++    a = _dir(_with_map(_raw(), (AB, JS, CD)), market__US=layer)
++    b = _dir(_with_map(_edit("EXP-002", threshold=0.30), (AB, JS, CD)), market__US=layer)
++    with _vault(AB, JS, CD):
++        raises(L.PolicyGovernanceError, lambda: _authorise(a, b, (AB, JS)), "US requires 3: ",
++               match="3 required")
++        require(_authorise(a, b, (AB, JS, CD)).required_approvals == "3", "the count must be 3")
++
++
++def t_store_failures():
++    a = _dir(_raw())
++    b = _dir(_edit("EXP-001", threshold=0.04))
++    auth = _authorise(a, b)
++    naive = FakeStore(_hashes(a), now=datetime.now())  # noqa: DTZ005 - the naive clock under test
++    raises(P.InForceAnchorError, lambda: _current(auth, naive, a, b), "naive clock: ", match="naive")
++
++    class Broken(FakeStore):
++        def in_force_hashes(self, conn):
++            raise RuntimeError("connection lost")
++
++    raises(P.InForceAnchorError, lambda: _current(auth, Broken({}), a, b), "store fails: ",
++           match="could not be read")
++    bad = _dir(_edit("EXP-001", threshold=0.04), market__XX={"a": 1})
++    raises(P.StaleAuthorisationError, lambda: _current(auth, FakeStore(_hashes(a)), a, bad),
++           "unknown layer: ", match="unknown layer")
++
++
++def t_anchor_needs_its_own_layer():
++    """The (m, None) anchor is for a combination's OWN env file, not any layer added with it."""
++    a = _dir(_with_map(_raw(), (AB, JS)), env__paper=None)
++    b = _dir(_with_map(_raw(), (AB, JS)), env__paper=None,
++             market__US={"metadata": {"description": "a US layer"}})
++    with _vault(AB, JS):
++        auth = _authorise(a, b, (AB, JS))
++        rows = _hashes(a)
++        del rows[("US", "paper")]
++        raises(P.StaleAuthorisationError, lambda: _current(auth, FakeStore(rows), a, b),
++               "another layer's record: ", match="no in-force row")
++
++
++def t_check_order():
++    """§5.3: the candidate is checked before the digest."""
++    a = _dir(_raw())
++    b = _dir(_edit("EXP-001", threshold=0.04))
++    auth = _authorise(a, b).model_copy(update={"digest": "0" * 64})
++    edited = _dir(_edit("EXP-001", threshold=0.03))
++    raises(P.StaleAuthorisationError, lambda: _current(auth, FakeStore(_hashes(a)), a, edited),
++           "both wrong: ", match="changed after approval")
++
++
++def t_order_is_not_a_change():
++    """§2 row 7: value sets compare as sets."""
++    r = _rule_raw(RAW, "EXP-001")
++    _expect(_edit("EXP-001", inputs=list(reversed(r["inputs"]))), {})
++    e = _rule_raw(RAW, "KILL-002")
++    _expect(_edit("KILL-002", exempts=list(reversed(e["exempts"]))), {})
++    x = _rule_raw(RAW, "EXEC-001")
++    _expect(_edit("EXEC-001", allowed_values_emergency=list(reversed(x["allowed_values_emergency"]))),
++            {})
++    base = _edit("EXEC-001", allowed_values=["LIMIT", "STOP"])
++    _expect(_edit("EXEC-001", allowed_values=["STOP", "LIMIT"]), {}, old=base)
++
++
++def t_loader_failures_are_refused():
++    """§8's catch-all: whatever the loader raises, the documented types come out (X2H-6)."""
++    good = _dir(_raw())
++    no_layering = _raw()
++    del no_layering["layering"]
++    null_layering = _raw()
++    null_layering["layering"] = None
++    mixed = _raw()
++    mixed["portfolio"][1] = "x"
++    not_utf8 = _dir(_raw())
++    (not_utf8 / "policy.yaml").write_bytes(b"\xff\xfe\x00")
++    cases = (_dir(no_layering), _dir(null_layering), _dir(mixed), not_utf8)
++    auth = _authorise(good, _dir(_edit("EXP-001", threshold=0.04)))
++    for bad in cases:
++        raises(P.PolicyDiffError, lambda b=bad: P.diff_policy_dirs(good, b), f"{bad.name}: ")
++        raises(P.StaleAuthorisationError,
++               lambda b=bad: _current(auth, FakeStore(_hashes(good)), good, b), f"{bad.name}, apply: ")
++
++
+ # =============================================================================
+ # E. COMPLETENESS (§7.6)
+@@ -1464,4 +1784,16 @@ def t_fast_yaml_parser_agrees():
+ 
+ 
++def t_production_parser_gives_the_same_hash():
++    """One load through the unpatched parser, with a layer, so the memo cannot hide a difference."""
++    d = _dir(_raw(), market__US={"metadata": {"description": "a US layer"}})
++    fast = L.PolicyLoader(d).load(market="US", require_signature=False).content_hash
++    yaml.safe_load = _SLOW_YAML_LOAD
++    try:
++        slow = L.PolicyLoader(d).load(market="US", require_signature=False).content_hash
++    finally:
++        yaml.safe_load = _fast_yaml_load
++    require(fast == slow, "the production parser and the test parser disagree")
++
++
+ def t_every_basis_is_exercised():
+     missing = set(P.CLASSIFICATION_BASES) - SEEN_BASES
+@@ -1484,4 +1816,5 @@ def main() -> int:
+         (n, f) for n, f in globals().items() if n.startswith("t_") and callable(f))
+     if os.environ.get("P13_PINS_ONLY") == "1":  # the sweep: attribution reads only these
++        print("PINS-ONLY MODE: this run is not evidence that the suite passes")
+         tests = [(n, f) for n, f in tests if n.startswith("t_pin_") or n in PIN_TESTS]
+     tests.sort(key=lambda item: item[0] == "t_every_basis_is_exercised")
+

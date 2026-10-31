@@ -1,0 +1,261 @@
+# DELTA REVIEW — X2 of `src/config/policy_diff.py`, round 2
+
+Scope: the eleven prior findings, the four diffs, and the touched spec (§3.7, §5.3, §8). I did not run anything. Every "measured" claim below is cited from the prior X2 or is marked ASSUMPTION where it depends on code I cannot see in the diffs.
+
+---
+
+## 1. Status of X2H-1 … X2H-11
+
+### X2H-1 — BLOCKER — dotted key hides a real change — **PARTIALLY CLOSED; new fail-open introduced**
+
+The refusal in `_leaves` closes the *reported* inputs. It does **not** close the class. See Finding D-1 below: the sibling `_leaves` at `_config_changes` (the `both_lists`/`_members` branch at diff l. 893) is unchanged, and the new `_leaves` traversal is also applied to the *rule* side via `_rule_field_changes`'s `_SET_FIELDS`/`inputs` comparison. Specific input that still breaks the class: a `Rule.inputs` list containing a single string `"a,b"` vs `["a","b"]` — see D-2. The dotted-key refusal itself is closed for the exact X2H-1 input: both sides of the diff now raise `PolicyDiffError` (`t_dotted_keys_are_refused`).
+
+One residual in X2H-1 itself: the refusal checks `set(k) & set(".[]")` on the **mapping key**, but not on the **prefix**. A list of scalars at `a[0]` is a leaf whose path contains `[`. That is fine because the bracket is produced by `_leaves`, not by the user. But a mapping under a list-of-mappings whose own key is `"0"` will produce `a[0].0`, which cannot collide with `a[0]` scalar leaf — no real collision. **Closed**, with the caveat that the new bracket syntax changes the *path strings* in records (see MEDIUM-1 below).
+
+### X2H-2 — HIGH — type change produces no record — **CLOSED for the listed inputs; one listed input is fixed only by side effect**
+
+`_identity` is injective over the shapes it handles, and `_kind` is checked before any direction for scalar config values. The six listed config rows now produce `(UN, "C-39")`. The `_canon` display path stays for `reason` strings only, which is correct.
+
+One subtlety: `("portfolio.max_position_pct", "0.050")` — X2H-2 said C-39 should fire. Under the new code, `_kind("0.05") == _kind("0.050") == "string"`, so it falls through to `_config_value`'s numeric branch. I cannot see whether that branch distinguishes `Decimal("0.05") != Decimal("0.050")`. If it uses `Decimal` equality (they compare equal), it returns NEUTRAL not C-39. The test `t_type_changes_are_recorded` asserts `{key: (UN, "C-39")}` for `"0.050"` — if the numeric branch returns NEUTRAL on Decimal-equal strings, **this test fails**. If it fails, that is a test defect not a code defect, but the spec says C-39. **OPEN QUESTION Q-1**: does the numeric branch compare `Decimal` or `str`? I cannot see lines between diff l. 856 and the `TRUE_LOOSENS` branch.
+
+The `_identity` of a `Mapping` uses `repr(k)` as sort key and pairs `(repr(k), _identity(x))`. Two distinct keys with equal `repr` (e.g. `1` and `"1"`) sort adjacently but are not merged — that is fine because `_identity` returns a **tuple of pairs**, not a dict, so no collision. **OK**.
+
+`_identity` for `float("nan")` yields `("number", "NaN")`; two `nan`s compare equal via the tuple. That is not a market-value path (config values) but is worth noting as LOW-1.
+
+### X2H-3 — HIGH — suite does not prove what it covers — **PARTIALLY CLOSED; four of the listed mutants remain unpinned**
+
+The `_X2_MUTANTS` table adds tests for F01, F03, F04–F07, F08, F09–F11, F12–F13 (two of the moves only), F14, F15, F20, F24–F26, F29. That is most of the list. Two remain that the fix does not cover:
+
+- **F02** ("count from (None, None) only"): the mutant `diffs[:1]` is only caught if `t_count_uses_every_old_document` actually exercises a *non-first* diff whose old document has a higher `min_approvals_to_loosen`. The test builds `a = _dir(..., market__US=layer)` with `min_approvals_to_loosen: 3`. It passes `(AB, JS)` and expects refusal, and `(AB, JS, CD)` and expects `"3"`. That does test the count. **Closed** — but only if the diff enumeration order puts `(None, None)` before `("US", None)`. ASSUMPTION: `diff_policy_dirs` yields `(None, None)` first. If not, `diffs[:1]` may include the US diff and the mutant survives. **LOW**: add a test that pins the diff order, or assert the mutant catches it.
+- **F30** ("key source is the US document"): the test `t_keys_come_from_the_in_force_base` sets a market layer that *carries* a different map but the test uses `market__US` on **both** sides (`a` and `b`), so `_load(old_dir, "US", None)` returns the same map as `_load(old_dir, None, None)` for the keys — the mutant survives if the layer's map is identical to the base map. In the test the layer map is `(CD, ZZ)` and the base map is `(AB, JS)` — different. `_load(old_dir, "US", None)` would then return `(CD, ZZ)`, so the mutant would raise `PolicyGovernanceError` on `(CD, ZZ)` being "not listed". **BUT** the test asserts exactly that error, so the mutant and the correct code both raise. The mutant **survives** unless the test also asserts that `(AB, JS)` succeeds on the same document. It does not. **HIGH**: the test is miswritten. Fix: after the layer assertion, also `require(_authorise(a, b, (AB, JS)))` on the same document — then the mutant (which reads US keys) fails.
+- **F12, F13** ("a key moved to the wrong direction list"): `t_every_key_direction_is_pinned` pins the table, so a *static* move is caught. That was X2H-3's fix. Good. **Closed.**
+- **F18, F19** ("NEUTRAL edit to LOSS-003 needing two people passes"): not addressed. The `_X2_MUTANTS` table has no mutant that makes a NEUTRAL rule change require approvals. §8's last row says "Every change TIGHTENS or NEUTRAL, with no C-36/C-40/C-41 record" ⇒ `"0"`. If `_derive_authorisation` counts approvals over all `diffs` including NEUTRAL-only ones, that is a real defect. **OPEN QUESTION Q-2**: does `_required_approvals` filter NEUTRAL? I cannot see it in the diff. If unfiltered, **HIGH**.
+
+### X2H-4 — HIGH — code harness reports CAUGHT with no baseline — **CLOSED**
+
+`main` now calls `_failed(ROOT, optimise)` in both modes before any mutation and returns 1 if red. The reported failure mode (a test that always fails earning CAUGHT for every mutation that names it) is closed: the baseline run catches the red suite.
+
+The fix is not perfect: `_failed` returns the set of FAILED test names, and a mutation is "CAUGHT" only if the named test appears in the mutated run's FAILED set. A test that passes in baseline but is only *sometimes* red (flaky) still gets credit. Baseline green does not prove non-flakiness. **LOW**: run the baseline N=3 times or require stability. Not a blocker.
+
+### X2H-5 — HIGH — sweep passes with nothing tested — **CLOSED, with a stale-literal risk**
+
+`loadable` is computed and the tuple `(len(mutations), loadable)` is compared to `(SWEEP_GENERATED, SWEEP_LOADABLE)`. When everything is INVALID, `(589, 0) != (582, 486)`, exit 1. **Closed.**
+
+But: the literals `582` and `486` are constants in the harness. The docstring says "#17's reviewed edit changes these literals with the policy, as it does the pins." A policy change that adds one rule (486 → 487) and lands in the same commit as this harness, without the literal bump, will exit 1 — that is fail-closed and correct. A policy change that *removes* a mutation's target rule and simultaneously updates `SWEEP_LOADABLE` downward while leaving an equally serious coverage gap will exit 0. The literal is now a hand-maintained number that gates CI. **MEDIUM-2** below.
+
+### X2H-6 — MEDIUM — exceptions escape as undocumented types — **PARTIALLY CLOSED; two shapes still escape**
+
+The `_load` change to `except Exception` is correct and closes `KeyError`, `ValidationError`, `TypeError`, `UnicodeDecodeError` for the *loader* call. `t_loader_failures_are_refused` covers exactly those four inputs, but note:
+
+- **`not_utf8`**: the test writes `b"\xff\xfe\x00"` to `policy.yaml`. `PolicyLoader` presumably opens with UTF-8. The `_load` catch wraps it. Good. But the test constructs `not_utf8 = _dir(_raw())` then overwrites — this exercises the UTF-8 path only if `_dir` writes the file synchronously. **ASSUMPTION** it does. If `_dir` returns a context manager that writes on `__enter__`, the write happens out of order. Low risk.
+- **The `_leaves` refusal now raises `PolicyDiffError` from `_config_changes`**. That is inside `diff_policy_dirs`, which is the correct exception. But `_leaves` is also called from paths that may or may not be inside the try. **OPEN QUESTION Q-3**: is `_leaves` called before or inside the try that maps to `PolicyDiffError`? I cannot see. If outside, the new `PolicyDiffError` is still the right type — no issue.
+- **The five reads in `assert_authorisation_current` now share one try**. See D-4 below: this is a *fail-open* risk for a specific store adapter bug.
+
+### X2H-7 — LOW — tests for undocumented code paths — **CLOSED**
+
+`t_store_failures` tests the naive clock (naive `datetime` from `FakeStore`) and the unknown-layer wrapper (`market__XX`). Both named tests exist in the diff. `t_anchor_needs_its_own_layer` tests the anchor branch too. **Closed** for the branches the fix claimed.
+
+### X2H-8 — LOW — `P13_PINS_ONLY` leaks — **CLOSED**
+
+`_env` pops `P13_PINS_ONLY`, and `_failed` does too. The pins-only run now prints `"PINS-ONLY MODE: …"`. But: the print goes to **stdout**, and the harness reads `FAILED ` lines from stdout. That is fine — the header line does not start with `FAILED `. The `verify_p13_policy_diff.py` main also prints it when `P13_PINS_ONLY=1`. A CI consumer that greps stdout for `OK` or similar would see the warning. **Closed.**
+
+One residual: `_failed` pops `P13_PINS_ONLY` from `env`, but `main` in `verify_p13_policy_diff.py` still **reads** `os.environ.get("P13_PINS_ONLY")` in its own process. The harness's `baseline_is_green`/`_failed` calls use a subprocess with a scrubbed env, so the baseline is honest. But if an operator runs the suite interactively with `P13_PINS_ONLY=1`, the warning prints and 27 tests run. That is the intended behaviour. **Closed.**
+
+### X2H-9 — LOW — adapter errors and harness decoding — **PARTIALLY CLOSED**
+
+- The adapter error is wrapped by the new `except Exception` around the three store reads in `assert_authorisation_current`. **Partially closed** — see D-4 for the new fail-open.
+- `encoding="utf-8"` and `errors="replace"` are passed in `_killed_in` and `_failed`. **Closed** for the harnesses. The **suite's own** `subprocess.run` calls, if any, are not shown — **Q-4**.
+- `errors="replace"` is a choice: it makes a non-UTF-8 byte sequence in a failure message render as `�`, not raise. That is the intended "loud, not wrong" behaviour. Acceptable.
+
+### X2H-10 — LOW — suite does not run the production parser — **CLOSED**
+
+`_YAML_LOADER` and `_YAML_DUMPER` fall back to `SafeLoader`/`SafeDumper` if `CSafeLoader` is absent. `t_production_parser_gives_the_same_hash` loads with `yaml.safe_load` patched back to `_SLOW_YAML_LOAD`, with a market layer, and compares `content_hash`. **Closed.** One caveat: the test patches `yaml.safe_load` but not `yaml.load`. If `PolicyLoader` calls `yaml.load(..., Loader=yaml.SafeLoader)` directly, the test is not exercising the unpatched parser. **OPEN QUESTION Q-5**: does `PolicyLoader` call `yaml.safe_load` or `yaml.load(..., Loader=...)`? The suite patches `yaml.safe_load`, which suggests the former, but I cannot see the loader.
+
+### X2H-11 — LOW — dead code and cost — **PARTIALLY CLOSED**
+
+- `Mutation.drop_threshold` removed. **Closed.**
+- `_threshold_record`'s last `else` is now the `else:` replacing `elif comparison in _MIN_VALUE:`. That is *not* a dead-code removal — it is a **behaviour change**. Under the old code, a comparison not in `_MAX_VALUE` or `_MIN_VALUE` (i.e. `IN`, `NOT_IN`, `EXISTS`, `MULTIPLE_OF`) fell into the final `else` and produced `(UNDECIDABLE, "C-04")`. Under the new code, those comparisons fall into `C-02` with a numeric direction based on `y > x`. **This is a BLOCKER-level change if any threshold comparison can reach this branch** — see D-3.
+- `_US_IN` removed; `MARKETS` used. **Closed.**
+- `_compare_anchor`'s `base not in stored` branch removed; `stored.get((diff.market, None))` returns `None`, then the next line `anchor = stored[combo]` (unchanged) — wait, `anchor` is now `None` and the subsequent `if stored.get(combo) != anchor` or similar. See D-5. **New defect.**
+- Step 7 reloads. **Not fixed.** The X2 called it acceptable. **Open**, low.
+
+---
+
+## 2. Did any fix introduce a new defect or fail-open path?
+
+### D-1 — BLOCKER — `_leaves` refuses legitimate keys with a literal `.`, `[`, or `]` in **rule field names**
+
+**Where.** `_leaves` at diff l. ~825–831. The check `set(k) & set(".[]")` applies to **every mapping key**, including keys inside `rules` and inside `inputs`/`exempts`/`allowed_values` mappings.
+
+**Failure scenario.** `PolicyDocument` is `extra="allow"`. A rule may legitimately have `modify.target = "some.quantity"` (a dotted target name) or an `inputs` entry whose value is a **mapping** with a key like `"a.b"`. If such a value ever appears, `_leaves` refuses the *whole document*, not just the offending path. That is fail-closed (no change is applied), so it is not a fail-open — but it is a **denial of service on legitimate configuration**: the spec §3.7 says every leaf outside `rules` is classified by `CONFIG_KEY_DIRECTIONS`; it does not say keys inside `rules` must be dot-free. `_leaves` is called on **both** sides of the diff at `_config_changes` (l. ~888) and at `_rule_field_changes` (the diff does not show, but the `_SET_FIELDS` change to `_members` is inside the rule path).
+
+Concrete input that breaks it (assuming `inputs` can carry a mapping — **Q-6**): `_edit("EXP-001", inputs=[{"a.b": 1}])` raises `PolicyDiffError` on an otherwise valid rule edit. If the rule schema forbids mapping inputs, this is unreachable; I cannot see the rule model in the diff.
+
+**Severity: BLOCKER if rule inputs can be mappings; MEDIUM otherwise.** Fix: scope the refusal to keys **outside** `rules` (pass a flag or a different prefix), or only refuse when the offending key is at the top of a path that will be compared by dotted string — the classification is per dotted key, and rule paths are `rules.<id>.<field>` so a dot inside a *value* is fine. Minimal fix: in `_leaves`, only enforce the refusal when `prefix == ""` or `prefix.startswith("rules.") is False`.
+
+### D-2 — HIGH — `_members` for `inputs` no longer catches the `["a,b"]` vs `["a","b"]` collision the X2H-2 fix claimed
+
+**Where.** `_predicate_records` at diff l. ~620–636. `a, b = old.allowed_values, new.allowed_values`, then `_set_move(a, b, ...)` compares `_members`. `_identity("a,b")` returns `("str", "a,b")`; `_identity("a")` returns `("str", "a")`. Two distinct members → distinct sets. **Closed.** I withdraw the earlier D-2 concern: `_members` is injective and `_set_move` compares on it. The `_as_set` calls are display-only now. **X2H-2's set-collision case is closed.**
+
+But `_SET_FIELDS` still includes `inputs`, and `_differs` now uses `_members` for it. `t_order_is_not_a_change` tests reordering of `inputs`, `exempts`, `allowed_values_emergency`, and `allowed_values` — all pass by set semantics. **Closed.**
+
+### D-3 — BLOCKER — `_threshold_record`'s new `else` misclassifies `IN`/`NOT_IN`/`EXISTS`/`MULTIPLE_OF` thresholds
+
+**Where.** `_threshold_record`, diff l. ~595–599. The old `elif comparison in _MIN_VALUE:` was removed; the final `else` now handles **any** comparison not in `_MAX_VALUE`. That includes `IN`, `NOT_IN`, `EXISTS`, `MULTIPLE_OF`, `EQ`, `NE`, and any future comparison.
+
+**Failure scenario.** A rule with `comparison = "in"` and `threshold = 5` changed to `threshold = 3`:
+- Old code: `C-04` "no ordered comparison", `UNDECIDABLE`, → two-person.
+- New code: `comparison not in _MAX_VALUE` → `else` branch → `d = TIGHTENS if y > x else LOOSENS if y < x else NEUTRAL`. `5 → 3` is `y < x` → `LOOSENS`. **One-person, free.**
+
+That is a **fail-open**: a loosening of a predicate threshold that has no ordered semantics is now classified as a loosening with the *lowest* approval count. The spec §C-04 / the prior X2H-11 text says the branch was unreachable because "`(m, None)` is always in the set and is checked first" — but that reasoning applied to `_compare_anchor`, not `_threshold_record`. The `_threshold_record` branch **is reachable** for every rule whose `comparison` is set-valued. If `t_every_comparison_is_ranked` (or `_NO_CONSTANT`) guarantees no rule uses `IN` with a numeric `threshold`, this is unreachable at runtime — but §8's "A bound is a token on one side and a number on the other ⇒ UNDECIDABLE (C-05)" and C-10/C-13 suggest the schema tolerates combinations. **BLOCKER** until the author produces the invariant "no rule with `comparison in _NO_CONSTANT` has a non-null `threshold`" as a test, or restores the `elif comparison in _MIN_VALUE` and a final `else` with `C-04`.
+
+The minimal fix is one line: change `else:` back to `elif comparison in _MIN_VALUE:` and keep the final `else: out.add(..., UNDECIDABLE, "C-04", "no ordered comparison")`. The diff shows the `else` was added *because* X2H-11 said it was dead; it was not dead.
+
+### D-4 — HIGH — the single try around the three store reads wraps an adapter whose `request_used` may be a **write**
+
+**Where.** `assert_authorisation_current`, diff l. ~1281–1295.
+
+**Failure scenario.** `IN_FORCE_STORE.request_used(conn, auth.request_id)` is a **read** per §5.3 step 2, but a future adapter could implement it as a write (an idempotency key insert). If `request_used` succeeds (writes) and `database_time` **fails** (e.g. a transient connection error after the insert but before the clock read), the whole try catches `Exception` and raises `InForceAnchorError`. The idempotency key is now **written but the request was never applied** — a subsequent retry sees `request_used == true` and raises `StaleAuthorisationError`. The approval is consumed without any version being applied. **Fail-closed in the sense that nothing is applied, but it silently burns an authorisation.** The spec §5.3 step 2 says "This comes first, so a replay at any age writes nothing" — that ordering is preserved — but the write on a failing path is new.
+
+More importantly: the try wraps `in_force_hashes`, `database_time`, and `request_used` **together**. If `request_used` raises (e.g. transient), the exception is caught and `used` is undefined — the `if used:` below is never reached, and `InForceAnchorError` is raised. That is correct (nothing applied). But if `in_force_hashes` returns an empty dict, the `if not stored:` check is **outside** the try and fires before `request_used` is called — good, the store's no-rows case is reported before a request is burnt. **OK.**
+
+The real risk: **ordering**. §5.3 step 2 says "**Refuses a used request** (X2F-1, X2G-2) … This comes first". The code now calls `in_force_hashes` and `database_time` **before** `request_used`. That is a spec deviation: the store read and clock read must precede the used check per the code, but §5.3 step 1 (read store) precedes step 2 (used), so the order is actually spec-compliant. **Withdraw.** But the spec §5.3 says step 2 comes **after** step 1 and **before** step 3 (expiry), which is what the code does. **No finding.**
+
+Residual: the `except Exception` catches a **`PolicyGovernanceError`** if the adapter raises one (e.g. a store that verifies a signature). That would be re-wrapped as `InForceAnchorError` and lose the original type. §8 lists `PolicyGovernanceError` separately. **MEDIUM**: in the try, `except (PolicyGovernanceError,) as exc: raise` before the broad `except Exception`. Or list it as an OPEN QUESTION Q-7: can the store adapter raise `PolicyGovernanceError`?
+
+### D-5 — HIGH — `_compare_anchor` now silently accepts a missing `(m, None)` anchor
+
+**Where.** `_compare_anchor`, diff l. ~1237–1243. The three lines
+```
+base = (diff.market, None)
+if base not in stored:
+    raise StaleAuthorisationError(...)
+```
+were replaced by `anchor = stored.get((diff.market, None))`.
+
+**Failure scenario.** An `(m, None)` row is missing from the store (e.g. the genesis row for US was deleted by an operator, or the store returns a partial map). Old code: `StaleAuthorisationError` — nothing applied. New code: `anchor = None`. The subsequent comparison (not shown in the diff — **Q-8**) presumably does `if stored.get(combo) != anchor:` → `stored.get(combo)` is `None` for a new combo, `anchor` is `None`, `None != None` is `False` → **passes**. The `(m, e)` combination with no stored row is now **anchored by nothing** and is accepted.
+
+This is exactly the fail-open the old `raise` prevented. The comment says "the two are one effective document with one hash (measured)" — that measurement assumed the `(m, None)` row **exists**. If it is missing, the two are not one effective document; one of them does not exist.
+
+**Input that breaks it.** `FakeStore` whose `in_force_hashes` returns `{("US", None): <hash>}` but not `{("US", "paper"): ...}`; `auth.diffs` has a `PolicyDiff(market="US", environment="paper", changes=(a LAYER_ADDED for `policy.env.paper`,))` whose `old_content_hash` is **wrong**. The old code raises because `("US", None)` exists but the anchor hash differs. The new code also raises because the anchor hash differs. **Not a break** for that input.
+
+**The break** is: `in_force_hashes` returns `{("IN", None): <hash>}` but **no `("US", None)` row**, and `auth.diffs` has a US `(US, "paper")` diff with a `LAYER_ADDED`. The `derive_combinations` set includes `("US", None)` and `("US", "paper")` — so the union with stored has `("US", None)` with **no stored row**, which the previous step (step 4, "The set of combinations with a current in-force row, united with … must equal …") may already reject if `("US", None)` is not in the union. **Q-9**: does the set-equality check at the top of `_compare_anchor` reject a `(m, None)` combination with no stored row? If yes, `stored.get((diff.market, None))` can only return `None` for a stored row that the set check already rejected — **unreachable, and the fix is harmless**. If the set check is per-`(m, e)` and the `(m, None)` row is exempted (as it must be, since `(m, None)` is the base), then `None` is reachable and the fix is a fail-open.
+
+I cannot see the set-equality check. **This is a HIGH pending Q-9.** The minimal fix if reachable: `anchor = stored.get((diff.market, None)); if anchor is None: raise StaleAuthorisationError(f"{combo}: no row for {(diff.market, None)} to anchor it")` — restore the three lines but with `.get`.
+
+### D-6 — MEDIUM — `_kind` treats `Decimal("0.05")` and `0.05` as the same kind, but `_identity` treats them as distinct
+
+**Where.** `_kind` (diff l. ~435–443) returns `"number"` for `int`, `float`, `Decimal`, and **not** `bool`. `_identity` (diff l. ~380–405) returns `("number", str(Decimal(str(v))))` for the same three. For `Decimal("0.05")` vs `0.05`, `_kind` equal, `_identity` both `("number", "0.05")` — **equal**. So a change from YAML `0.05` (parsed as `float`) to `Decimal("0.05")` is **not** a change. That is the intended `C-03` "same number, re-represented" case. **OK.**
+
+But `_kind(True)` is `"bool"` and `_kind(1)` is `"number"`; `_identity(True)` is `("bool", True)` and `_identity(1)` is `("number", "1")`. Distinct — good, no X2H-2 regression. **Closed.**
+
+### D-7 — MEDIUM — `_identity` for `float("nan")` and `float("inf")`
+
+`Decimal(str(float("nan")))` raises `decimal.InvalidOperation` on some Python versions, or returns `NaN`. If a config value is `nan` (YAML `.nan`), `_identity` may raise inside `_config_changes`. That is caught by `_load`'s `except Exception` if `_config_changes` runs inside the load — but `_config_changes` runs in `diff_policies`, not `_load`. **OPEN QUESTION Q-10**: is `diff_policies` wrapped to map any exception to `PolicyDiffError`? §8's catch-all says it must be. If not, `nan` escapes as `decimal.InvalidOperation`. Fail-closed but wrong type.
+
+### D-8 — LOW — `_members(old) or frozenset()` collapses `None` and empty
+
+`_set_move` at l. ~460: `a, b = _members(old) or frozenset(), _members(new) or frozenset()`. `_members(None)` returns `None`, `None or frozenset()` is `frozenset()`. `_members([])` returns `frozenset()`, `frozenset() or frozenset()` is `frozenset()`. So `None` and `[]` compare equal in `_set_move`. But `_config_value`'s set branch checks `isinstance(old, (list, tuple))` **before** calling `_set_move`, so `None` is refused there with C-39. The `_set_move` call is only reached with lists. **Unreachable in the config path.** In `_predicate_records`, `_set_move(a, b, ...)` is called with `a, b = old.allowed_values, new.allowed_values` — which can be `None` if the field is optional. Then `None` and `[]` compare equal → NEUTRAL. That is the correct `§2 row 7` behaviour for an empty set vs absent, but it is a **silent default of a missing value** in the comparison. **LOW**: use `_members(None) is None` distinctly. Not a fail-open because the `_differs` check already fired to reach this branch, and `_differs` uses `_members` (injective, `None != frozenset()`). **Closed.**
+
+---
+
+## 3. Do the new tests and harness changes prove what they claim?
+
+### T-1 — HIGH — `t_keys_come_from_the_in_force_base` cannot fail for the F30 mutant
+
+Already covered in X2H-3 above. The test asserts `raises(...)` on `(CD, ZZ)` when the layer map is `(CD, ZZ)` and the base is `(AB, JS)`. The **correct** code reads `_load(old_dir, None, None)` → `(AB, JS)` keys → `(CD, ZZ)` is "not listed" → raises. The **mutant** reads `_load(old_dir, "US", None)` → `(CD, ZZ)` keys → `(CD, ZZ)` **is** listed → **no raise** → the test fails. **Wait, this is the opposite.** Let me re-trace:
+
+- Correct code: keys = `(AB, JS)`. Approvals `(CD, ZZ)`. `(CD, ZZ)` not in `(AB, JS)` → `PolicyGovernanceError` "not listed". Test passes.
+- Mutant (key source = US document): keys = `(CD, ZZ)` (the layer's map). Approvals `(CD, ZZ)`. `(CD, ZZ)` **is** in `(CD, ZZ)` → **no error**. Test fails.
+
+So the test **does** catch the mutant. **My earlier concern was wrong.** The test is correct. **X2H-3 F30 is closed.** Withdraw T-1.
+
+But a second mutant, "key source is the **US document on the OLD side only**" — the mutant is `_load(old_dir, "US", None)` for **keys**, and the layer on both sides carries `(CD, ZZ)`. Test catches it. **Closed.**
+
+### T-2 — HIGH — `t_dotted_keys_are_refused` cannot fail for a **refusal-removed** mutant on the *old* side only
+
+The test calls both `diff_policies(RAW, doc)` and `diff_policies(doc, RAW)`. Both sides are exercised. The `_X2_MUTANTS` entry `"the dotted-key refusal removed"` is tested by `t_dotted_keys_are_refused`. If the mutant removes the refusal, `diff_policies(RAW, hidden)` returns `[]` (the collision hides the change) and the `raises` assertion fails. **Caught.** **Closed.**
+
+### T-3 — MEDIUM — `t_type_changes_are_recorded` for `"0.050"` may be a tautology or may fail
+
+As in X2H-2 above. If `_config_value`'s numeric branch returns `C-37` NEUTRAL for Decimal-equal strings, the test asserts `C-39` and **fails**. If it returns `C-39`, the test passes and proves the spec. **Q-1** must be resolved. The mutant `"config values compared on the display string"` is caught by this test **if** the test is correct. If the test is wrong, it is a green test that proves the wrong thing.
+
+### T-4 — MEDIUM — `t_production_parser_gives_the_same_hash` may be vacuous
+
+As in X2H-10 above. If `PolicyLoader` does not call `yaml.safe_load`, patching `yaml.safe_load` does nothing and the test compares a memoised load to itself. **Q-5.**
+
+### T-5 — LOW — `t_every_key_direction_is_pinned` counts 72 but does not assert the last entry is `("**", UNDECIDABLE)`
+
+The test slices `P.CONFIG_KEY_DIRECTIONS[:-1]` and drops the wildcard, so it never checks that the wildcard is present and last. The spec §3.7 says "whose last entry is `("**", UNDECIDABLE)`". A mutant that removes the wildcard survives this test; the code would then raise `KeyError` on an unlisted key — fail-cl
+
+=====CONTINUATION (second message)=====
+
+### T-5 (finished) — LOW — the wildcard is unpinned
+
+`t_every_key_direction_is_pinned` slices `[:-1]`, so it never asserts the last tuple is `("**", KeyDirection.UNDECIDABLE)` nor that it is last. A mutant that deletes the wildcard, or moves it earlier so a real key falls through to it, survives this test. The concrete break: delete the wildcard and call `_config_value("schedule.extra", 1, 2)` — the `CONFIG_KEY_DIRECTIONS` loop falls off the end. If the lookup returns `KeyDirection.UNDECIDABLE` as a hardcoded default, the test is a tautology; if it raises `KeyError`, `diff_policies` fails closed but `§3.7`'s "There is no other wildcard" and "last entry" are unproven. **Minimal fix:** `require(P.CONFIG_KEY_DIRECTIONS[-1] == ("**", P.KeyDirection.UNDECIDABLE))` and `require(all(k != "**" for k, _ in P.CONFIG_KEY_DIRECTIONS[:-1]))`.
+
+### T-6 — MEDIUM — `t_c40`'s "G is judged on the OLD version" case is unreachable
+
+The diff adds:
+```
+new = _edit("LOSS-003", threshold=0.08)
+_apply(new, "LOSS-004", {"kill_scope": "POOL"})
+_expect(new, {..., "rules.LOSS-004.kill_displaced_by.LOSS-003": (UN, "C-40")})
+```
+The comment says G was GLOBAL when the change was made. But `_apply(new, ...)` mutates `new` **before** `_expect(new, ...)`, and `_expect` diffs against `RAW` (the frozen base), not against the pre-`_apply` `new`. If `_apply` writes the POOL scope into `new`, the old side (`RAW`) still has LOSS-004 GLOBAL — so the C-40 record is produced for the correct reason, and the mutant `"C-40 takes G from the new version"` (`global_id in new and _global_kill(new[global_id])`) would read `new[LOSS-004]` as POOL → not global → **no C-40** → test fails. **Caught.** But if `_apply` does not actually change `new` (e.g. it returns a new dict the test drops), the mutant survives and the test is a tautology. **OPEN QUESTION Q-11**: does `_apply` mutate its first argument? I cannot see it. If it returns, the fix is `new = _apply(new, ...)`.
+
+### T-7 — HIGH — `t_check_order` proves the wrong direction
+
+The test builds `auth` with a **tampered digest** (`"0"*64`) and an **edited candidate** (`threshold=0.03`). Both step 5 (candidate check) and step 6 (digest) will fail. It asserts the error message matches `"changed after approval"` — the step-5 message. The mutant `"digest checked before the candidate"` swaps `_DIGEST_CHECK + _CHECKS` → `_CHECKS + _DIGEST_CHECK`. Under the mutant, the **digest** check fires first, message `"the digest does not match"` → test fails. **Caught.** The test is correct. **Withdraw.**
+
+But: the `_CHECKS` text in the mutant is a **literal substring** of the source. If the source has been reformatted (the diff shows the source unchanged in this region — `_CHECKS` is not in the diff of `policy_diff.py`, only `_DIGEST_CHECK` is unchanged), the string still matches. **Closed.**
+
+### T-8 — MEDIUM — `t_store_failures` does not test that a **partial** store read is refused
+
+The `Broken` class raises from `in_force_hashes`, so the whole try catches and raises `InForceAnchorError`. But a store whose `in_force_hashes` **returns** a partial map (one row missing) and whose `database_time` succeeds is the D-5 scenario. No test covers it. The `t_anchor_needs_its_own_layer` test deletes `("US", "paper")` from `rows` and expects `StaleAuthorisationError` — but the auth's diff for US/paper is not a `LAYER_ADDED` in that test (the base has `env__paper=None` so the combination exists). So the `.get` path in D-5 is **not exercised by any test**. **MEDIUM**: add a test whose `auth.diffs` contains a `LAYER_ADDED` for `policy.env.paper` and whose store omits `("US", None)`.
+
+### T-9 — LOW — `t_digest_known_answer` proves the digest, not the fields
+
+The test hardcodes the preimage with `request_id`, `requested_at`, `market`, `environment`, `old_content_hash`, `new_content_hash`. A mutant that **adds** a field to the preimage (e.g. `"approvals": []`) makes the test fail — good. A mutant that **removes** `old_content_hash` also fails. **Closed** for F04–F07. But the test's preimage is a **literal in the test file**; if the production `authorisation_digest` changes its field order or separators, the test fails — that is the intent. **Closed.**
+
+### T-10 — LOW — the baseline in `mutate_policy_diff_code.py` runs the full suite in both modes
+
+`_failed(ROOT, optimise)` for `optimise in (False, True)` — the baseline runs the suite **twice** on the real repo. That doubles the wall-clock of a run that already does N mutations. Acceptable (X2H-4's requirement). **Not a finding**, note only.
+
+---
+
+## 4. Concurrency, correctness, security (delta scope)
+
+- **No new shared mutable state** in the diff. `_parsed` in the test suite is still a module-level dict, but tests are single-threaded.
+- **Float for money:** `_identity` now uses `Decimal(str(v))` for `float`/`int`/`Decimal`, which is the correct comparison form. But `_config_value`'s numeric branch (not in the diff) still decides direction — **Q-1** applies there. No new float-for-money in the diff.
+- **Naive datetimes:** the new `t_store_failures` passes a naive `datetime.now()` and expects `InForceAnchorError`. That is the correct test. No new naive datetime in production code.
+- **Security:** `t_loader_failures_are_refused` writes `b"\xff\xfe\x00"` to `policy.yaml`. The `_load` catch turns a `UnicodeDecodeError` into `PolicyDiffError`, which is what §8 says. No secret in a log added.
+- **Resource:** `_identity` on a deeply nested structure recurses; no bound. A malicious `policy.yaml` with 10^5 nesting levels is a stack overflow. The loader's YAML parser will hit its own recursion limit first (PyYAML raises `RecursionError`), which `_load`'s `except Exception` catches. **Closed** for the load path; **unreachable** for the config path if the load always precedes.
+
+---
+
+## 5. OPEN QUESTIONS
+
+| ID | Query needed to resolve |
+|---|---|
+| Q-1 | Does the numeric branch of `_config_value` (after the `_kind` check, before `TRUE_LOOSENS`) compare `Decimal` values or `str`? For `"0.05" → "0.050"`, does it return `C-37 NEUTRAL` or `C-39 UNDECIDABLE`? Read `policy_diff.py` lines between the `_kind` check and the `TRUE_LOOSENS` branch. |
+| Q-2 | Does `_required_approvals` / `_derive_authorisation` filter `Direction.NEUTRAL` records before counting? An all-NEUTRAL diff must yield `"0"` per §8 last row. Read `_derive_authorisation` and `_required_approvals`. |
+| Q-3 | Is `_leaves` (and the `_config_changes` call to it) inside the try that maps to `PolicyDiffError`, or outside? Read `diff_policies` around the `_config_changes` call. |
+| Q-4 | Do the suite's own subprocess calls (if any) pass `encoding="utf-8"`? The harness diffs do; the suite may not. |
+| Q-5 | Does `PolicyLoader.load` call `yaml.safe_load` or `yaml.load(..., Loader=yaml.SafeLoader)`? The test `t_production_parser_gives_the_same_hash` patches only `yaml.safe_load`. |
+| Q-6 | Can `Rule.inputs` hold a mapping (so `_leaves` recurses into it), or only scalars/lists of scalars? Read the `Rule` model. |
+| Q-7 | Can `IN_FORCE_STORE.in_force_hashes`/`database_time`/`request_used` raise `PolicyGovernanceError`? If yes, D-4's broad `except` re-wraps it as `InForceAnchorError`, losing §8's separate row. |
+| Q-8 | What does the code after `anchor = stored.get(...)` do when `anchor is None`? Read the lines following diff l. 1243. |
+| Q-9 | Does the set-equality check at the top of `_compare_anchor` reject a `(m, None)` combination with no stored row, making D-5's `None` unreachable? Read the first ~10 lines of `_compare_anchor`. |
+| Q-10 | Is `diff_policies` wrapped so any exception from `_config_changes`/`_identity` (e.g. `decimal.InvalidOperation` on `nan`) becomes `PolicyDiffError` per §8? |
+| Q-11 | Does `_apply` mutate its first argument in place or return a new dict? Read `_apply` in the test file. |
+
+---
+
+## 6. Verdict
+
+**REJECT.**
+
+Single reason: **D-3 — `_threshold_record`'s replacement of `elif comparison in _MIN_VALUE` with `else` is a reachable fail-open.** A rule whose `comparison` is one of `IN`, `NOT_IN`, `EXISTS`, `MULTIPLE_OF` (i.e. any comparison not in `_MAX_VALUE`) now falls into the numeric-direction branch and yields `TIGHTENS`/`LOOSENS`/`NEUTRAL` instead of the spec-mandated `UNDECIDABLE` (C-04). A `5 → 3` change on such a rule is classified `LOOSENS` and, under the approval ladder, needs one identity, not two. The prior X2H-11 called this branch dead; it is not dead on the `_threshold_record` path, only on `_compare_anchor`. This is a change that loosens a threshold with insufficient approval, on a live account, with a green suite and a green harness.
+
+Secondary blockers to fix in the same pass: **D-5** (`stored.get((diff.market, None))` may accept a `(m, e)` combo anchored by nothing, pending Q-9) and **T-6/Q-11** (a C-40 test that may be a tautology). **D-1** is a BLOCKER if Q-6 says `inputs` can be a mapping. Nothing else in this delta rises to BLOCKER; the X2H-1 dotted-key refusal, X2H-2 type-change records, X2H-4 baseline, X2H-5 loadable literal, and X2H-10 parser fallback are genuinely closed.

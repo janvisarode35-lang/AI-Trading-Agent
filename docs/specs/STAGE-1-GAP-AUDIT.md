@@ -335,8 +335,8 @@ ticks or one, 2 are contradictions, 1 has none. The full matrix is in the re-run
 
 **Block A numbers.** All present with the right value; none stated two ways inside `rules`;
 ten are duplicated in non-rule config (SPEC-P1.3.1 F-2). The value is pinned
-by a test for 12 rule ids. A rule's `action`, `mode`, `comparison` and `scope` are not yet pinned
-as Ruling 12 requires (condition 12, OPEN — see §10):
+by a test for 12 rule ids. When this audit ran, a rule's `action`, `mode`, `comparison` and `scope` were not
+pinned as Ruling 12 requires (condition 12, closed 2026-10-31 — see §10):
 `EXP-002` to `ALLOW`, `LOSS-001` to `monitor`, `LOSS-004` to 20%, `EXEC-001` allowing `MARKET`,
 and `STOP-001` to `lte` each load and pass every suite.
 
@@ -387,7 +387,7 @@ By phase. Conditions 1 to 8 keep their numbers.
 | **9** | Decide `Q-P1.2-7` / X3R-M1, widened to `reproducibility`, and name the owner of the audit writer | P2.1 code that writes an audit event; P2.3, P2.5, P2.6, P2.7, P2.9 | **BLOCKER** | OPEN |
 | **10** | Decide X3R-M2 | The first run that writes `EFFECTIVE_CONFIG_RENDERED` | **BLOCKER** for that run | OPEN |
 | **11** | Tests for the types P2.1 constructs (X5R-G1) | P2.1 code drop | HIGH | OPEN |
-| **12** | Pin `action`, `mode`, `comparison` and `scope` of the constitutional rules; define loosening for a non-threshold change (X5R-G2) | P2.9; any policy change | HIGH | **OPEN** — in progress, re-running per #6's execution sequence (see note below) |
+| **12** | Pin all five attributes (`threshold`, `action`, `mode`, `comparison`, `scope`) of every constitutional rule and `scope` and `mode` of every rule; classify every policy change by Owner Ruling 12, with UNDECIDABLE failing closed to the two-person rule (X5R-G2, X5R-G9) | P2.9; any policy change | HIGH | **CLOSED** by SPEC-P1.3.1-POLICY-DIFF (FROZEN), with the evidence below |
 | **13** | Ratify `A-14`; state how a `PolicyVerdict` becomes a `RiskVerdict`; decide earnings blackout | P2.9 | BLOCKER for P2.9 | OPEN |
 | **14** | Decide whether daily and weekly loss trip the kill switch | P2.10 | BLOCKER for P2.10 | OPEN |
 | **15** | Run the suites in CI, on Python 3.12+ | all | MEDIUM | OPEN |
@@ -419,6 +419,39 @@ By phase. Conditions 1 to 8 keep their numbers.
 > 5. Tests that fail when the code is broken.
 >
 > This row closes only when those steps are done.
+
+**Condition 12 — closed 2026-10-31.** Issue #6's sequence was followed in order, and every result below comes from
+one commit, `c75f7f6`, extracted with `git archive` and run with `py -3.11`. This is SPEC-P1.3.1 §10's closing record.
+
+| §10 item | Result |
+|---|---|
+| 1 | SPEC-P1.3.1 v0.3.4 FROZEN at `6832f76`, after X2 reviews steps 2 to 2e in separate conversations. No BLOCKER open. B1 to B7 answered or ratified |
+| 2 | X1 generated from the frozen spec. X2 of the code: 1 BLOCKER and 4 HIGH, all fixed. Delta X2: all closed, in a separate conversation, and run in DeepSeek too |
+| 3 | `verify_p13_policy_diff.py`: exit 0, plain and `-O`, 116 tests. **Python 3.12+ not run: condition 15 is carried** |
+| 4 | `mutate_x5r_g9.py`, five mutations: five `[KILLED]`, each attributed to its pin, exit 0. Negative control: five `[SURVIVED]`, exit 0 |
+| 5 | `--sweep`: 582 generated, 486 loadable as §7.5 states, 486 KILLED, exit 0. Negative control: 486 SURVIVED, exit 0 |
+| 6 | `mutate_policy_diff_code.py`: 84 of 84 caught in both modes, exit 0. That is M-1 to M-30 plus M-31 onward from the X2. Negative control: 0 of 84, exit 0 |
+| 7 | `t_no_bare_assert` passes. `verify_p13_config.py` (39) and `verify_p11_x5_conditions.py` (12) pass, plain and `-O` |
+| 8 | SPEC-P1.3 v0.1.1 carries §6's text, with its change-log row at STAGE-1-FREEZE §11 |
+| 12 | Done at the freeze |
+
+**Carried in writing**, each a requirement on the phase named:
+
+| §10 item | Carried | To |
+|---|---|---|
+| 9 | F-14 and F-15: a KILL verdict's scope comes from the lowest-id rule, and a kill from `on_missing_input` has no scope. C-40 gates the change in the meantime | SPEC-P1.3 v0.2 (B5 option d); P2.10 |
+| 10 | Q-P1.3.1-13 and F-16, F-18: no store records the in-force version, so **no policy change can be applied by this path**, which fails closed. Prerequisite of the first policy change after go-live | P1.2 / P6.4 |
+| 10 | B7, no bootstrap, reopened when a second approver exists, and Q-P1.3.1-14: **no LOOSENS or UNDECIDABLE change can be approved** until then. Prerequisite of the first gated change. An identity holding a dot cannot be listed (X2J-4): the map's documentation must exclude it | Owner; SPEC-P1.3 v0.2; P6.2 |
+| 11 | Q-P1.3.1-11: an order the risk engine computes as exposure-reducing is never denied by TURN-001, TURN-002 or HOLD-001. B1's answer is the one that is not fail-closed for exits | P2.9 (#16) |
+| 13 | Q-P1.3.1-15: a `HALT_ENTRIES` outcome decides entries only. For an exit, the gate resolves the binding set without it | P2.10 (#17) |
+
+**Erratum to carry into SPEC-P1.3.1's next revision.** §3.6 C-40 trigger (2) must read "whose own, non-derived record".
+As written it contradicts §7.4's C-36 case, and the code follows §7.4. The X2 upheld this (D-1 of the X1 notes): the
+diff is gated by its C-36 record either way, so no zero-approval path follows.
+
+**Not verified:** Python 3.12+ (condition 15); `mypy --strict`, which is not installed for `py -3.11`; and any real
+store, because `InForceStore` is exercised only by a test double. The items above are carried in this record, not as
+comments on #16 or #17. The reviews are in `AI-Trading-Agent-stage1-fresh-reviews/X5R-G9/`, steps 2 to 4b.
 
 Finding A is open and accepted (STAGE-1-FREEZE §11.5). Remediation E is deferred. Neither is a
 Stage 2 entry condition.
