@@ -1,0 +1,69 @@
+**Adversarial review — SPEC-P0.2-PROVIDERS v0.2→v0.3**
+
+Focus areas ordered as requested. Word budget is tight; each finding is stated to be falsifiable.
+
+---
+
+### 1. `publication_data_cleared` / `row_cleared` — can they still return true when they should not?
+
+**F-1 (BLOCKER, spec §8.1 `row_cleared`, and D-43 / E-36 / P2.7).**
+`row_cleared` requires `s.primary is provider` **and** `licensed_use is PUBLICATION`. But `publication_data_cleared` accepts a market-less row (`s.market is None`) for any capability as long as it is `PUBLICATION`. Nothing in `ProviderSelection` prevents a market-less `FX_REFERENCE`/`MACRO` style row from being modelled as `market=None` and `primary=UPSTOX`. That is fine for the market gate. The **defect** is in `row_cleared`: it matches on `s.market is market`. A signal entry for `Market.IN` fed by a bar whose `VendorSeriesSnapshot.market` is `IN` but whose provider row was recorded with `market=None` (a market-less "global daily bars" row) returns `False`, which is fail-closed and correct. The inverse is the bug: there is **no capability/market uniqueness constraint** on `ProviderSelection`. Two rows can exist for `(EOD_BARS, IN)` with the same primary — one `PUBLICATION`, one `NONE`. `publication_data_cleared` requires `all(...)` so it fails; good. `row_cleared` uses `any(...)`, so **a single `PUBLICATION` row for `(EOD_BARS, IN, UPSTOX)` clears every bar from Upstox regardless of which row the bar actually came from.** Concrete failure: operator adds a provisional trial row `(EOD_BARS, IN, UPSTOX, PUBLICATION)` for one licensed instrument subset, leaving the real EOD row `NONE`; every Upstox EOD bar now passes `row_cleared`. Minimal fix: add a validator that `(capability, market)` — or `(capability, market=None)` — is unique across `selections`, and/or have `row_cleared` take the `snapshot_id`/`selection` and compare against the exact row, not a set membership test.
+
+**F-2 (HIGH, `ProviderSelection` validator, §8.1).** The new check `licensed_use is PUBLICATION => status is SELECTED` does **not** enforce the reverse. A `SELECTED` row can carry `licensed_use=NONE`, so `publication_data_cleared` returns false for that capability, which is correct. But `row_cleared` on a `SELECTED` row with `NONE` returns false too. That part is fail-closed. The real gap: **nothing requires `licensed_use` to be set from a source of truth.** It is a Pydantic field settable to `PUBLICATION` by any caller constructing a selection. `t_publication_stays_off_until_every_capability_is_cleared` builds `cleared_rows()` with `LicensedUse.PUBLICATION` programmatically. That proves the function, not the gate. A config-driven `providers.selections` (new row in §12) can therefore be edited to `PUBLICATION` on any SELECTED row and pass every test. This is a **P1.3 loader defect**, not a spec-code defect: the loader must reject `PUBLICATION` unless the acceptance record (owner decision + written licence ref) is present. The spec says this only in prose (E-36, D-44); the check script cannot and does not test it. Flag it as an unclosed gap, not a defect in the diff.
+
+**F-3 (MEDIUM, `publication_data_cleared`, market-less handling).** A market-less row clears *both* markets. If `MACRO`/`FX_REFERENCE` ever becomes a signal input (it is not today), one licence answer for one market clears both. That is consistent with "market or market-less" in the text, but is asymmetric with `row_cleared`, which has no `market=None` branch. If a bar arrives with `snapshot.market=None` (should be impossible — `VendorSeriesSnapshot` validator rejects it) `row_cleared` returns false. So no false-true. Note only.
+
+**F-4 (LOW, `NOT_SIGNAL_INPUTS`).** It is a module-level frozen set in the executable block. The check script imports it and asserts nothing about its contents. If someone adds `Capability.EOD_BARS` to `NOT_SIGNAL_INPUTS`, `publication_data_cleared` skips the most important capability and returns true on an empty set. `t_publication_stays_off_until_every_capability_is_cleared` includes `require(not publication_data_cleared(Market.IN, ()))` — with `EOD_BARS` excluded, `cleared_rows(skip=EOD_BARS)` is empty and the function would return `True`, so the `cleared_rows(skip=Capability.NEWS)` test would *not* catch it but the `()` test would only catch it because the loop still has other capabilities. Actually with all bar capabilities excluded the empty-set test still returns `True` only if *all* capabilities are in `NOT_SIGNAL_INPUTS`. So the risk is real but narrow. Fix: assert `NOT_SIGNAL_INPUTS == {BROKER_EXECUTION, INTRADAY_BARS, FX_REFERENCE}` in `t_enum_sizes` or a new test.
+
+---
+
+### 2. Is `FX_REFERENCE` rightly left out of the signal-input capabilities?
+
+**F-5 (HIGH, policy/spec contradiction, `NOT_SIGNAL_INPUTS` + D-43 + UP-25/BO-1).**
+Excluding `BROKER_EXECUTION` (Model B has no routing) and `INTRADAY_BARS` (D-43, research only) is right. Excluding `FX_REFERENCE` is **not obviously safe for India**. Signals on NSE/BSE instruments are denominated in INR; Model B publishes to users presumably reporting in some base currency. If any derived signal, ranking, or track record is expressed in USD (or converted for a US-facing user), then FX is a **derived input to a published figure**, and MB-AC-14 plausibly reaches it. The spec gives no evidence that FX_REFERENCE is used only internally for display. Under "fail closed" this is a question, not a decision the author may take: either (a) FX is only used inside the reporting layer and is never a model input, in which case say so in the spec and cite it; or (b) FX is a signal input for cross-listed or USD-reporting instruments, in which case it must be in scope. As written the exclusion is an **unstated assumption**. Add to OPEN QUESTIONS: "Does FX_REFERENCE feed any published number, or only display?" and until answered, the burden is on the spec to justify exclusion. I rate it HIGH because the exclusion is silent.
+
+---
+
+### 3. Did any fix break another part of the spec?
+
+**F-6 (HIGH, §5.14 Upstox auth block vs `research.http_path_allowlist`).** The new prose says the allowlist holds "market-data paths only" and cites a test asserting rejection of `/portfolio`, `/user`, `/charges`, `/margins`. But `§12` still defines `research.http_path_allowlist` as "historical, intraday, instruments, fundamentals, news, market holidays" — and `Charges`, `Margins`, `Option Chain`, `IPO` are now listed as working *without* static IP (added in this diff). The allowlist prose and the config-key row now disagree on whether Charges/Margins are in scope. Since those categories are account-adjacent, including `charges` in the "works without static IP" list while a test asserts the allowlist rejects `/charges` is an **internal contradiction introduced by the diff**. Minimal fix: remove `Charges` and `Margins` from the no-static-IP enumeration, or change the test's expected rejects. Pick one; the safer is to drop them from the enumeration.
+
+**F-7 (MEDIUM, UP-41 vs F-82 section 15).** The diff rewords F-82 §15 to "FYERS shall delete cached and stored content" and §5.15 to match. That is a **vendor-fact change** (who deletes). Under the instructions vendor facts were reviewed earlier and should only be re-checked if a change depends on it — the change here *does* alter the deletion obligation's subject, which affects the [DEFAULT-62] snapshot conflict. It is acceptable to reword if it was misquoted, but the check script does not test prose, so a transcription error cannot be caught. Flag: cite the exact §15 sentence in OQ-68's resolution ticket; do not let counsel rely on paraphrase.
+
+**F-8 (MEDIUM, PE-24 rewrite).** "the highest session date in the answer, which need not be the last row" is correct, but PE-24 now also says "a duplicate key is PE-13". PE-13 is not shown; confirm PE-13 is *duplicate session in a response* and not another error class. If PE-13 is a different condition, this is a broken cross-reference. Worth a one-line check.
+
+**F-9 (LOW, `t_india_rows_are_as_decided`).** SEL-10 is asserted `("UPSTOX", None, "BLOCKED")` but the test's `want` dict also asserts `sel["SEL-8"].backup is None`; SEL-8 is `UNFILLED` in `t_selection_states`? No, SEL-8 is not in that UNFILLED set. Verify SEL-8's market in the table: the test is asserting a market-India row for `SEL-8`, but `t_every_india_data_row_names_the_licence_question` only checks `OQ-68` presence for `Market.IN`, which any PROVISIONAL/BLOCKED row must carry. Consistent. No defect, noting because it looked suspicious.
+
+---
+
+### 4. Does the check script prove what it claims?
+
+**F-10 (HIGH, coverage claim vs `t_publication_stays_off_until_every_capability_is_cleared`).** The Evidence paragraph says the script covers "`licensed_use` rejected as `PUBLICATION` on a non-SELECTED row". True (`t_publication_needs_a_selected_row`). It also says `publication_data_cleared` is "true only for a full cleared set". The test builds "a full cleared set" by **caller-controlled construction**, not by reading §6.3. So the test proves the function's logic under a synthetic input; it does **not** prove that the shipped selection rows can ever become a cleared set, nor that the loader path exists. That is exactly the gap in F-2. The script should either (a) load `providers.selections` from a fixture and assert the function returns False, or (b) explicitly state it does not cover the loader.
+
+**F-11 (MEDIUM, `t_publication_needs_a_selected_row` uses a bare `lambda`).** The `rejected()` helper catches `(ValidationError, ValueError)`. If Pydantic v2 raises a subclass of `ValueError` for a `model_validator` failure (it raises `ValidationError`, which is a subclass of `ValueError` in v2), fine. But if the validator's `raise ValueError` is wrapped, a future pydantic major could change this and `rejected` would silently pass on an *unexpected* exception class. Narrower: catch only `ValidationError`. Minor.
+
+**F-12 (MEDIUM, `t_throttle_rows_are_half_of_the_limit`).** It checks the table text ends with a specific string. It does **not** verify that the `ClientThrottle` values derived from `RateLimitFact` actually equal `documented_max_count // 2`. `t_throttles_are_half_and_match_their_facts` builds its own throttles. So a table edit and a code edit could diverge without either test failing. Add: parse the THR-13/THR-14 rows, build `ClientThrottle`, assert `client_max_count * 2 <= documented_max_count`.
+
+**F-13 (MEDIUM, `selections()` parser).** `backup=None if cap == "broker_execution" else provider(backup)` forces `None` for `BROKER_EXECUTION`. But `t_selection_states` asserts only `SEL-22.backup is None`. If a future `BROKER_EXECUTION` row legitimately has a backup (say, a failover broker), the parser hides it and the test passes falsely. Make the parser honour the cell.
+
+**F-14 (LOW, `t_header_and_placeholders`).** `require(not re.search(r"\bdormancy_alerts\b", TEXT))` is good, but the check does not assert `verify_p02_spec.py` exists at the path named in the Evidence paragraph, nor that it runs under 3.12. The Evidence paragraph itself concedes 3.12 is not exercised (R-4). That concession is honest and should be tracked as a blocking test gap for P2.1: **do not ship the 3.12 assertion until the script has been run once under 3.12**. Under the "audited by a regulator" framing, "not run on the stack's own Python" is a finding, not a footnote.
+
+**F-15 (MEDIUM, `t_every_new_row_exists` for `F 77..108`).** It requires every integer in 77–108 to be a table row. If a fact row is later deleted (say F-77 superseded), the check fails and forces renumbering. That is intentional per the spec's stable-identifier rule but is brittle: it conflates "identifier must exist" with "numbering must be dense". Prefer checking cited ⊆ rows (already done in `t_identifier_series`) and removing the dense-range assertion for F. Same for OQ, PE, etc. This will bite on the next amendment.
+
+**F-16 (LOW, `t_identifier_series` reads `\bE-(\d+)\b`).** `E-` collides with `E-35`, `E-36`, but also with text like `F-` no, fine; but it would match `CE-`, `PE-`? `\b` before `E` requires a word boundary; `PE-` has boundary before `P`, not before `E`? Actually `\bE` matches after a non-word char. `xE-35` would match. Inspect: `PE-35` — `\bPE` then `-`; the regex `\bE-(\d+)` on "PE-35" — the character before `E` is `P`, a word char, so no `\b` between `P` and `E`. Safe. No defect.
+
+---
+
+### Verdict
+
+**FIX-THEN-SHIP.**
+
+Single blocking reason if forced to REJECT: **F-1 — `row_cleared` returns true from a set-membership `any()` over a non-unique `(capability, market, primary)` key space, and `ProviderSelection` does not enforce uniqueness.** This lets a single trial `PUBLICATION` row whitelist every bar from that provider for that capability and market, defeating the per-bar gate D-43 and E-36 claim to enforce. Minimum fixes before ship:
+
+1. F-1: uniqueness validator on `(capability, market)` and `(capability, None)`; `row_cleared` takes the exact row or `snapshot_id`.
+2. F-4: pin `NOT_SIGNAL_INPUTS` contents in a test.
+3. F-6: reconcile the Charges/Margins contradiction between the Upstox auth prose and the allowlist config row/test.
+4. F-10, F-12: the check script must exercise the loader path and the table↔model half-budget equality, not just synthetic callers.
+5. F-5: convert the `FX_REFERENCE` exclusion into an explicit OPEN QUESTION with the exact query.
+
+F-7, F-8, F-14 are MEDIUM and must be tracked, not silently dropped; F-14 in particular (3.12 not exercised) is a release-gate item for P2.1, not a v0.3 defect.

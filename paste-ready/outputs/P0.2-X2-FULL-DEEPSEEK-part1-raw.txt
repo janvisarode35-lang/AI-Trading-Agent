@@ -1,0 +1,112 @@
+**Review of SPEC-P0.2-PROVIDERS v0.2, header to section 5**
+**Reviewer stance:** Adversarial. Assume unattended execution against live brokerage/data accounts. Findings ranked by severity. File/line = section/row.
+
+---
+
+## 1. SPEC CONFORMANCE
+
+**HIGH — F-77/F-98 plan history and #68 premise: the spec correctly identifies the contradiction but the default selection still rests on a licence that is not verified.**
+Section 0 and BQ-48 state that Fyers Standard serves intraday only from 2025 and daily from 2021, and that Prime is paid. The vendor page confirms this: Data APIs 5 req/s, 50/min, 5,000/day on Standard; intraday history “1 year (from 2025)”; daily “5 years (from 2021)” . The spec’s F-77 row is accurate. But [DEFAULT-59] selects Upstox with “no intraday backup” while the selection table (section 6.2, not in scope here) is not visible. The defect is that the spec **re-uses #68 figures after confirming one does not hold**, yet the default still reads as a data selection rather than a blocked one. Under Model B, no India row may be SELECTED (section 0, decision 2; UP-41). The header says “after v0.2 every India capability has a named candidate, but each rests on a licence that is not verified.” That is correct. The selection table must not present Upstox as a selection; it must present it as a **named candidate pending OQ-68**.
+
+**MEDIUM — Benzinga corrections (F-94, F-99) are factually correct but the spec attributes them to “SPEC-P2N.13 F-1” as if F-1 were a correction of Alpaca.**
+Benzinga’s own page states: history from 2010; 130–160 full-length articles per day; 600–900 real-time headlines per day; REST, TCP streaming, RSS; API pull or TCP push . Alpaca’s 2022 announcement states: 130–160 full-length articles, 600–900 real-time headlines, history to 2015, REST and WebSocket . The spec’s row F-94 and F-99 correctly record both. UP-48 correctly notes that F-1 was “fair as to Benzinga’s product” but “not an error in what Alpaca said.” No defect. The only residual issue is that F-94’s “more than 200 stories and 1,000 pieces a day” (from the same page) is recorded but the spec’s summary in section 5.2 says “treat the volume as a vendor range” — correct.
+
+**HIGH — Upstox Analytics Token: the spec correctly records one-year read-only, but misses the static-IP boundary for account-specific GETs.**
+F-87 says “no static IP for market-data categories” and “account categories need a whitelisted IP.” Upstox’s own announcement confirms: Market Quote, Historical Data, Market Information, Fundamentals, News, Websocket work without Static IP; User, Portfolio, Orders, GTT, MF, P&L, Payments require Static IP . The spec’s section 5.4 says this correctly. **However**, [DEFAULT-60] selects the Analytics Token for the **data client**, and section 5.4 states “Upstox data has no daily human step.” That is true only for the market-data categories. If the data client ever reads holdings or positions (e.g., for reconciliation under Model B’s signals-only path — not needed, but the capability table lists `broker_execution` as deferred), the token would fail without static IP. Under Model B this is moot. But the spec should state explicitly that the Analytics Token’s **market-data-only** scope is the reason no static IP is needed, and that any future account-data read reintroduces the static-IP requirement. Section 5.4 says “account categories … need a whitelisted IP” but does not draw the operational consequence: the read-only client must be allowlisted at the path level to **market-data paths only**, not “GET paths” generically. A misconfigured path allowlist that includes `/v2/user/profile` would fail at runtime and, worse, might be treated as a data outage rather than a configuration error.
+
+**MEDIUM — Upstox historical depth: the spec says minutes/hours “January 2022” and days “January 2000.” Vendor confirms.**
+Upstox announcement: Minutes & Hours from January 2022; Days, Weeks & Months from January 2000 . F-43 and section 5.4 are accurate. No defect.
+
+**LOW — Fyers token expiry zone: F-79 says “6:30 AM daily, zone not stated (A-76).”**
+The vendor page does not state the zone on the plans/limits page . The spec’s treatment as ASSUMPTION A-76 is correct. No defect.
+
+---
+
+## 2. CONSTITUTION VIOLATIONS
+
+**BLOCKER — Section 5.4, Upstox execution paragraphs: the spec says “Order paragraphs below are kept for any future execution phase (MB-8); no v1 code may call them (MB-AC-2).” This is correct. But the spec then documents the Upstox **place-order** endpoint with full field detail (section 5.4, Orders), including `market_protection` 1–25 and `slice`. Under INV-2 (“LLMs never … place/cancel/modify orders”) and Model B’s no-order-routing decision, documenting a live order endpoint is not a violation per se — it is a fact sheet. The violation risk is that the **read-only HTTP client with path allowlist** ([DEFAULT-50]) must be specified with a **deny-by-default path allowlist that contains only market-data paths**, not a blocklist of order paths. The spec says “path allowlist” in section 5.4 and [DEFAULT-50] but does not enumerate the allowed paths. For an audited system, the allowed-path set must be frozen in the spec, not left to implementation. Minimal fix: add a row in section 8 (typed form) or section 5.4 listing the exact Upstox paths the v1 client may call: `/v3/historical-candle/...`, `/v3/market-quote/...` (if used), fundamentals, news, instruments, holidays. Everything else denied.
+
+**BLOCKER — Fyers: section 5.15 says “No Fyers client is built until OQ-68 is answered for Fyers.” Correct. But the spec still records Fyers order API facts in section 5.15 (“Order specifics are deferred (MB-8) and were not researched: the documentation lists single, multi and async orders, GTT and smart orders”).** This is not a violation; it is a fact sheet. The violation risk is that a future engineer reads the Fyers fact sheet and builds a client because the spec “has the endpoints.” The spec’s own rule (section 5.15, first paragraph) is the control. No defect, but the **BLOCKER** is that Fyers’ API terms (F-82) are recorded as barring third-party use and requiring written consent for derivative works. The spec says OQ-68 is a legal question. Under INV-9 (compliance built in) and Model B’s MB-AC-14 (licence must permit commercial use and publication of derived signals), **Fyers is not a candidate for Model B at all** until counsel says otherwise. The spec should state this more bluntly: Fyers is **excluded from selection** under Model B, not merely “no client until OQ-68.” The difference matters: a named candidate implies it could be selected; an excluded source does not.
+
+**HIGH — Upstox licence (F-100, F-92): a forum reply is not a licence.** The spec correctly says “a forum reply is not a licence” (UP-41, section 5.4 Legal). But [DEFAULT-63] uses Upstox news and sector “as PROVISIONAL.” Under Model B, provisional use of unlicensed data in a commercial signals service is exactly what MB-AC-14 prohibits. The default should be **BLOCKED**, not PROVISIONAL, until OQ-68 returns a written answer. The spec’s own rule (“No India selection may be SELECTED; research use only”) is stronger than [DEFAULT-63]. Minimal fix: change [DEFAULT-63] to “BLOCKED for any Model B output; research use only under section 6.3 gate.”
+
+---
+
+## 3. CORRECTNESS
+
+**HIGH — Section 5.15, Fyers intraday history: “1 year (from 2025)” with a yearly reset.** The vendor page says “Last 1 year, every year will reset to last 1 year” . On 2026-10-30, “last 1 year” means 2025-10-30 to 2026-10-30, not “from 2025-01-01.” The spec’s parenthetical “(from 2025)” is the vendor’s own label, but the spec then says (section 5.15) “does not say whether Standard reaches back a rolling 365 days or to 1 January 2025; on 2026-10-30 that is 365 or 667 days.” This is correct and appropriately flags OQ-74. **No defect** — the spec correctly refuses to resolve the ambiguity. The only issue is that BQ-48’s “about 4.8 years” for Upstox (January 2022 to October 2026 = 4.8 years) is arithmetic that assumes continuous trading days; it is an approximation and should be labelled ASSUMPTION. It is not labelled.
+
+**MEDIUM — Section 5.4, Upstox historical candle timestamp: “ISO 8601 with +05:30.”** The vendor error-code page (F-3) does not show a timestamp example in the search result. The spec’s claim is from F-43 (PRIMARY_EXTRACT). Not re-verified in this review. Accept as recorded.
+
+**MEDIUM — Section 5.2, Benzinga “TCP push” vs “WebSocket.”** Benzinga’s page says “REST API, TCP streaming, and RSS feeds” . Alpaca’s 2022 announcement says “real-time streams over WebSocket” . The spec says “TCP push” (F-94) and “Alpaca … real-time news WebSocket” (F-95). These are not contradictory: TCP streaming is the transport; WebSocket is the application protocol. But the spec should not imply Benzinga offers “TCP push” while Alpaca offers “WebSocket” as if they were different products. The minimal fix: in section 5.2, say “Benzinga offers REST, TCP streaming (which Alpaca exposes as a WebSocket), and RSS.”
+
+---
+
+## 4. CONCURRENCY
+
+**Not applicable to the reviewed sections (header–5).** The typed models and rate budgets are in section 8, out of scope. No concurrency finding from the fact sheets alone.
+
+---
+
+## 5. FAILURE HANDLING
+
+**HIGH — Section 5.4, Upstox Analytics Token expiry (PE-17): “expiry is a known date, so it is alerted, not discovered.”** This is correct. But the token is **one per account**, and regenerating it **revokes the previous token** (F-87: “Only one Analytics Token is permitted per account at a time”). If the alert fires and an operator regenerates the token in the Upstox UI, the running client’s token is immediately invalid. The spec does not state the **atomic swap procedure**: generate new token → write to Vault → restart client → verify → revoke old (already revoked by generation). The failure scenario: operator regenerates token at 14:00 IST while the evening batch is mid-run; the batch’s next request returns `UDAPI100050` (invalid token); if the batch treats that as a transient auth error and retries, it will retry forever against a dead token. Minimal fix: section 5.4 or PE-17 must state that token rotation is a **maintenance-window operation** with the data client stopped, and that `UDAPI100050` is a **fatal, no-retry** error that halts the batch and alerts.
+
+**MEDIUM — Section 5.15, Fyers error -429 and -360: the spec says “more than 3 per-minute breaches in a day block the user for the rest of that day.”** Vendor confirms: “if the per-minute rate limit is exceeded more than 3 times in a day, the user is blocked for the rest of the day” . The spec’s THR-14 is not in scope, but the error path (PE-19, PE-21) is conditional on OQ-68. **No defect** in the fact sheet.
+
+---
+
+## 6. RESOURCE AND PERFORMANCE
+
+**MEDIUM — Section 5.4, Upstox instrument files: “Gzipped JSON … refreshed around 06:00, rarely during the day.”** The spec does not state a **maximum size** for `complete.json.gz`. If the file is hundreds of MB and the client decompresses it into memory on every restart, a single VM could OOM. The spec should require streaming decompression or a size cap with fail-closed on exceedance. This is a data-client design requirement that belongs in section 5.4 or section 8 (typed form, out of scope). Flagging for the section 8 review.
+
+---
+
+## 7. SECURITY
+
+**HIGH — Section 5.4, Upstox Analytics Token: “Sent as `Authorization: Bearer` (F-90 samples).”** The token is a one-year read-only credential. The spec does not state that it must be stored in Vault and **never logged**. A `requests` library debug log or an exception traceback containing the `Authorization` header would expose a year-long credential. The spec’s SECURITY requirements are not in the reviewed sections, but the fact sheet should state: “The Analytics Token is a bearer credential; it is read from Vault at process start, held in memory only, and never written to any log, traceback, or audit event.” Minimal fix: add to section 5.4 Auth for data.
+
+**MEDIUM — Section 5.2, F-94: Benzinga “no price” is recorded, but the spec does not state that the Benzinga page was read as a **vendor marketing page**, not a licence. The legal terms are not on that page. The spec’s Legal line says “Redistribution and storage terms: NOT VERIFIED (OQ-37).” Correct. No defect.
+
+---
+
+## 8. TESTS
+
+**Not applicable to the reviewed sections (header–5).** The test requirements are in section 8/9, out of scope. The only test-related observation: the spec’s claim that “F-39 and F-43 were read again on 2026-10-30 and are unchanged” is a **manual re-read**, not an automated check. For an audited system, vendor-page changes should be diffed mechanically or at least recorded with a timestamped hash. This is a process recommendation, not a defect in the spec text.
+
+---
+
+## 9. SIMPLICITY
+
+**MEDIUM — Section 5.4, Upstox GTT: the spec documents GTT fields and statuses in detail (F-42), then says “execution deferred.”** This is fact-sheet completeness, but it is **speculative abstraction**: no v1 code will use GTT, and the fields are not needed for the data client. The minimal fix: move the GTT paragraph to an appendix labelled “Deferred (MB-8)” or delete it from v0.2. The same applies to the Upstox place-order field list (section 5.4, Orders). The spec’s own simplicity rule (“what can be deleted”) applies.
+
+**LOW — Section 5.2, Benzinga: “No selection changes: the news path runs once per decision cycle, so push delivery has no use in v1.”** This is correct and is a good example of the spec’s own simplicity discipline. No defect.
+
+---
+
+## OPEN QUESTIONS ADDED OR AMENDED BY THIS REVIEW
+
+| # | Query needed | Why |
+|---|--------------|-----|
+| OQ-78 | Upstox: exact list of market-data GET paths covered by the Analytics Token without static IP. Confirm `/v3/historical-candle/*`, `/v3/market-quote/*`, fundamentals, news, instruments, holidays are all in the no-static-IP set. | Path allowlist must be frozen; a misconfiguration is a runtime failure, not a security breach, but it breaks the data pipeline. |
+| OQ-79 | Fyers: does a non-trading app (data-only) require the API terms to be accepted, and do sections 11–12 (no third-party use, written consent for derivative works) apply to a signals service that publishes derived signals? | OQ-68 is broader; this is the specific Model B question. |
+| OQ-80 | Upstox Analytics Token rotation: confirm that generating a new token immediately revokes the old one, and whether the old token’s revocation is immediate or eventual. | Determines whether rotation can be done without stopping the client. |
+
+---
+
+## VERDICT
+
+**FIX-THEN-SHIP** for the reviewed sections (header–5), conditional on the section 6–11 review.
+
+**Reason for not rejecting:** the fact sheets are substantially accurate against vendor pages; the spec correctly identifies the Fyers plan contradiction, the Upstox licence gap, and the Benzinga volume discrepancy. No constitutional violation is committed by the reviewed text itself.
+
+**Required fixes before this section is auditable:**
+1. Section 5.4: enumerate the Upstox read-only path allowlist (BLOCKER).
+2. Section 5.15: state that Fyers is **excluded** from Model B selection pending OQ-68, not merely “no client built” (BLOCKER).
+3. [DEFAULT-63]: change Upstox news/sector from PROVISIONAL to BLOCKED for Model B output (HIGH).
+4. Section 5.4: add token-rotation procedure and `UDAPI100050` no-retry rule (HIGH).
+5. Section 5.4: add bearer-token logging prohibition (HIGH).
+6. Section 5.2: correct “TCP push vs WebSocket” phrasing (MEDIUM).
+7. Delete or appendix-defer Upstox GTT and place-order field lists (MEDIUM).
+
+**Single reason if REJECT were forced:** the Upstox path allowlist is not enumerated, so the “read-only HTTP client” is an implementation decision, not a spec decision. An audited system cannot leave the allowed-path set to the engineer who writes the client.

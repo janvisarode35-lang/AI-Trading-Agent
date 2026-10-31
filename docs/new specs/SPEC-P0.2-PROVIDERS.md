@@ -1,10 +1,10 @@
 ---
 id: SPEC-P0.2-PROVIDERS
-version: 0.2
+version: 0.3
 status: DRAFT
 phase: P0.2
 depends_on: [SPEC-A-CONSTITUTION, SPEC-P0.1-DECISIONS, MODEL-B-DECISION, SPEC-CR1-US-DAY-TRADING]
-produces: [F-6..F-64, F-77..F-108, DEFAULT-22..DEFAULT-31, DEFAULT-59..DEFAULT-64, ProviderId, Capability, SelectionStatus, VerificationLevel, LimitBasis, ProviderErrorClass, AdjustmentBasis, BarResolution, ClientOrderRef, RateLimitFact, ClientThrottle, ProviderSelection, VendorSeriesSnapshot, AccountActivity, ResearchGateApproval, dormancy_alerts, SEL-1..SEL-23, PE-1..PE-25, THR-1..THR-14]
+produces: [F-6..F-64, F-77..F-108, DEFAULT-22..DEFAULT-31, DEFAULT-59..DEFAULT-64, ProviderId, Capability, SelectionStatus, VerificationLevel, LimitBasis, ProviderErrorClass, AdjustmentBasis, BarResolution, LicensedUse, DormancyStatus, ClientOrderRef, RateLimitFact, ClientThrottle, ProviderSelection, ProviderSelectionSet, VendorSeriesSnapshot, AccountActivity, ResearchGateApproval, dormancy_status, research_gate_open, publication_data_cleared, row_cleared, throttle_matches, SEL-1..SEL-23, PE-1..PE-25, THR-1..THR-14]
 ---
 
 > **Model B notice (2026-10-14).** The Owner chose signals only for v1 (no order routing, no broker integration, no handling of user funds). This spec's text below is unchanged. Where it concerns orders, brokers or accounts it is superseded or deferred as listed in `MODEL-B-DECISION.md` section 6, and Block A items are read with the amendments BA-1 to BA-6 there. Phases are re-run per `ROADMAP-V1.md`.
@@ -15,7 +15,10 @@ Date: 2026-10-13; amended 2026-10-30. Decision owner: Owner. Author: integration
 
 Version history: 0.1 (2026-10-13) first record. 0.2 (2026-10-30) amendment for issue #2: section 0
 says what changed, and why. This amendment is not the Model B re-run that `ROADMAP-V1.md` requires
-of P0.2; it changes the India data rows and the items in section 0 only.
+of P0.2; it changes the India data rows and the items in section 0 only. 0.3 (2026-10-30) fixes from
+the full-spec X2 in claude.ai and DeepSeek: typed licence gate, research gate revocation, shared
+rate budget, candle ordering, tick unit, a status in place of the dormancy sentinel, and the check
+moved into the repository. No selection changed.
 
 Inputs consumed by v0.1: `CONSTITUTION.md` v0.3 (SPEC-A-CONSTITUTION) and `SPEC-P0.1-DECISIONS.md`
 v0.1, both as supplied in full with the phase prompt. No other repository file was read (N-3).
@@ -60,7 +63,7 @@ stated the figure, so nothing here changes for it.
 **The result that matters.** The price, history and limit figures recorded in #68 were re-read at the vendors' pages before
 being re-used, and one of them does not hold as recorded. Fyers documents intraday history from
 3 July 2017, but its free Standard plan serves intraday only from 2025 and daily only from 2021;
-the deeper history needs the paid Prime plan (F-77, F-83). Fyers brought in this plan structure on
+the deeper history needs the paid Prime plan (F-77, F-83). Fyers' plan-based limits took effect on
 2026-10-16 (F-98), the day before the Owner's decision of 2026-10-17, which was made on the reading
 that this depth was free. Separately, the Fyers API terms restrict derived
 works, distribution and paper trading in ways that bear directly on a signals service (F-82), and
@@ -93,11 +96,11 @@ Change log:
 | 5.15 | New: Fyers. Non-trading app required |
 | 6.1, 6.2, 6.3 | C6 scored for Model B on re-scored rows; 12 rows added and 2 re-scored; SEL-4, SEL-6, SEL-8, SEL-10, SEL-12, SEL-14, SEL-16 changed; SEL-22, SEL-23 added; research gate and publication gate stated |
 | 7 | Upstox row changed; Fyers and India news rows added |
-| 8 | `ProviderId` adds `FYERS`, `REVIEWED_CALENDAR_FILE`; `Capability` adds `INTRADAY_BARS`; `ProviderErrorClass` adds `ACCOUNT_RESTRICTED`; new `AdjustmentBasis`, `BarResolution`, `VendorSeriesSnapshot`, `AccountActivity`, `ResearchGateApproval`, `dormancy_alerts`; THR-13, THR-14 |
-| 9 | PE-17 to PE-25; E-33 to E-35; E-12 amended for the research gate |
+| 8 | `ProviderId` adds `FYERS`, `REVIEWED_CALENDAR_FILE`; `Capability` adds `INTRADAY_BARS`; `ProviderErrorClass` adds `ACCOUNT_RESTRICTED`; `ProviderSelection` adds `licensed_use`; new `AdjustmentBasis`, `BarResolution`, `LicensedUse`, `DormancyStatus`, `ProviderSelectionSet`, `VendorSeriesSnapshot`, `AccountActivity`, `ResearchGateApproval` and five functions; THR-13, THR-14 |
+| 9 | PE-17 to PE-25; E-33 to E-36; E-12 amended for the research gate |
 | 10 | Rows 37 to 49 |
-| 11 | NB-63 to NB-73 |
-| Tables | D-39 to D-46; D-11, D-20, D-22 updated; A-76 to A-83; OQ-67 to OQ-77; OQ-30, OQ-40, OQ-41, OQ-46 changed; contracts updated |
+| 11 | NB-63 to NB-73; NB-34, NB-35 moved to the Upstox file |
+| Tables | D-39 to D-46; D-11, D-20, D-22 updated; A-76 to A-83; OQ-67 to OQ-80; OQ-30, OQ-40, OQ-41, OQ-46 changed; contracts updated |
 
 Propagation. [DEFAULT-53] requires a dated notice, and a re-run where an imported contract changed:
 
@@ -105,14 +108,15 @@ Propagation. [DEFAULT-53] requires a dated notice, and a re-run where an importe
 |----------|---------------------|
 | `SPEC-P0.3-BUDGET` | Kite Connect INR 500 a month is no longer a data cost; Upstox and Fyers Standard are INR 0; Fyers Prime is an option. Already due for its Model B re-run |
 | P1.1 | `ProviderId`, `Capability`, `ProviderErrorClass` gain members; `AdjustmentBasis`, `BarResolution` are new |
-| P1.2, P1.3, P1.4 | Snapshot storage and its DDL; new config keys; `ACCOUNT_RESTRICTED` in the audit event field |
+| P1.2, P1.3, P1.4 | Snapshot storage and its DDL; new config keys; `ACCOUNT_RESTRICTED` in the audit event field. P1.3's loader must also reject an enabled publication switch unless `publication_data_cleared` is true for that market; `MODEL-B-DECISION.md` has no such error path yet (a proposed MB-E9, OQ-78). P1.3 also resolves `licence_audit_id` and `backup_licence_audit_id` at every load, as MB-E4 does for a switch, and loads selections through `model_validate_json` |
+| P2.7 | Signal entry accepts only `1D` bars, and every signal input only from a provider that `row_cleared` confirms; both need tests |
 | P2.1 | Client is Upstox (read-only HTTP, [DEFAULT-50]) once the Owner opens the research gate; Fyers only after OQ-68 for Fyers; snapshot rule [DEFAULT-62]; expected-session check PE-24 |
 | P2.2 | PE-22 data-quality event; threshold is P2.2's |
 | P2.3 | Instrument master and sector from Upstox; delisted coverage still missing |
-| P4.1 | India news candidate with a 7-day window, so capture must be daily |
+| P4.1 | India news candidate with a 7-day window, so capture must be daily; enforces that no gated content reaches an external LLM until OQ-76 closes |
 | P5.x | Every India result stays labelled survivorship-biased ([DEFAULT-29]) |
 | P6.1 | `AccountActivity` metric; token renewal alert |
-| P6.3 | OQ-68 is an input; BO-1 and MB-AC-14 are not met for either market |
+| P6.3 | OQ-68 is an input; BO-1 and MB-AC-14 are not met for either market; records a negative answer to OQ-68 by setting `revoked_on` |
 | Historical issues #8, #26, #27, #33, #34, #62, #63, #64, #67, #69 | The #67 "9 years of free Fyers intraday" premise fails (UP-40); #64 has no daily token step for Upstox data (UP-45); two static-IP registrations are not needed while no order is sent (BA-1) |
 
 Review. X2 ran in a separate conversation and in DeepSeek; findings and their disposition are in
@@ -165,7 +169,7 @@ RULE-5 requires this section.
 | UP-24 | ADR-13 "LLM affordability" and ADR-04 "news" | No verified news source exists for India (section 6.2). INV-10 forbids "US-only by accident". | The LLM news path is declared US-scoped until an India source is selected (ADR-11 edge case: a market-scoped feature must be declared). OQ-40. v0.2: India has a candidate with a 7-day window (SEL-12, F-89); the declaration stands until OQ-68 and OQ-76 close. |
 | UP-25 | Constitution U-5 (sector taxonomy) | No licensed-free taxonomy was verified for either market. US SIC codes appear in EDGAR data (F-64, secondary). Alpaca's asset object has no sector and no security-type field, so it cannot tell common stock from an ETF or a depositary receipt (F-33), which ADR-05 requires. | Instrument class for the US comes from the Massive ticker `type` field (F-51; code list unverified, OQ-38). Sector taxonomy is UNFILLED for both markets: OQ-40, OQ-41. RISK-2 cannot be enforced until it is filled. v0.2: India has a candidate (SEL-14, F-88); the US row is unchanged. |
 | UP-40 | Owner decision of 2026-10-17 (root `DECISIONS.md`, #68), which also "closes OQ-14" | "Fyers: intraday from 3 July 2017, free" is true of the archive and not of the free plan. The Standard plan serves "1 year (from 2025)" of intraday and "5 years (from 2021)" of daily, each resetting yearly; the same page set says 3 July 2017 and "unlimited" symbols, and also caps Data APIs at 5,000 requests a day (F-77, F-78). Prime is paid, by waitlist (F-83). Fyers' Standard and Prime rate limits took effect on 2026-10-16, and the notice says Prime gets broader history (F-98); it does not date the Standard history window, but the #68 figure may have been right when read. The stated reason for choosing Fyers does not survive on the free plan. | BQ-48, [DEFAULT-59], OQ-67. The decision as written cannot be reproduced on the free plan. Free multi-year intraday does exist at Upstox from January 2022 on all plans (F-43, F-90), but that is a substitution and a new decision for the Owner, not the old decision surviving; it is shorter, about 4.8 years against about 9.3. OQ-14 is closed by that fact only if the Owner accepts the substitute. |
-| UP-41 | Owner decision of 2026-10-17 against Model B (2026-10-14), BO-1, MB-AC-14 | The decision and the #68 ticket drafts describe a personal system, and were made three days after the Owner chose Model B, which serves other people. **On their face the Fyers API terms give no route to a signals service for people who are not FYERS clients**: sections 2, 8 and 9 allow onward platforms only for other FYERS clients after approvals. They also limit exchange data to legitimate, fair and transparent trading, bar paper trading, gaming and virtual trading, bar third-party use of the APIs, and need written consent for databases with intent to redistribute, derivative works, distribution and public display (F-82, sections 11 and 12). A model portfolio and a published track record may fall inside those words. Upstox API-specific terms were not found (F-92), but an Upstox developer states that storage and derived analytics are fine for informational use and that a monetised service needs a separate business arrangement (F-100); a forum reply is not a licence. The exchanges' own redistribution rules were not read. | MB-AC-14 is not met for India, so the Owner's decision holds for research at most, and is not compatible with Model B publication as it stands. The first question for Fyers is whether it can be used at all under Model B. This spec does not decide what those clauses mean: OQ-68, a legal question. No India row can be SELECTED. Whether a free signals service counts as monetised, and whether signals are derived analytics or a redistribution, are for the written answer. |
+| UP-41 | Owner decision of 2026-10-17 against Model B (2026-10-14), BO-1, MB-AC-14 | The decision and the #68 ticket drafts describe a personal system, and were made three days after the Owner chose Model B, which serves other people. **On their face the Fyers API terms give no route to a signals service for people who are not FYERS clients**: sections 2, 8 and 9 allow onward platforms only for other FYERS clients after approvals. They also limit exchange data to legitimate, fair and transparent trading, bar paper trading, gaming and virtual trading, bar third-party use of the APIs, and need written consent for databases with intent to redistribute, derivative works, distribution and public display (F-82, sections 11 and 12). A model portfolio and a published track record may fall inside those words. Section 2 does mention a platform offered to the public, but section 8 limits onward platforms to other FYERS clients after approvals, and section 9 says all end users are FYERS clients. Upstox API-specific terms were not found (F-92), but an Upstox developer states that storage and derived analytics are fine for informational use and that a monetised service needs a separate business arrangement (F-100); a forum reply is not a licence. The exchanges' own redistribution rules were not read. | MB-AC-14 is not met for India, so the Owner's decision holds for research at most, and is not compatible with Model B publication as it stands. The first question for Fyers is whether it can be used at all under Model B. This spec does not decide what those clauses mean: OQ-68, a legal question. No India row can be SELECTED. Whether a free signals service counts as monetised, and whether signals are derived analytics or a redistribution, are for the written answer. |
 | UP-42 | [DEFAULT-26], D-13: "raw bars, adjustment is ours" | Fyers staff state history is adjusted for corporate actions, price and volume (F-84). Upstox pages say nothing (F-43). No raw India source is verified. | BQ-51, [DEFAULT-62]. The rule stands as the target and is recorded as unmet for India. |
 | UP-43 | ADR-14; #68 open item 5 (delisted symbols) | Confirmed for the instrument masters: the Upstox next-day file excludes delisted stocks (F-91) and its `instrument_key` identifies an active instrument (F-90); its expired-instrument APIs are for derivatives and need the Upstox Plus plan (F-90). A Fyers forum reply says delisted companies are not provided (F-85, not a documentation page). Whether the Upstox archive answers for a delisted ISIN is not stated. | UP-17 and [DEFAULT-29] stand. SEL-4 runs labelled survivorship-biased and is no ADR-08 evidence. OQ-69. Free price data does not close survivorship. |
 | UP-44 | #68 table: Upstox "50 req/s orders" | That is the landing-page figure. The rate-limit page gives 10 per second for regular algos and 50 only for exchange-registered ones (F-39). For data, 50 per second is a burst figure: the binding limit is 2,000 per 30 minutes, 1.11 per second on average. | THR-13 budgets the 30-minute limit. |
@@ -223,7 +227,7 @@ earlier record, not re-read; F-97 is an earlier record of which only the Fyers K
 | F-40 | Upstox authentication and token: OAuth flow, TOTP token endpoint, 03:30 expiry, `extended_token` | https://upstox.com/developer/api-documentation/authentication/ and https://upstox.com/developer/api-documentation/get-token/ | PRIMARY_EXTRACT | only if activated |
 | F-41 | Upstox place order v3: fields, `tag` max 40, error codes, market protection | https://upstox.com/developer/api-documentation/v3/place-order/ | PRIMARY_EXTRACT | only if activated |
 | F-42 | Upstox GTT: limit order on trigger, valid up to one year, up to three rules | https://upstox.com/developer/api-documentation/place-gtt-order/ | PRIMARY_EXTRACT | only if activated |
-| F-43 | Upstox historical candles v3: availability and per-request range by unit | https://upstox.com/developer/api-documentation/v3/get-historical-candle-data/ | PRIMARY_EXTRACT | P2.1 |
+| F-43 | Upstox historical candles v3: availability and per-request range by unit | https://upstox.com/developer/api-documentation/v3/get-historical-candle-data/ | PRIMARY_FULL (code samples excluded; read in full on 2026-10-30) | done |
 | F-44 | Upstox market feed v3: protobuf, modes, subscription and connection limits | https://upstox.com/developer/api-documentation/v3/get-market-data-feed/ | PRIMARY_EXTRACT | only if activated |
 | F-45 | Upstox: a sandbox host exists; APIs are free; INR 10 per order | https://upstox.com/developer/api-documentation/api-overview/ and https://upstox.com/trading-api/ | SEARCH_EXCERPT | only if activated |
 | F-46 | IBKR Web API: 10 requests/s global, per-endpoint limits, HTTP 429 and a 10-minute penalty box, nightly reset about 01:00 regional time, order endpoint path | https://www.interactivebrokers.com/campus/ibkr-api-page/web-api-trading/ | PRIMARY_EXTRACT | only if activated |
@@ -250,7 +254,7 @@ earlier record, not re-read; F-97 is an earlier record of which only the Fyers K
 | F-79 | Fyers auth: individual app, browser login, auth code, `POST /api/v3/validate-authcode`, `appIdHash`, header form, expiry at 6:30 AM daily, individual app usable only by its creator. The attributes table lists `access_token` only; the page's sample response also shows `refresh_token` | https://fyers.in/api-docs/v3/api/authentication/ and its individual-app pages | PRIMARY_FULL (the first read excluded code samples; the sample was then read in the page HTML) | OQ-74 |
 | F-80 | Fyers API standards and error codes: envelope, HTTP codes, codes -8, -15, -16, -17, -50, -300, -352, -360, -429 | https://fyers.in/api-docs/v3/api/api-standards/ and https://fyers.in/api-docs/v3/api/appendix/common-api-error-codes/ | PRIMARY_FULL | done |
 | F-81 | Fyers symbol master: public CSV per segment, columns including lot size, tick size, ISIN, symbol ticker | https://fyers.in/api-docs/v3/api/market-information/symbol-master/symbol-master-file/ | PRIMARY_FULL | done |
-| F-82 | Fyers API terms, read in full. Section 2: personal use, or a trading platform offered onward, within regulations. Sections 8, 9: platforms for other FYERS clients after approvals; end users are exclusively FYERS clients. Section 11: no third-party use; exchange data only for legitimate, fair and transparent trading; not to be disseminated, supplied or processed for unauthorised purposes; not for developing charting or technical tools, paper trading, gaming or virtual trading. Section 12: written consent needed to build databases or copies with intent to redistribute, to copy, modify, make derivative works, sell, distribute, publicly display or sub-license, and to disclose source or ownership. Section 6: not meant for fully automated trades. Section 15: rights end automatically on non-compliance; on termination, use stops and stored content is deleted. Section 17: indemnity | https://fyers.in/terms-and-conditions-api | PRIMARY_FULL | OQ-68 |
+| F-82 | Fyers API terms, read in full. Section 2: personal use, or a trading platform offered onward, within regulations. Sections 8, 9: platforms for other FYERS clients after approvals; end users are exclusively FYERS clients. Section 11: no third-party use; exchange data only for legitimate, fair and transparent trading; not to be disseminated, supplied or processed for unauthorised purposes; not for developing charting or technical tools, paper trading, gaming or virtual trading. Section 12: written consent needed to build databases or copies with intent to redistribute, to copy, modify, make derivative works, sell, distribute, publicly display or sub-license, and to disclose source or ownership. Section 6: not meant for fully automated trades. Section 15: rights end automatically on non-compliance; on termination, use stops, and the clause says FYERS shall delete cached and stored content. Section 17: indemnity | https://fyers.in/terms-and-conditions-api | PRIMARY_FULL | OQ-68 |
 | F-83 | Fyers Prime: INR 499 plus 18% GST a month or INR 4,990 plus 18% GST a year; rollout by waitlist; same limits as F-77 | https://fyers.in/prime | PRIMARY_FULL | OQ-67 |
 | F-84 | Fyers Product Manager, 2026-02-19: historical API data is adjusted for corporate actions, both price and volume as per the ratio | https://fyers.in/community/t/are-stocks-price-and-volume-adjusted-for-corp-actions-like-splits-bonuses-dividends-etc-in-daily-and-1-min-timeframe-sourced-via-historical-api/22387 | PRIMARY_FULL (staff forum post, not documentation) | OQ-70 |
 | F-85 | Fyers forum reply, August 2023: data for delisted companies is not provided; data is served for symbols in the symbol master. Author shown as an inactive member; role not confirmed | https://fyers.in/community/t/api-data-availability/12942 | SECONDARY | OQ-70 |
@@ -280,7 +284,7 @@ earlier record, not re-read; F-97 is an earlier record of which only the Fyers K
 | F-107 | Upstox Intraday Candle Data V3: candles for the current trading day, units `minutes`, `hours`, `days`; the historical page sends the current day here | https://upstox.com/developer/api-documentation/v3/get-intra-day-candle-data | PRIMARY_FULL (code samples excluded) | OQ-75 |
 | F-108 | Upstox Market Holidays: holidays for the current year, or the status of a given date; `date`, `description`, `holiday_type`, `closed_exchanges`, `open_exchanges` with start and end times. Coverage of past years not stated | https://upstox.com/developer/api-documentation/get-market-holidays | PRIMARY_FULL (code samples excluded) | OQ-75 |
 
-Count: 91 fact rows. 30 PRIMARY_FULL, 47 PRIMARY_EXTRACT, 9 SEARCH_EXCERPT, 5 SECONDARY. F-84 is a staff forum post, and F-88 to F-91 exclude code samples; each row says so.
+Count: 91 fact rows. 31 PRIMARY_FULL, 46 PRIMARY_EXTRACT, 9 SEARCH_EXCERPT, 5 SECONDARY. F-84 is a staff forum post, and F-88 to F-91 exclude code samples; each row says so.
 
 ## 4. Capabilities the design needs
 
@@ -600,9 +604,16 @@ client is a read-only HTTP client with a path allowlist, never the Upstox SDK ([
 Auth for data (F-87, [DEFAULT-60]). An Analytics Token is generated by a human on the Developer Apps
 page, Analytics tab. It lasts 1 year from generation; one token per account; read-only, GET only;
 free; no OAuth redirect. It cannot place or modify an order. Market Quote, Historical Data, Market
-Information, Fundamentals, News and WebSocket categories work with no static IP; account categories
-(User, Orders, Portfolio and others) need a whitelisted IP. So Upstox data has **no daily human
-step**; the human step is once a year (UP-45). Sent as `Authorization: Bearer` (F-90 samples).
+Information, Fundamentals, News, WebSocket, Charges, Margins, Option Chain and IPO categories work
+with no static IP; account categories (User, Orders, Portfolio and others) need a whitelisted IP. So Upstox data has **no daily human
+step**; the human step is once a year (UP-45). Sent as `Authorization: Bearer` (F-90 samples). It is
+a one-year credential: read from the secret store at process start, held in memory only, and never
+written to a log, traceback or audit event. Replace it with the client stopped. Whether generating a
+new token ends the old one at once is not stated (OQ-75). The allowlist is deny-by-default and holds
+market-data paths only; the exact paths are frozen in P2.1 from the vendor pages. It is the only
+barrier between this credential and the account's holdings, so a test asserts it rejects `/portfolio`,
+`/user`, `/charges` and `/margins` paths, and a percent-encoded path (MB-AC-4). The match is on exact
+path templates after one decode, and a path with a remaining `%` or a `.` or `..` segment is rejected.
 
 Auth for orders, not used in v1 (F-40). OAuth: `https://api.upstox.com/v2/login/authorization/dialog` then
 `POST https://api.upstox.com/v2/login/authorization/token` with `code`, `client_id`,
@@ -945,9 +956,9 @@ D-18 pins the snapshot identifier, not the alias.
 - Data (F-63, SEARCH_EXCERPT): the NSE website terms prohibit systematic or automated data
   collection. End-of-day and historical files are sold through NSE Data & Analytics. Price,
   licence terms and whether delisted securities are included: NOT VERIFIED (OQ-39).
-- Tick size, lot size and price bands: read per instrument from the broker's instrument dump and
-  quote (`tick_size`, `lot_size`, `lower_circuit_limit`, `upper_circuit_limit`); no exchange
-  constant is assumed.
+- Tick size and lot size: read per instrument from the Upstox instrument file, and not used until
+  the unit of `tick_size` is confirmed (OQ-75). Price bands are Kite quote fields, deferred. No
+  exchange constant is assumed.
 
 ### 5.15 Fyers (India daily-history backup and instrument master backup; execution deferred)
 
@@ -1048,10 +1059,10 @@ and research as well as on a track record. Section 12: written consent is needed
 or copies with intent to redistribute; to copy, modify, make derivative works, sell, distribute,
 publicly display or sub-license API content; and to disclose its source or ownership. Section 15:
 rights end automatically on non-compliance, a breach not cured within one day can end the
-relationship, and on termination use stops and stored content is deleted, which conflicts with
-keeping snapshots ([DEFAULT-62]). Sections 2, 8 and 9 allow trading platforms offered onward only
-to other FYERS clients after approvals, so they are no route for Model B subscribers at other
-brokers. Section 17 is an indemnity. What these mean is a legal question: OQ-68.
+relationship, and on termination use stops and the clause says FYERS shall delete cached and stored
+content; how that reaches our snapshots ([DEFAULT-62]) is for counsel. Section 2 mentions platforms
+for the public or other FYERS clients; sections 8 and 9 limit that to other FYERS clients after
+approvals, so they are no route for Model B subscribers at other brokers. Section 17 is an indemnity. What these mean is a legal question: OQ-68.
 
 ## 6. Decision matrix and selection
 
@@ -1148,31 +1159,31 @@ Status values: SELECTED (ready to specify a client), PROVISIONAL (chosen; a name
 close before code, except a research client admitted by the research gate below), BLOCKED (chosen; cannot be used until a named item is resolved), UNFILLED
 (no provider can be named from verified facts).
 
-| ID | Capability | Market | Primary | Backup | Status | Open items |
-|----|------------|--------|---------|--------|--------|------------|
-| SEL-1 | broker_execution | US | Alpaca Trading API | none integrated; cold alternate Interactive Brokers | PROVISIONAL | OQ-33, OQ-34, OQ-35 |
-| SEL-2 | broker_execution | IN | Zerodha Kite Connect | none integrated; cold alternate Upstox | PROVISIONAL | OQ-27, OQ-28, OQ-29, OQ-31 |
-| SEL-3 | eod_bars | US | Massive, Developer plan | Alpaca Market Data, Basic plan, `feed=sip` | PROVISIONAL | OQ-38, OQ-36 |
-| SEL-4 | eod_bars | IN | Upstox historical | Fyers historical, Standard plan | PROVISIONAL | OQ-39, OQ-68, OQ-69 |
-| SEL-5 | instrument_master | US | Massive tickers (class, listing status) with Alpaca assets (tradability) | none | PROVISIONAL | OQ-38 |
-| SEL-6 | instrument_master | IN | Upstox instrument files | Fyers symbol master | PROVISIONAL | OQ-68, OQ-75 |
-| SEL-7 | corporate_actions | US | Alpaca Market Data | Massive | PROVISIONAL | OQ-36, OQ-38 |
-| SEL-8 | corporate_actions | IN | Upstox fundamentals, corporate actions | none | PROVISIONAL | OQ-68, OQ-73 |
-| SEL-9 | fundamentals | US | SEC EDGAR | FMP | BLOCKED | OQ-41, OQ-47 |
-| SEL-10 | fundamentals | IN | Upstox fundamentals | none | BLOCKED | OQ-68, OQ-73 |
-| SEL-11 | news | US | Alpaca News | Finnhub | PROVISIONAL | OQ-37, OQ-50 |
-| SEL-12 | news | IN | Upstox news | none | PROVISIONAL | OQ-68, OQ-76 |
-| SEL-13 | sector_taxonomy | US | none | none | UNFILLED | OQ-41, OQ-38 |
-| SEL-14 | sector_taxonomy | IN | Upstox company profile `sector` | none | PROVISIONAL | OQ-68, OQ-73 |
-| SEL-15 | calendar | US | NYSE published calendar, entered as a reviewed file | none | PROVISIONAL | OQ-36 |
-| SEL-16 | calendar | IN | Upstox market holidays | none | PROVISIONAL | OQ-49, OQ-68, OQ-75 |
-| SEL-17 | macro | none | FRED | none | PROVISIONAL | OQ-42 |
-| SEL-18 | fx_reference | none | none | none | UNFILLED | OQ-22 |
-| SEL-19 | llm | none | DeepSeek, model `deepseek-flash` | OpenAI, model `gpt-4o-mini-2024-07-18` | PROVISIONAL | OQ-43, OQ-44 |
-| SEL-20 | streaming quotes at order time | US | not selected; P3.2 decides whether it is needed | none | UNFILLED | OQ-36 |
-| SEL-21 | streaming quotes at order time | IN | not selected; P3.2 decides whether it is needed | none | UNFILLED | OQ-31 |
-| SEL-22 | intraday_bars | IN | Upstox historical | none | PROVISIONAL | OQ-67, OQ-68, OQ-69 |
-| SEL-23 | intraday_bars | US | none | none | UNFILLED | OQ-77 |
+| ID | Capability | Market | Primary | Backup | Status | Open items | Licensed use |
+|----|------------|--------|---------|--------|--------|------------|--------------|
+| SEL-1 | broker_execution | US | Alpaca Trading API | none integrated; cold alternate Interactive Brokers | PROVISIONAL | OQ-33, OQ-34, OQ-35 | NONE |
+| SEL-2 | broker_execution | IN | Zerodha Kite Connect | none integrated; cold alternate Upstox | PROVISIONAL | OQ-27, OQ-28, OQ-29, OQ-31 | NONE |
+| SEL-3 | eod_bars | US | Massive, Developer plan | Alpaca Market Data, Basic plan, `feed=sip` | PROVISIONAL | OQ-38, OQ-36 | NONE |
+| SEL-4 | eod_bars | IN | Upstox historical | Fyers historical, Standard plan | PROVISIONAL | OQ-39, OQ-68, OQ-69 | NONE |
+| SEL-5 | instrument_master | US | Massive tickers (class, listing status) with Alpaca assets (tradability) | none | PROVISIONAL | OQ-38 | NONE |
+| SEL-6 | instrument_master | IN | Upstox instrument files | Fyers symbol master | PROVISIONAL | OQ-68, OQ-75 | NONE |
+| SEL-7 | corporate_actions | US | Alpaca Market Data | Massive | PROVISIONAL | OQ-36, OQ-38 | NONE |
+| SEL-8 | corporate_actions | IN | Upstox fundamentals, corporate actions | none | PROVISIONAL | OQ-68, OQ-73 | NONE |
+| SEL-9 | fundamentals | US | SEC EDGAR | FMP | BLOCKED | OQ-41, OQ-47 | NONE |
+| SEL-10 | fundamentals | IN | Upstox fundamentals | none | BLOCKED | OQ-68, OQ-73 | NONE |
+| SEL-11 | news | US | Alpaca News | Finnhub | PROVISIONAL | OQ-37, OQ-50 | NONE |
+| SEL-12 | news | IN | Upstox news | none | PROVISIONAL | OQ-68, OQ-76 | NONE |
+| SEL-13 | sector_taxonomy | US | none | none | UNFILLED | OQ-41, OQ-38 | NONE |
+| SEL-14 | sector_taxonomy | IN | Upstox company profile `sector` | none | PROVISIONAL | OQ-68, OQ-73 | NONE |
+| SEL-15 | calendar | US | NYSE published calendar, entered as a reviewed file | none | PROVISIONAL | OQ-36 | NONE |
+| SEL-16 | calendar | IN | Upstox market holidays | none | PROVISIONAL | OQ-49, OQ-68, OQ-75 | NONE |
+| SEL-17 | macro | none | FRED | none | PROVISIONAL | OQ-42 | NONE |
+| SEL-18 | fx_reference | none | none | none | UNFILLED | OQ-22 | NONE |
+| SEL-19 | llm | none | DeepSeek, model `deepseek-flash` | OpenAI, model `gpt-4o-mini-2024-07-18` | PROVISIONAL | OQ-43, OQ-44 | NONE |
+| SEL-20 | streaming quotes at order time | US | not selected; P3.2 decides whether it is needed | none | UNFILLED | OQ-36 | NONE |
+| SEL-21 | streaming quotes at order time | IN | not selected; P3.2 decides whether it is needed | none | UNFILLED | OQ-31 | NONE |
+| SEL-22 | intraday_bars | IN | Upstox historical | none | PROVISIONAL | OQ-67, OQ-68, OQ-69 | NONE |
+| SEL-23 | intraday_bars | US | none | none | UNFILLED | OQ-77 | NONE |
 
 SEL-20 and SEL-21 are recorded so that P3.2 finds the question; they are not `Capability`
 values in section 8 and have no client.
@@ -1193,12 +1204,29 @@ Two gates, because E-12 alone would stop everything:
   here; the Model B re-run defines them. F-100
   licenses nothing: it is the best evidence of what Upstox would say, and the acceptance is the
   Owner's own. Output is labelled and reaches no user. Not on a BLOCKED row, and not on Fyers before
-  OQ-68 is answered for Fyers.
+  OQ-68 is answered for Fyers. One approval covers all PROVISIONAL Upstox rows, and a revoked approval
+  closes the gate: recording a negative answer to OQ-68 revokes it (P6.3). No gated content goes to an
+  external LLM until OQ-76 closes (P4.1).
 - **Publication gate.** Data from a row that names OQ-68 may not feed a published signal, and the
   publication switch for a market (MB-5) may not be turned on while any data row of that market lacks
-  a licence for that use (MB-AC-14, D-44). **The same applies to the US rows**: Massive's and
+  a licence for that use (MB-AC-14, D-44). This is typed. `ProviderSelection.licensed_use` records
+  whether a written licence covers publication, and `licence_audit_id` names the audit record of it,
+  which P1.3 resolves at every load as MB-E4 does for a switch, checking that the record names that
+  provider, capability and market. A forum reply never sets that value.
+  A backup on a cleared row needs its own licence record, `backup_licence_audit_id`; otherwise the
+  backup rule below could put an unlicensed source in a signal. `publication_data_cleared` is true only if every signal-input
+  capability has a row, for that market or market-less, and that row is `PUBLICATION`; an absent
+  capability fails it. `row_cleared` applies the same test at signal entry to the provider of any
+  signal input, so a value from another source does not pass because its market cleared. Three
+  capabilities are not signal inputs: `broker_execution` (deferred, MB-8), `intraday_bars` (D-43) and
+  `fx_reference`, a reporting figure only (ADR-15), with each model portfolio in its own currency
+  ([DEFAULT-46]). If a published number ever uses the reporting rate, OQ-22 must bring that row into
+  the test. Every other capability counts for now, so neither market can clear yet, even on a row no
+  strategy uses; OQ-79 narrows the set, and a row is never marked cleared to get past it. Training
+  data is outside both functions (OQ-80). The loader rule is proposed, not made (MB-E9, OQ-78). **The same applies to the US rows**: Massive's and
   Finnhub's plans are individual or personal use (BO-1), so MB-AC-14 is equally unmet there, pending
-  the Model B re-run.
+  the Model B re-run. Fyers is excluded from Model B publication unless OQ-68 says otherwise; its
+  backup entries are inactive until then.
 
 Either way, nothing here publishes anything.
 
@@ -1217,7 +1245,8 @@ Edge cases of the selection rules:
   stored; the disagreement is recorded as a data-quality event; the instrument is quarantined
   (HITL-12) if the difference exceeds a threshold that P2.2 owns.
 - The primary is down and the backup is up, for a non-model input (calendar, reporting rate):
-  the backup may be used the same day, and the record says which source supplied the value.
+  the backup may be used the same day, and the record says which source supplied the value. On a
+  row cleared for publication, only a backup with its own licence record may be used.
 - A provider is renamed or re-hosted (F-49): the base URL is a config value changed through
   HITL-5; the provider identity in `ProviderId` does not change.
 - Upstox is both primary and the only source for several India rows (SEL-4, 6, 8, 10, 12, 14, 22).
@@ -1246,7 +1275,7 @@ question for them is what the evening batch loses.
 | Zerodha session (token invalidated, not an outage) | Same | Every authenticated call returns 403 `TokenException`. Identical to "no login" in [DEFAULT-6] from that moment. | Orders at the exchange and existing GTTs. | India disabled; alert; HITL-7. No automated re-login. |
 | Upstox | Not on the 09:31 path | Nothing at 09:31. After the close, the whole India data side: no daily bars, instrument file, corporate actions, sector, calendar or news. The token is a single point of failure for all of them. | The US side. Stored India data, which stays usable but stale. | No India batch for that session; no signal is built on a missing or stale bar (INV-6, PE-16, PE-24). Fyers is not switched in automatically: it needs a human login, and a source change is T-3. |
 | Fyers | Not on the 09:31 path | Nothing at 09:31. A planned human pull fails. | Everything; it has no scheduled job. | The pull is retried by a human later. No automated action. |
-| Upstox News | Not on the 09:31 path | Tonight's India candidates have no news, and with a 7-day window a gap of more than 7 days is permanent. | The deterministic path. | As News (Alpaca News) below. The capture gap is recorded. |
+| Upstox News | Not on the 09:31 path | Tonight's India candidates have no news, and with a 7-day window a gap of more than 7 days is permanent. | The deterministic path. | As the News (Alpaca News) row. The capture gap is recorded. |
 | Interactive Brokers | Not integrated | Nothing. | Everything. | None. |
 | Massive | Not on the 09:31 path | Nothing at 09:31. After the close: no US daily bars. | Orders and stops. | No US decision cycle for that session (ADR-13 edge case: no decision on D-1's bar). The backup is not switched in automatically, because that is T-3. |
 | Finnhub | Not on the 09:31 path | Nothing; it is a backup. | Everything. | None. |
@@ -1275,6 +1304,7 @@ phases (P2.1, P3.1, P4.2) define the models that wrap them.
 from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Annotated
+from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -1366,6 +1396,17 @@ class BarResolution(StrEnum):
     ONE_DAY = "1D"
 
 
+class LicensedUse(StrEnum):
+    NONE = "NONE"
+    PUBLICATION = "PUBLICATION"
+
+
+class DormancyStatus(StrEnum):
+    OK = "OK"
+    DUE = "DUE"
+    UNKNOWN = "UNKNOWN"
+
+
 BAR_PROVIDER_MARKET = {
     ProviderId.UPSTOX: Market.IN,
     ProviderId.FYERS: Market.IN,
@@ -1373,6 +1414,7 @@ BAR_PROVIDER_MARKET = {
     ProviderId.ALPACA_DATA: Market.US,
 }
 DORMANCY_PROVIDERS = frozenset({ProviderId.UPSTOX, ProviderId.FYERS})
+NOT_SIGNAL_INPUTS = frozenset({Capability.BROKER_EXECUTION, Capability.INTRADAY_BARS, Capability.FX_REFERENCE})
 
 
 ClientOrderRef = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Z0-9]{20}$")]
@@ -1420,6 +1462,9 @@ class ProviderSelection(BaseModel):
     backup: ProviderId | None
     status: SelectionStatus
     blocked_by: tuple[OpenItemRef, ...] = ()
+    licensed_use: LicensedUse = LicensedUse.NONE
+    licence_audit_id: UUID | None = None
+    backup_licence_audit_id: UUID | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "ProviderSelection":
@@ -1433,6 +1478,28 @@ class ProviderSelection(BaseModel):
             raise ValueError("primary and backup must differ")
         if (self.status is SelectionStatus.SELECTED) != (len(self.blocked_by) == 0):
             raise ValueError("blocked_by is empty if and only if status is SELECTED")
+        if (self.licensed_use is LicensedUse.PUBLICATION) != (self.licence_audit_id is not None):
+            raise ValueError("licence_audit_id is set if and only if the row is cleared for publication")
+        if self.licensed_use is LicensedUse.PUBLICATION and self.status is not SelectionStatus.SELECTED:
+            raise ValueError("only a SELECTED row can be cleared for publication")
+        cleared_backup = self.licensed_use is LicensedUse.PUBLICATION and self.backup is not None
+        if cleared_backup != (self.backup_licence_audit_id is not None):
+            raise ValueError("backup_licence_audit_id is set if and only if a cleared row has a backup")
+        if self.licence_audit_id is not None and self.licence_audit_id == self.backup_licence_audit_id:
+            raise ValueError("a backup needs a licence record of its own")
+        return self
+
+
+class ProviderSelectionSet(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    rows: tuple[ProviderSelection, ...]
+
+    @model_validator(mode="after")
+    def _one_row_per_key(self) -> "ProviderSelectionSet":
+        keys = [(s.capability, s.market) for s in self.rows]
+        if len(keys) != len(set(keys)):
+            raise ValueError("one row per capability and market")
         return self
 
 
@@ -1486,29 +1553,100 @@ class AccountActivity(BaseModel):
 class ResearchGateApproval(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
-    provider: ProviderId
     approved_by: ScopeText
     approval_ref: ScopeText
     approved_on: date
+    revoked_on: date | None = None
 
     @model_validator(mode="after")
-    def _upstox_only(self) -> "ResearchGateApproval":
-        if self.provider is not ProviderId.UPSTOX:
-            raise ValueError("the research gate covers Upstox rows only")
+    def _traceable(self) -> "ResearchGateApproval":
         if not self.approved_by.strip() or not self.approval_ref.strip():
             raise ValueError("an approval must be traceable")
         return self
 
 
-def dormancy_alerts(record: AccountActivity | None, today: date) -> tuple[int, ...]:
-    """Thresholds reached. Bad or missing input alerts: (0,) means "overdue, unknown" (INV-6)."""
+def research_gate_open(approval: ResearchGateApproval | None, selection: ProviderSelection, today: date) -> bool:
+    """Closed unless a current approval exists and the row is a PROVISIONAL Upstox row. Bad input closes it."""
+    if approval is None or type(today) is not date:
+        return False
+    if selection.primary is not ProviderId.UPSTOX or selection.status is not SelectionStatus.PROVISIONAL:
+        return False
+    if approval.revoked_on is not None and approval.revoked_on <= today:
+        return False
+    return approval.approved_on <= today
+
+
+def _row_for(capability: Capability, market: Market, selections: ProviderSelectionSet) -> ProviderSelection | None:
+    return next((s for s in selections.rows if s.capability is capability and (s.market is market or s.market is None)), None)
+
+
+def publication_data_cleared(market: Market, selections: ProviderSelectionSet) -> bool:
+    """True only if every signal-input capability has a row licensed for publication."""
+    rows = [_row_for(c, market, selections) for c in Capability if c not in NOT_SIGNAL_INPUTS]
+    return all(r is not None and r.licensed_use is LicensedUse.PUBLICATION for r in rows)
+
+
+def row_cleared(provider: ProviderId, capability: Capability, market: Market, selections: ProviderSelectionSet) -> bool:
+    """True only if the row is licensed for publication and this is its primary, or its backup with a record."""
+    row = _row_for(capability, market, selections)
+    if row is None or row.licensed_use is not LicensedUse.PUBLICATION:
+        return False
+    return provider is row.primary or (row.backup_licence_audit_id is not None and provider is row.backup)
+
+
+def throttle_matches(throttle: ClientThrottle, fact: RateLimitFact) -> bool:
+    """A throttle may only be built from the fact it cites."""
+    return (
+        throttle.provider is fact.provider
+        and throttle.scope == fact.scope
+        and throttle.window_seconds == fact.window_seconds
+        and throttle.documented_max_count == fact.max_count
+    )
+
+
+def dormancy_status(record: AccountActivity | None, today: date) -> tuple[DormancyStatus, int]:
+    """Status and the highest threshold reached. Bad or missing input is UNKNOWN, which alerts (INV-6)."""
     if record is None or type(today) is not date:
-        return (0,)
+        return (DormancyStatus.UNKNOWN, 0)
     days = (today - record.last_activity_on).days
     if days < 0:
-        return (0,)
-    return tuple(d for d in record.alert_after_days if days >= d)
+        return (DormancyStatus.UNKNOWN, 0)
+    reached = [d for d in record.alert_after_days if days >= d]
+    return (DormancyStatus.DUE, reached[-1]) if reached else (DormancyStatus.OK, 0)
 ```
+
+Config and stored records enter these models through `model_validate_json`: strict mode refuses a
+list for a tuple, or a string for an enum or a date, in Python input, and accepts them in JSON. A YAML
+value is therefore turned into JSON text first.
+
+Evidence, v0.3: the block and the tables of this spec are checked by
+`v2/tests/providers/verify_p02_spec.py`, run on 2026-10-31 with Python 3.11.9 and Pydantic 2.13.5, the
+only local version with Pydantic; the stack's Python 3.12 is not exercised here (R-4). Covered: enum
+sizes; `NOT_SIGNAL_INPUTS` against a list written in the script; the arithmetic of all 32 rows of
+section 6.2; the 21 capability rows of section 6.3 loaded through `ProviderSelection` and
+`ProviderSelectionSet`, licensed use read from the table, none SELECTED, none licensed, the UNFILLED
+and BLOCKED sets as stated, the India primaries and backups, and every India data row naming OQ-68;
+every row reloaded from JSON text; a duplicate key rejected; `PUBLICATION` rejected on a non-SELECTED
+row, with an unlicensed backup and without `licence_audit_id`, and either id rejected where it does
+not apply, and one record rejected for both providers;
+`publication_data_cleared` false for the rows as they stand, for a single cleared row, and for each
+signal-input capability missing or uncleared in turn, and true only for a full cleared set;
+`row_cleared` false for another provider, market or capability, true for a backup with its own record
+and false for one without; the THR-13 and THR-14 budgets parsed
+from their rows, each half of its documented limit, a budget over half rejected, and `throttle_matches`
+false for a limit that differs from its fact; `VendorSeriesSnapshot` distinct across fetches and
+instruments, and rejecting a bad provider, market, basis, session range, resolution, time or digest;
+`dormancy_status` `OK` at 299 days, `DUE` at 300 and 330, and `UNKNOWN` rather than a crash on bad
+input; `research_gate_open` closed for no record, a future approval, a revoked approval, a BLOCKED row,
+a row that is not Upstox and bad input; the presence of each new row; and that every cited F (from
+F-77), OQ (from OQ-27), PE, THR, SEL and E identifier has a row. The fact counts of section 3 are
+checked too. Deliberate breaks of a copy of this spec each failed the check: a wrong score, OQ-68
+removed from a row, a removed enum member, disabled validators, a changed boundary, guards that fail
+open, each gate weakened, a wider exclusion set, duplicate keys allowed, a throttle at the full limit,
+a swapped selection, a licensed table cell, deleted rows and a FROZEN status. There is no loader yet,
+so P1.3's path (E-36) is not tested here: the script covers the functions and the tables only.
+Client-phase tests still owed: shared budgets across processes, a restart keeping the PE-19 count,
+descending and duplicate candles, and the allowlist.
 
 Evidence, v0.2: the block and the tables of this spec were checked on 2026-10-30 with Python 3.11.9
 and Pydantic 2.13.5, all checks passing; the check script is not in the repository, so a client
@@ -1560,9 +1698,13 @@ time of day; the other date fields are calendar or session dates.
 | ProviderSelection.capability | Capability | none | none | no | a member of `Capability` | E-11 |
 | ProviderSelection.market | Market or None | none | none | yes | None exactly when the capability is `macro`, `fx_reference` or `llm` | a per-market capability with no market is "US-only by accident" (INV-10); rejected (E-11) |
 | ProviderSelection.primary | ProviderId or None | none | none | yes | None exactly when status is `UNFILLED` | E-11 |
-| ProviderSelection.backup | ProviderId or None | none | none | yes | None, or a provider different from the primary; None for `broker_execution` (ADR-10) | E-11; a broker backup is additionally rejected by the check in E-12 |
+| ProviderSelection.backup | ProviderId or None | none | none | yes | None, or a provider different from the primary; None for `broker_execution` (ADR-10); on a row cleared for publication it needs `backup_licence_audit_id` | E-11; a broker backup is additionally rejected by the check in E-12 |
 | ProviderSelection.status | SelectionStatus | none | none | no | one of four values | E-11 |
 | ProviderSelection.blocked_by | tuple of str | none | none | no | empty exactly when status is `SELECTED`; each item `OQ-n`, `BQ-n` or `UP-n` | a selection that claims to be ready while a question is open, or blocked with no reason; rejected (E-11) |
+| ProviderSelection.licensed_use | LicensedUse | none | none | no | `NONE` by default; `PUBLICATION` only with a written licence for that use, only with `licence_audit_id`, and only on a SELECTED row | a forum reply or an assumption cleared for publication; E-11 |
+| ProviderSelection.licence_audit_id | UUID or None | none | none | yes | set exactly when `licensed_use` is `PUBLICATION`; P1.3 resolves it against the audit trail at every load and checks that the record names this provider, capability and market | a row cleared with no licence behind it; E-11, E-36 |
+| ProviderSelection.backup_licence_audit_id | UUID or None | none | none | yes | set exactly when a row cleared for publication has a backup; a record of its own, different from `licence_audit_id`; P1.3 checks it the same way, for the backup | a fallback in a published signal with no licence behind it; E-11, E-36 |
+| ProviderSelectionSet.rows | tuple of ProviderSelection | none | none | no | one row per capability and market | a duplicate could hide an uncleared row; rejected (E-11) |
 | ClientOrderRef | str | none | none | no | exactly 20 characters from `A-Z0-9` | the reference would be truncated or rejected by Kite (`tag` max 20, alphanumeric); the order is not sent (E-13) |
 | VendorSeriesSnapshot.snapshot_id | str | none | none | no | unique per complete fetch, 1 to 120 characters; generation is P2.1's | two fetches on one day must stay two snapshots; E-33 |
 | VendorSeriesSnapshot.provider | ProviderId | none | none | no | a key of `BAR_PROVIDER_MARKET` | a provider that serves no bars; E-33 |
@@ -1576,9 +1718,8 @@ time of day; the other date fields are calendar or session dates.
 | AccountActivity.provider | ProviderId | none | none | no | `UPSTOX` or `FYERS`. This is the time-based guard only; PE-20 classifies an error, separately | E-34 |
 | AccountActivity.last_activity_on | date | calendar date | `Asia/Kolkata` | no | an executed trade or a KYC update recorded by a human. Not a login, an API call or a token (BQ-53, OQ-71) | counting a login could keep the alert from ever firing |
 | AccountActivity.alert_after_days | tuple of int | days | none | no | ascending, distinct, 1 to 364; [DEFAULT-64] sets (300, 330) | a value of 365 or more could alert after the account is dormant; E-34 |
-| ResearchGateApproval.provider | ProviderId | none | none | no | `UPSTOX` | the gate is opened for a row it does not cover; E-35 |
 | ResearchGateApproval.approved_by, approval_ref | str | none | none | no | 1 to 120 characters; the Owner, and the record of the acceptance | an approval nobody can trace; E-35 |
-| ResearchGateApproval.approved_on | date | calendar date | `Asia/Kolkata` | no | a `date` object, not in the future when the client starts; the start-up check tests that | E-35 |
+| ResearchGateApproval.approved_on, revoked_on | date; `revoked_on` nullable | calendar date | `Asia/Kolkata` | `revoked_on` yes | `research_gate_open` is false before `approved_on` and from `revoked_on` | an approval that outlives a negative answer to OQ-68; E-35 |
 
 `ClientOrderRef` edge cases: it must be unique for the life of the system, not per day, because
 Alpaca treats `client_order_id` as unique and a `gtc` order lives 90 days. 36^20 values exist;
@@ -1618,8 +1759,18 @@ Edge cases:
 - Windows are measured on the monotonic clock (NB-10).
 - THR-7 and THR-8 are our pace, not the provider's limit. They may only be loosened after the
   open question is answered with a documented number.
+- All windows of a scope are checked before each request; a request is sent only if every window
+  has headroom.
+- A budget is per provider account, not per process. Counters live in Redis, keyed by provider,
+  account and scope, or one runner lock per account is held. Two jobs on separate in-process counters
+  would reach the documented limit together, and PE-23 would stop every India row. If Redis is
+  unreachable, or a counter vanishes while a job runs, the client sends nothing until it is back and
+  the longest window of that account has passed, for Fyers the rest of the `Asia/Kolkata` day: a lost
+  count cannot be told from a free one. The PE-19 day count is
+  stored in PostgreSQL. A throttle is built only from the fact it cites (`throttle_matches`).
 - THR-13 backfill arithmetic, 500 India instruments: daily since 2000 needs 3 calls each, 1,500
-  calls, 45 minutes at 1,000 per 30 minutes; 1-minute bars from January 2022 need 58 calls each,
+  calls, 45 minutes at 1,000 per 30 minutes; 1-minute bars from January 2022, at one month per
+  request (F-43), need 58 calls each,
   29,000 calls, 14.5 hours. The evening batch shares this budget, so the 1-minute backfill runs in
   parts around it.
 - THR-14: on a rolling year, Fyers intraday at 100 days per request is 4 calls per instrument, 2,000
@@ -1649,7 +1800,7 @@ cancel. No row permits a default or substituted value (INV-6).
 | PE-10 | India market or `SL-M` order with protection did not fill | order `OPEN`, then `CANCELLED` at the close | ORDER_REJECTED | An emergency exit in India is not assumed complete until the fill is read back. An unfilled exit is escalated. |
 | PE-11 | A resting stop or GTT is cancelled by the broker (90-day expiry at Alpaca, 365-day expiry or corporate action at Zerodha) | Alpaca status `expired` or `canceled`; GTT status `expired`, `cancelled`, `disabled` | ORDER_REJECTED | Every session, before entries: each open position is checked for a live stop; a missing one is placed first (REC-4 order). Stops are re-placed ahead of expiry: at 60 days for Alpaca and at 300 days for a GTT [ASSUMPTION A-42]. |
 | PE-12 | Broker backend down | Kite HTTP 502, `NetworkException`; any HTTP 503 or 504 | BACKEND_DOWN | That market disabled. Reads are retried with backoff, bounded by PE-25; order calls are not. On recovery: reconcile first. |
-| PE-13 | Response does not match the documented shape: missing field, wrong type, unknown status or enum value | validation failure in our client | MALFORMED_RESPONSE | The value is not used. For an order or account response: the market is disabled and reconciliation is required. For data: the record is rejected and the instrument has no data for that session. An unknown status string is never mapped to the nearest known one. |
+| PE-13 | Response does not match the documented shape: missing field, wrong type, unknown status or enum value, duplicate key | validation failure in our client | MALFORMED_RESPONSE | The value is not used. For an order or account response: the market is disabled and reconciliation is required. For data: the record is rejected and the instrument has no data for that session. An unknown status string is never mapped to the nearest known one. |
 | PE-14 | LLM does not answer in time | our deadline of 120 seconds per call passes [ASSUMPTION A-42]; DeepSeek may hold a connection up to 10 minutes (F-58) | SERVER_ERROR | The connection is closed. One call to the fallback under the same deadline. Then the LLM step is unavailable for that candidate. No order depends on it (INV-2). |
 | PE-15 | LLM account out of credit | DeepSeek HTTP 402 | BALANCE_EXHAUSTED | No retry. Fallback used for the rest of the cycle; alert; a human tops up (HITL-14 class of action). |
 | PE-16 | A data provider returns an empty result for a session that the calendar says was open | empty `bars`, empty candle list | MALFORMED_RESPONSE | Empty is not zero volume and is not "no change". The bar is missing: no decision for that instrument (ADR-13 edge case). If more than a threshold of the universe is missing, the whole cycle is skipped; the threshold is P2.2's. |
@@ -1660,7 +1811,7 @@ cancel. No row permits a default or substituted value (INV-6).
 | PE-21 | Requested range outside what the plan or endpoint serves, or a partial answer | Upstox `UDAPI1148`; Fyers: possibly HTTP 429 (entitlement), or an answer starting later than asked; not verified (OQ-74) | INVALID_REQUEST | The client checks the range against `fyers.standard_history_start` before sending, so this means the configuration is stale. After any answer, the first returned session is compared with the requested start: a later start is recorded and never treated as "no data before this date". Not retried with a narrower range silently. An empty answer here is PE-16. |
 | PE-22 | A vendor series differs from a stored snapshot for the same instrument and session | bar-by-bar comparison over the sessions two snapshots share | MALFORMED_RESPONSE | Neither is overwritten or averaged. A data-quality event is recorded. The two snapshots are not joined across that session ([DEFAULT-62]). Training data for a model stays the snapshot it was built on. Threshold for quarantine is P2.2's. |
 | PE-23 | Upstox limit reached | HTTP 429, `UDAPI10005` (F-106); the page warns of temporary suspension of access (F-39) | RATE_LIMITED | Not the PE-3 retry. The job stops for the rest of the session and alerts, because a suspension hits every India row at once. It resumes the next session at half the pace, after a human has looked at it. THR-13 exists so that this never fires. A job stopped here or in PE-19 keeps every instrument and range already complete; the one in progress is partial, is not a snapshot and is discarded. |
-| PE-24 | A batch asks for session D and the last returned session is earlier (a stale but well-formed answer) | comparison of the last returned session with the expected session from the calendar | MALFORMED_RESPONSE | The bar for D is missing (PE-16 applies), though the response looks valid. No signal is built on the older bar (INV-6). Fetched again in that evening's window; if still absent, the instrument has no data for that session. |
+| PE-24 | A batch asks for session D and the last returned session is earlier (a stale but well-formed answer) | the highest session date in the answer, which need not be the last row, compared with the expected session from the calendar | MALFORMED_RESPONSE | The bar for D is missing (PE-16 applies), though the response looks valid. No signal is built on the older bar (INV-6). Fetched again in that evening's window; if still absent, the instrument has no data for that session. Candle order is not documented, so the client sorts by session; a duplicate key is PE-13, never resolved by keeping one bar. |
 | PE-25 | A data read times out or the connection drops | no response within 30 seconds [ASSUMPTION A-83] | SERVER_ERROR | At most 3 tries with backoff, under the throttle. Then the data is missing (PE-16), never a stale or substituted value. After 20 instruments fail in a row [ASSUMPTION A-83], the job stops and alerts, so an outage costs minutes, not hours. A read that fails this way is not an account problem and does not enter PE-20. |
 
 Errors of the models in section 8:
@@ -1674,8 +1825,9 @@ Errors of the models in section 8:
 | E-13 | A `ClientOrderRef` fails its pattern | Pydantic `ValidationError` | The order is not sent. |
 | E-14 | A served LLM model version differs from the one recorded at the last promotion | comparison of the response's model field with the stored value | The LLM output is not used for that call; alert; treated as a T-3 event for the LLM path (P4.2 owns the rule). |
 | E-33 | A `VendorSeriesSnapshot` is inconsistent: a missing field, a session after retrieval, a provider that does not serve that market, a basis the evidence does not support, a naive time | Pydantic `ValidationError` | The snapshot is not stored. Its bars are not used. |
-| E-35 | No valid `ResearchGateApproval` is on record | start-up check of a research client | The client does not start. This is the default state. |
-| E-34 | An `AccountActivity` record is missing or invalid, its date is in the future, or `today` is not a `date` | `dormancy_alerts` returns `(0,)`; a bad record fails `ValidationError` at load | The guard reports the account as overdue and alerts; it does not crash. A missing record is never read as recent activity (INV-6). |
+| E-35 | `research_gate_open` is false: no valid approval, a revoked one, a row that is not a PROVISIONAL Upstox row, or a bad date | start-up check of a research client | The client does not start. This is the default state. |
+| E-34 | An `AccountActivity` record is missing or invalid, its date is in the future, or `today` is not a `date` | `dormancy_status` returns `UNKNOWN`; a bad record fails `ValidationError` at load | The guard treats `UNKNOWN` as overdue and alerts; it does not crash. A missing record is never read as recent activity (INV-6). |
+| E-36 | A publication switch is enabled for a market where `publication_data_cleared` is false, or a signal input reaches signal entry from a provider `row_cleared` does not confirm | P1.3 loader, under a proposed MB-E9 (OQ-78); signal entry, P2.7 | The configuration is rejected and publication stays off (MB-AC-14); the input is not used. Until MB-E9 is adopted, the loader part is a requirement on P1.3 and not yet a rule of `MODEL-B-DECISION.md`. |
 
 ## 10. Documentation that could not be verified
 
@@ -1745,8 +1897,8 @@ earlier record.
 | NB-31 | Daily bar identity | A daily bar is keyed by market, instrument and session date, never by the vendor's timestamp, because vendors stamp daily bars differently (start of window, midnight UTC, midnight IST). |
 | NB-32 | Request date bounds | Alpaca `start` and `end` are inclusive. Upstox `to_date` is inclusive. Kite `from` and `to`: inclusiveness not stated (OQ-30); the client requests one extra day on each side and discards rows outside the range. |
 | NB-33 | Pagination | Alpaca `limit` counts points across all symbols, not per symbol; the client pages until `next_page_token` is null and treats a missing token field as PE-13. |
-| NB-34 | Tick size | US: 2 decimals at or above USD 1.00, 4 below (F-21); a price is rounded to the tick toward the passive side (down for a buy limit, down for a sell stop). India: `tick_size` per instrument from the dump; same rounding rule. The rounding direction for a stop is confirmed by P3.4. |
-| NB-35 | Lot size | India cash equities: `lot_size` from the dump is read, not assumed to be 1. Quantity is a multiple of it, rounded down (NB-22). |
+| NB-34 | Tick size | US: 2 decimals at or above USD 1.00, 4 below (F-21); a price is rounded to the tick toward the passive side (down for a buy limit, down for a sell stop). India: `tick_size` from the Upstox instrument file, used only once its unit is confirmed (OQ-75); until then no signal that needs the tick is built for that instrument (INV-6). The Kite dump is deferred. The rounding direction for a stop is confirmed by P3.4. |
+| NB-35 | Lot size | India cash equities: `lot_size` from the Upstox instrument file is read, not assumed to be 1. Quantity is a multiple of it, rounded down (NB-22). |
 | NB-36 | Alpaca `opg` and `cls` windows | Not used. Entries are `limit`, `day` orders submitted before the open ([RISK-13], HP-2). The 09:28 ET cutoff therefore does not apply. |
 | NB-37 | GTC expiry arithmetic | 90 days are calendar days from creation; the cancel runs at 16:15 ET on the expiry date. Re-placement at 60 days leaves 30 calendar days of margin. |
 | NB-38 | Kite token boundary | Expiry at 06:00 `Asia/Kolkata`; India has no daylight saving. A token obtained at 05:59 lasts one minute. Login is accepted by our system only after 06:00. |
@@ -1789,7 +1941,7 @@ earlier record.
 | D-40 | The only Upstox credential in v1 is the Analytics Token. | It cannot place an order (F-87); no daily human step. | Yes. | P2.1, P6.2. |
 | D-41 | Fyers has no scheduled job and no scripted login, uses a non-trading app only, and has no client until OQ-68 is answered for Fyers. | [DEFAULT-61]; F-79; F-82; F-103; F-104. | Yes, by Owner choice of Prime and a written answer. | Backup is manual. |
 | D-42 | India bars are stored as immutable snapshots of complete fetches, labelled by adjustment basis, each re-requesting the last 5 sessions, and are not joined across a corporate action. Completeness is per instrument and range: a partial one is discarded, finished ones are kept. | [DEFAULT-62]; F-84. | Costly after data is stored. | P2.1, P2.4, P5.x. |
-| D-43 | `intraday_bars` is for research only; signal entry accepts `1D` bars only, with its own test. | HP-1; Model B has no intraday signals; `v2/signals` may import `v2/research`, so an import check is not enough. | Yes. | P2.1, P2.7, P4.x. |
+| D-43 | `intraday_bars` is for research only; signal entry accepts `1D` bars only, and every signal input only from a provider `row_cleared` confirms, with a test for each. | HP-1; Model B has no intraday signals; `v2/signals` may import `v2/research`, so an import check is not enough, and a research snapshot must not reach a signal through storage. | Yes. | P2.1, P2.7, P4.x. |
 | D-44 | No data row of either market may feed a published signal, and no row of OQ-68 becomes SELECTED, until its licence is answered in writing. Research runs only under the Owner-opened gate of section 6.3. | MB-AC-14; BO-1; F-82; F-92; F-100. | No: it is the rule. | Go-live in both markets. |
 | D-45 | `ACCOUNT_RESTRICTED` is never retried; the dormancy guard runs per account. | #68; F-97. | Yes. | P2.1, P6.1. |
 | D-46 | No SEC host is contacted; EDGAR facts stay SECONDARY until the Owner lifts the pause. | O-16; [DEFAULT-28]. | Yes. | US fundamentals. |
@@ -1850,16 +2002,19 @@ times of NYSE (PRIMARY_EXTRACT) and NSE (SEARCH_EXCERPT).
 | OQ-50 | Finnhub: company-news endpoint fields; what "Personal Use" permits; storage; India coverage. | Finnhub | finnhub.io/docs/api/company-news; finnhub.io terms of service | P4.1 |
 | OQ-51 | Rest of OQ-1: for an unregistered client strategy under 10 orders per second, who generates the exchange order tag and does the client send anything; is the threshold counted per exchange, per segment or per client. | NSE; SEBI; Zerodha | NSE circular INVG67858 (2025-05-05) and INVG69255 (2025-07-22); the NSE retail-algo FAQ of 2025-11-03; SEBI circular text | P2.9, P6.3 |
 | OQ-67 | Owner decision: accept Upstox as the India intraday source, or buy Fyers Prime. If Prime: does it reach 3 July 2017 (the pages say both that and "5+ years"), does the depth apply to the API, and when does the waitlist open? | Owner; Fyers | BQ-48; fyers.in/prime; ask Fyers support to confirm the earliest intraday date on Prime through `/data/history` | P2.1, the event study |
-| OQ-68 | Legal: may India market data from Upstox and Fyers be stored, used in a backtest, used to run a model portfolio and track record, and used to derive signals published to users, paying or not? Is written consent available, on what terms, and from which entity? Does an exchange licence also apply? Which account holds the credential, an individual's or a company's? For Fyers, does research use fall inside "legitimate, fair and transparent trading"? Upstox's answer so far is a forum reply (F-100); its API terms must be located. | Upstox business team; Fyers; NSE, BSE; qualified counsel | Upstox: Business Trading API form or api@upstox.com, describing the Model B use. Fyers, first: can it be used at all under Model B? F-82 sections 2, 3, 8, 9, 11, 12, 15, 17, in writing. NSE and BSE data policies | Every India data row; MB-AC-14; P6.3 |
+| OQ-68 | Legal: does the Owner's own Upstox token count as a user's broker credential under MB-2 and MB-AC-4? May India market data from Upstox and Fyers be stored, used in a backtest, used to run a model portfolio and track record, and used to derive signals published to users, paying or not? Is written consent available, on what terms, and from which entity? Does an exchange licence also apply? Which account holds the credential, an individual's or a company's? For Fyers, does research use fall inside "legitimate, fair and transparent trading"? Upstox's answer so far is a forum reply (F-100); its API terms must be located. | Upstox business team; Fyers; NSE, BSE; qualified counsel | Upstox: Business Trading API form or api@upstox.com, describing the Model B use. Fyers, first: can it be used at all under Model B? F-82 sections 2, 3, 8, 9, 11, 12, 15, 17, in writing. NSE and BSE data policies | Every India data row; MB-AC-14; P6.3 |
 | OQ-69 | Upstox: are candles adjusted; are they restated after a corporate action; does a historical query answer for a delisted ISIN; does history survive an ISIN change at a split (from general knowledge, not a vendor page: Indian splits commonly issue a new ISIN)? Do corporate actions answer for the old ISIN? | Upstox | Ticket drafted on #68, questions 3 and 4, plus the ISIN question | P2.1, P5.x |
 | OQ-70 | Fyers: which actions adjust the series (dividends too?); are delisted symbols served; confirm F-85 from a staff source. | Fyers | Ticket drafted on #68, questions 3 and 4 | P2.1, P5.x |
-| OQ-71 | A standard access token needs an active segment (F-105). Still open: can an Analytics Token be generated, or keep working, on a dormant account; what activity keeps a segment active (a trade, a KYC update, a login); the Fyers answers to the same, and its 12 or 24 months. | Upstox; Fyers | Tickets drafted on #68, questions 1 and 2; Fyers KB pages | P2.1, P6.1 |
+| OQ-71 | A standard access token needs an active segment (F-105). Still open: can an Analytics Token be generated, or keep working, on a dormant account; what activity keeps a segment active (a trade, a KYC update, a login); the Fyers answers to the same, and its 12 or 24 months. If the Owner becomes the registered RA, does a keep-alive trade fall inside the personal-trading window of IN-4, and is a KYC update enough? | Upstox; Fyers | Tickets drafted on #68, questions 1 and 2; Fyers KB pages; counsel for the IN-4 point | P2.1, P6.1 |
 | OQ-72 | Does Alpaca's news feed still carry Benzinga's headline stream at the 2022 volume, and from what date? Narrowed by F-95 and F-99. | Alpaca; a day of measurement | Same as `SPEC-P2N.13` OQ-4; count one day of `/v1beta1/news`; held until #68 lands | P4.1, if Alpaca stays in scope |
 | OQ-73 | Upstox fundamentals and corporate actions: publication or filing date, history depth, the vendor behind them, restatement; are mergers, demergers and delistings included; is `sector` a stable taxonomy and is its history available? | Upstox | Sibling pages in section 10 row 39; Upstox support | P2.1, P2.3 |
 | OQ-74 | Fyers: does `refresh_token` work for a non-trading app under F-103, and for how long; login URL and API hosts; zone of the 6:30 AM expiry; response to an out-of-plan or straddling range; whether "from 2025" is a rolling year or 1 January 2025; WebSocket heartbeat and replay. | Fyers | fyers.in/api-docs: generate-auth-code samples, data-socket pages, status.fyers.in; Fyers support | The ranking in section 6.2; any Fyers client |
-| OQ-75 | Upstox: when a finished session appears in the historical endpoint; exact path of Intraday V3; `security_type` codes; unit of `tick_size` (CSV 0.05, JSON samples reportedly 5.0); do instrument files need a token; do Market Holidays cover past years? | Upstox | upstox.com/developer/api-documentation: error-codes, get-intra-day-candle-data, appendix, get-market-holidays; one unauthenticated fetch of a file; one call with a past date | P2.1 |
+| OQ-75 | Upstox: when a finished session appears in the historical endpoint; exact path of Intraday V3; `security_type` codes; unit of `tick_size` (the CSV sample shows 0.05, the JSON sample 5.0, possibly paise); do instrument files need a token; do Market Holidays cover past years? | Upstox | upstox.com/developer/api-documentation: error-codes, get-intra-day-candle-data, appendix, get-market-holidays; one unauthenticated fetch of a file; one call with a past date | P2.1 |
 | OQ-76 | Upstox News: who supplies the articles; may they be stored; may the text be sent to DeepSeek or OpenAI? | Upstox | Upstox support; the licence chain named in the answer | P4.1 |
 | OQ-77 | Is US intraday needed at all, and from whom? The Owner's decision covers India. | Owner, after #68; the event-study phase | `SPEC-P2N.13` sections 15 to 18 | The US side of any event study |
+| OQ-78 | Owner: add error path MB-E9 to `MODEL-B-DECISION.md`, so that an enabled publication switch is rejected unless `publication_data_cleared` is true for that market? This spec cannot change that document. | Owner | E-36; `MODEL-B-DECISION.md` section 9, MB-E1 to MB-E8 | P1.3, publication in either market |
+| OQ-79 | Which capabilities are signal inputs of the strategy to be published? `publication_data_cleared` counts every capability outside `NOT_SIGNAL_INPUTS`, which includes rows that may never carry a licence: `fundamentals` (BLOCKED in both markets), US `sector_taxonomy` (UNFILLED), the NYSE calendar file and `llm`. Neither market can clear until a spec amendment narrows the set. | Owner, at the first frozen strategy | Section 6.3 | Publication in either market |
+| OQ-80 | A research run may train a model on a row never licensed, such as SEL-22, and neither gate sees it. Does a model calibrated on research data count as a derived work (for counsel, with OQ-68)? The phase that promotes a model records which providers trained it, and publication then needs `row_cleared` for each, or counsel's written answer that it is not required. | Counsel, Owner | MB-AC-14; ADR-07; section 6.3 | Promotion of a model trained under the research gate |
 
 Upstream questions answered or narrowed by this spec:
 - OQ-7: answered in substance (F-6; F-20 as excerpt). The terms text remains OQ-28.
@@ -1899,12 +2054,14 @@ Answered or narrowed by v0.2:
 | ProviderErrorClass | type | `StrEnum`, 13 members, section 8.1; mapping in section 9 | P1.4 (audit event field), P3.1, P3.4, P6.1 |
 | AdjustmentBasis | type | `StrEnum`: `RAW`, `VENDOR_ADJUSTED`, `UNSTATED` | P1.1, P2.1, P2.2 |
 | BarResolution | type | `StrEnum`: `1MIN`, `1D` | P1.1, P2.1, P2.7 |
+| LicensedUse, `publication_data_cleared`, `row_cleared` | type, functions | `StrEnum`: `NONE`, `PUBLICATION`; market-level and provider-level checks, section 8.1; an absent capability fails the market check | P1.3, P2.7, P6.3 |
+| `throttle_matches` | function | a throttle against the `RateLimitFact` it cites | P2.1, P3.1 |
 | ClientOrderRef | type | strict `str`, pattern `^[A-Z0-9]{20}$` | P1.1, P1.4, P3.1, P5.5 |
 | RateLimitFact | type | frozen Pydantic v2 model, 8 fields, section 8.2 | P3.1, P6.1 |
 | ClientThrottle | type | frozen Pydantic v2 model, 5 fields; client budget at most half the documented limit | P2.1, P3.1, P4.2 |
-| ProviderSelection | type | frozen Pydantic v2 model, 6 fields, validator in section 8.1 | P0.3, P2.1, P3.1, P4.1, P4.2 |
+| ProviderSelection, ProviderSelectionSet | type | frozen Pydantic v2 models, 9 fields and validator in section 8.1; one row per capability and market; the rows of section 6.3 are the source, carried as config key `providers.selections` and loaded through `model_validate_json` | P0.3, P1.3, P2.1, P2.7, P3.1, P4.1, P4.2 |
 | VendorSeriesSnapshot | type | frozen Pydantic v2 model, 10 fields, section 8.1; storage is P2.1's | P1.2, P2.1, P2.2, P5.x |
-| AccountActivity, `dormancy_alerts` | type, function | frozen Pydantic v2 model, 3 fields; a function that alerts on bad input; section 8.1 | P2.1, P6.1 |
+| AccountActivity, DormancyStatus, `dormancy_status` | type, function | frozen Pydantic v2 model, 3 fields; `OK`, `DUE`, `UNKNOWN`; a function that treats bad input as `UNKNOWN`; section 8.1 | P2.1, P6.1 |
 | SEL-1..SEL-23 | selection identifier | Section 6.3 row | P0.3 and every client phase |
 | THR-1..THR-14 | client throttle identifier | Section 8.3 row | P2.1, P3.1, P4.2, P6.1 |
 | PE-1..PE-25 | provider error path identifier | Section 9 row: condition, class, fail-closed behaviour | P2.1, P3.1, P3.4, P2.10, P5.5 |
@@ -1914,6 +2071,6 @@ Answered or narrowed by v0.2:
 | `upstox.base_url`, `upstox.assets_base_url`, `fyers.data_base_url`, `fyers.public_base_url` | config key | `str`, an `https://` URL; the Fyers data host is not yet verified (OQ-74); changed only through HITL-5 | P1.3, P2.1 |
 | `research.http_path_allowlist` | config key | list of `str`; the read-only paths of [DEFAULT-50]: historical, intraday, instruments, fundamentals, news, market holidays; a test enumerates them (MB-AC-2) | P1.3, P2.1, P6.4 |
 | `fyers.standard_history_start` | config key | `date`, per resolution; moves yearly on a date not stated by Fyers (OQ-74) | P1.3, P2.1 |
-| ResearchGateApproval | type | frozen Pydantic v2 model, 4 fields, section 8.1; no record means the gate is closed | P1.3, P2.1 |
+| ResearchGateApproval, `research_gate_open` | type, function | frozen Pydantic v2 model, 4 fields; the function takes the selection row; no record or a revoked record means closed; section 8.1 | P1.3, P2.1 |
 | `upstox.analytics_token_expires_on`, `upstox.analytics_token_renew_before_days` | config key | `date`; `int`, days, decided value 30 [ASSUMPTION A-81], valid range 1 to 180 | P1.3, P6.1 |
 | `dormancy.alert_after_days` | config key | list of `int`, days, decided value [300, 330] [DEFAULT-64], each 1 to 364, ascending | P1.3, P6.1 |

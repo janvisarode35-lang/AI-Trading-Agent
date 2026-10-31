@@ -1,0 +1,16 @@
+**Defect**
+
+`ProviderSelection` validator, `cleared_backup` logic — **BLOCKER**.
+
+`cleared_backup = licensed_use is PUBLICATION and backup is not None`, then `if cleared_backup != (backup_licence_audit_id is not None): raise`. This does **not** require the backup provider to differ from the primary, and does not require the backup to be a real provider on a cleared row. But the concrete break is different:
+
+Input: `ProviderSelection(capability=EOD_BARS, market=IN, primary=UPSTOX, backup=FYERS, status=SELECTED, blocked_by=(), licensed_use=PUBLICATION, licence_audit_id=AUDIT, backup_licence_audit_id=AUDIT_B)` — passes. Then `row_cleared(FYERS, EOD_BARS, IN, s)` returns `True`. SEL-4's backup is Fyers, and §6.3 / D-44 / UP-41 say Fyers "is excluded from Model B publication unless OQ-68 says otherwise." The new `row_cleared` now admits Fyers as a signal source the moment any operator sets `backup_licence_audit_id` on SEL-4. The licence question is still open (OQ-68); the gate the original review insisted on is defeated by a UUID field.
+
+Fix: `row_cleared` must reject a backup whose provider is on the OQ-68 exclusion (Fyers), or the validator must refuse `backup=FYERS` on a cleared India row until OQ-68 closes. Neither the spec nor the script tests this.
+
+**Rejections: both stand.**
+
+- Research gate on PROVISIONAL/OQ-68 rows: the gate is Owner-accepted, output reaches no user, and §6.3 says so. My finding was wrong on the intent; withdrawn.
+- Market-less MACRO: `market is None` iff capability is market-less, tested. My finding was wrong; withdrawn.
+
+**Verdict: FIX-THEN-SHIP.**

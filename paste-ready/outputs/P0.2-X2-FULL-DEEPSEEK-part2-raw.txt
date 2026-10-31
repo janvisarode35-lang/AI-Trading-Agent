@@ -1,0 +1,110 @@
+**Verdict: FIX-THEN-SHIP**
+
+**Single reason:** The document's own §8.1 `ProviderSelection` validator and §9 E-12 start-up check logically prohibit any client from starting on a `PROVISIONAL` row, yet §6.3 explicitly admits research clients on PROVISIONAL Upstox rows under the research gate. This is an internal contradiction between the typed model, the error table, and the selection rules that will either crash research at startup or force an unaudited bypass.
+
+---
+
+### 1. SPEC CONFORMANCE
+
+**BLOCKER — Research gate contradicts `ProviderSelection` and E-12.**
+§6.3 research gate admits a read-only client on a PROVISIONAL Upstox row when a `ResearchGateApproval` is recorded. §8.1 `ProviderSelection._consistent` requires `(status is SELECTED) == (len(blocked_by) == 0)`. A PROVISIONAL row necessarily has non-empty `blocked_by` (OQ-68, etc.) and therefore fails this validator at load. §9 E-12 states the start-up check: "a research client in `v2/research` may start on a PROVISIONAL Upstox row only if a valid `ResearchGateApproval` is on record." The model cannot represent the state E-12 describes.
+*Failure scenario:* Operator records a `ResearchGateApproval` for Upstox. The selection table is loaded through `ProviderSelection`. The PROVISIONAL row with `blocked_by=('OQ-68','OQ-69')` raises `ValidationError` at construction. No client starts.
+*Minimal fix:* Either (a) add a `research_approved: bool = False` field to `ProviderSelection` and relax the `_consistent` validator to permit non-empty `blocked_by` when `research_approved` is true and `status` is PROVISIONAL, or (b) define a separate `ResearchSelection` model that wraps a `ProviderSelection` plus the approval and is the only thing `v2/research` loads.
+
+**HIGH — Selection matrix scores are not reproducible from the stated weights for every row.**
+§6.2 shows the arithmetic for Alpaca broker only. The remaining 31 rows have scores stated without derivation. The Owner cannot verify that the scores are computed from the §6.1 weights rather than chosen to produce a ranking.
+*Failure scenario:* A regulator asks how Upstox intraday scored 69. The document cannot show the calculation.
+*Minimal fix:* Add a machine-readable table or appendix containing the six component points for every row, or add a note that the score column is derived from a computation script whose output is attached.
+
+**MEDIUM — `OpenItemRef` pattern accepts `UP-n`, but `blocked_by` prose says `OQ-n`, `BQ-n` or `UP-n`; §8.1 pattern is `^(OQ|BQ|UP)-[1-9][0-9]*$`. This is consistent. However, §6.3 `SEL-18` (fx_reference) has `blocked_by=OQ-22` and `primary=None`, `status=UNFILLED`. The validator in §8.1 requires `(status is UNFILLED) == (primary is None)`, which passes. No defect.**
+
+**LOW — §7 table row "Upstox News" says "As News (Alpaca News) below," but the Alpaca News row appears above in the table order. Cross-reference is inverted. No functional impact.**
+
+---
+
+### 2. CONSTITUTION VIOLATIONS
+
+None found in §6–end. The LLM rows explicitly state INV-1/INV-2 override the score differential (DeepSeek primary despite OpenAI's 84 vs 81). No LLM path to sizing or execution is present. The `FX_REFERENCE` row is correctly UNFILLED rather than defaulting to a market rate (F-43).
+
+---
+
+### 3. CORRECTNESS
+
+**HIGH — `dormancy_alerts` return semantics for missing record contradicts E-34 prose.**
+§8.1 `dormancy_alerts` returns `(0,)` when `record is None`. The docstring says `(0,)` means "overdue, unknown" (INV-6). E-34 says "The guard reports the account as overdue and alerts." However, `(0,)` is also a valid tuple of integer thresholds. A caller that does `for d in dormancy_alerts(...)` and checks `if d > 0` will treat `(0,)` as "threshold 0 reached," which is not a threshold but a sentinel. A caller that checks `if alerts:` will correctly see truthy, but cannot distinguish "no alerts" from "overdue unknown" without an explicit `0 in alerts` check.
+*Failure scenario:* A caller uses `if len(alerts) > 1:` to decide whether to escalate. Missing record returns `(0,)`, length 1, escalation does not fire. Account dormancy goes undetected.
+*Minimal fix:* Return a distinct sentinel or raise a typed exception. Simplest: return `(-1,)` and document that any negative value means unknown/overdue; or change the signature to `dormancy_alerts(record, today) -> tuple[int, ...] | None` where `None` means unknown and the caller must handle it explicitly.
+
+**MEDIUM — `VendorSeriesSnapshot._consistent` UTC date bound is coarse and may reject valid snapshots near midnight UTC.**
+The validator computes `latest = retrieved_at.astimezone(timezone.utc).date() + timedelta(days=1)` and rejects `last_session > latest`. For an India snapshot retrieved at 23:30 UTC on a Monday (05:00 IST Tuesday), `retrieved_at.utc.date() + 1` is Wednesday. A `last_session` of Tuesday is accepted. For a snapshot retrieved at 00:30 UTC Tuesday (06:00 IST Tuesday), `latest` is Wednesday, and a `last_session` of Monday is accepted. No defect here, but the comment says "a coarse bound; the exact check against the exchange's local date and session close is P2.1's." The coarse bound admits snapshots that are impossible (e.g., a US snapshot retrieved at 01:00 UTC Tuesday with `last_session` Monday is valid; retrieved at 23:00 UTC Monday with `last_session` Monday is also valid). The risk is false negatives (rejecting valid data), not false positives. No fix required for v0.2; flagged so P2.1 carries the precise check.
+
+**LOW — `AccountActivity.alert_after_days` validator permits `days[-1]` up to 364, but [DEFAULT-64] sets `(300, 330)`. A tuple of `(364,)` passes. The prose says "a value of 365 or more could alert after the account is dormant." This is correct by the model. No defect.**
+
+**LOW — `HttpsUrl` pattern `^https://[^\s]+$` accepts `https://` with no host. `https://` passes because `[^\s]+` requires at least one character after `//`. A single character host passes. No practical risk (a URL with no host is useless), but a stricter pattern would be `^https://[^\s/]+\.[^\s]+$` or similar. Not blocking.**
+
+---
+
+### 4. CONCURRENCY
+
+**HIGH — THR-13/THR-14 multi-window budgets are modelled as independent counters, not a sliding window.**
+`ClientThrottle` has `window_seconds: int` and `client_max_count: int`. THR-13 has three windows: 1 second, 60 seconds, 1800 seconds. A single `ClientThrottle` cannot represent all three. The document's §8.3 table lists three documented limits for THR-13, but the model in §8.1 has one `documented_max_count` and one `window_seconds`. The evidence section says "six `ClientThrottle` values for THR-13 and THR-14." If THR-13 is instantiated as three separate `ClientThrottle` objects, they do not share state. A client that sends 250 requests in a 30-second burst satisfies the 1-second throttle (25/s = 750 in 30s > 250, so 250 in 30s is under 25/s average) and the 30-minute throttle (1000), but exceeds the 250/minute throttle.
+*Failure scenario:* Client issues 250 requests in 30 seconds. Per-second budget (25) allows 750 in 30s. Per-minute budget (250) is exactly met at 250 in 60s. If the burst is front-loaded, 250 in the first 30s meets the minute limit at the 60s mark but violates it transiently. The three `ClientThrottle` objects do not enforce the conjunction.
+*Minimal fix:* State explicitly in §8.3 that the client enforces all windows for a provider scope and that the three windows are checked before every send (the tightest binding window wins). The model is sufficient if the client checks all three; the document does not say this. Add a line to §8.3: "All windows for a scope are checked before each request; a request is sent only if every window has headroom."
+
+**MEDIUM — Kill switch shares the account limit but has no throttle model.**
+§8.3 edge case: "The kill switch has its own credentials ([DEFAULT-4]) but not its own limit, because limits are per account. The trading process's budget is half the documented limit precisely so the other half is left for the kill switch." The `ClientThrottle` model has no notion of a shared budget across processes. If the trading process and kill switch are separate processes, each with its own `ClientThrottle` at half the documented limit, the kill switch is not modelled here. This is a specification gap, not a code defect in §8.1. Flag for P6.1.
+
+---
+
+### 5. FAILURE HANDLING
+
+**HIGH — PE-23 Upstox rate limit says "job stops for the rest of the session and alerts," but PE-3 says "wait until window resets, at most 3 retries." PE-23 is an override for Upstox. The document is consistent. No defect.**
+
+**MEDIUM — PE-17 says "Renewal is alerted 30 days before the known expiry [ASSUMPTION A-81], so this path means the alert failed." A-81 is an assumption, not a verified fact. If the alert threshold is wrong, PE-17 fires without warning. The assumption is labelled. No fix; Owner accepts A-81 or changes it.**
+
+**MEDIUM — PE-21 Fyers range check: "If the request began within 30 days of `fyers.standard_history_start` [ASSUMPTION A-83], PE-21 is checked first." This is in PE-19, not PE-21. PE-19 is the rate-limit row. The cross-reference is correct: a 429 near the plan start may be an entitlement issue, not a rate issue. No defect.**
+
+**LOW — PE-25 timeout is 30 seconds. THR-13 Upstox historical candles at 25/second; a 30-second timeout means at most 750 concurrent in-flight requests if parallelism were unbounded. The throttle is per-second, not per-concurrent-request. A slow Upstox response (29 seconds) allows 25/s x 30s = 750 in flight, exceeding the 50/s documented limit? No: 25/s is the client budget, and each request takes 29s, so the client issues 25 in second 1, another 25 in second 2, etc. After 30 seconds, 750 are in flight. The Upstox limit is 50 requests per second, not 50 concurrent. The client is issuing 25 per second, which is under the limit regardless of concurrency. No defect.**
+
+---
+
+### 6. RESOURCE AND PERFORMANCE
+
+**MEDIUM — THR-13 backfill arithmetic: "1-minute bars from January 2022 need 58 calls each, 29,000 calls, 14.5 hours." The calculation: 2022-01-01 to 2026-10-30 is ~4.83 years. At 1-minute resolution, Upstox limit is "1 decade" per request. If 1 call covers 1 decade, 1 call per instrument, not 58. The document says "58 calls each" without showing the per-call coverage. If Upstox intraday V3 limits to 1 month per call (a plausible undocumented limit), 58 calls for ~58 months is correct. The document does not state the per-call window for intraday.**
+*Failure scenario:* The backfill estimate is wrong by a factor of 58 if Upstox serves a decade per call.
+*Minimal fix:* State the per-call window for Upstox intraday V3 in §8.3 or cite the fact (F-number) that establishes it. If unknown, move the arithmetic to an assumption with the exact query to resolve it.
+
+**LOW — THR-14 Fyers intraday: "100 days per request" is sourced from Fyers docs . "From 2025" on 2026-10-30 is 667 days. 667/100 = 7 calls (rounded up). 7 x 500 = 3,500 > 2,500 daily budget. Correct arithmetic. No defect.**
+
+---
+
+### 7. SECURITY
+
+**MEDIUM — `ResearchGateApproval.approved_by: ScopeText` with `min_length=1` and `max_length=120` accepts any non-blank string. The validator checks `not self.approved_by.strip()` is False (i.e., requires non-blank). It does not bind the approval to a specific provider row beyond `provider=UPSTOX`. A single approval authorises every PROVISIONAL Upstox row (SEL-4, 6, 8, 10, 12, 14, 22). The prose says "a read-only client in `v2/research` may run on a PROVISIONAL Upstox row" (singular, but ambiguous). If the Owner intends per-row approval, the model is too coarse. If blanket approval is intended, the model is correct but the prose should say so.**
+*Failure scenario:* Owner approves research on SEL-4 (daily bars) only. A client starts on SEL-12 (news) because the approval does not name the capability.
+*Minimal fix:* Add `capability: Capability` to `ResearchGateApproval` and require it to match the selection row's capability in E-35.
+
+**LOW — `RateLimitFact.source_url: HttpsUrl` accepts any HTTPS URL including internal ones. No allowlist. A rate-limit fact sourced from a phishing page passes. No practical risk inside a controlled repo, but the audit trail could record a false source. Flag for P6.1.**
+
+---
+
+### 8. TESTS
+
+**Missing test cases that must be named for the client phases:**
+1. `ProviderSelection` with `status=PROVISIONAL`, `blocked_by=('OQ-68',)`, and a valid `ResearchGateApproval` — must either load (if model fixed) or fail with a clear error. The evidence section does not mention this case.
+2. `dormancy_alerts(None, date(2026, 10, 30))` returns `(0,)`. The evidence says this is tested. But no test distinguishes `(0,)` from a real threshold tuple in a caller. Add a caller-level test in P6.1.
+3. `VendorSeriesSnapshot` with `retrieved_at` at 23:59:59 UTC and `last_session` equal to the next calendar day in the exchange's local timezone. The coarse bound passes or fails; the test must assert the intended behaviour.
+4. THR-13 conjunction: a mock client that sends 250 requests in 10 seconds must be rejected before the 60-second boundary if the per-minute window is enforced conjunctively. The evidence says "a budget over half rejected" but not a multi-window conjunction test.
+5. `ResearchGateApproval` with a blank `approved_by` (spaces only). The validator uses `strip()`. The evidence says "rejected for a blank name." Confirm the test uses `"   "` not `""` (empty string is already caught by `min_length=1`; the strip check is only meaningful for whitespace).
+
+---
+
+### 9. SIMPLICITY
+
+**Delete `VerificationLevel` from `RateLimitFact`.** It is a fact-register concept, not a runtime throttle constraint. A `RateLimitFact` that is `SECONDARY` is not safe to build a throttle from; the model does not enforce that a throttle uses only `PRIMARY_FULL` or `PRIMARY_EXTRACT` facts. Add a validator to `ClientThrottle` (or the construction path) that rejects a documented limit sourced from `SEARCH_EXCERPT` or `SECONDARY`. As written, THR-5 (Alpaca 200/min, SEARCH_EXCERPT, A-45) is a `RateLimitFact` with `verification=SEARCH_EXCERPT`, and a `ClientThrottle` can be built from it. The document says A-45 is an assumption, but the model does not distinguish.
+
+**Delete `ScopeText` as a type alias.** It is used for `scope`, `snapshot_id`, `instrument_ref`, `approved_by`, `approval_ref`. Five unrelated semantic fields share the same 1–120 character constraint. This is not a simplification; it obscures that `instrument_ref` is an internal identifier with a different validation need (UNI-4) than `approved_by` (a person's name). Separate types or inline constraints would be clearer. Not blocking.
+
+---
+
+**Verdict: FIX-THEN-SHIP.** Fix the `ProviderSelection` / `ResearchGateApproval` contradiction (BLOCKER). Address the THR-13 multi-window enforcement gap (HIGH) and the `dormancy_alerts` sentinel ambiguity (HIGH) before any client starts. The remaining findings are Owner decisions or client-phase carry-forwards.
