@@ -180,7 +180,7 @@ spec's `OPEN QUESTIONS` table and in STAGE-0-FREEZE §6.
 | **13c** | `BLACKOUT-001`: 2 sessions before to 1 after; DENY increasing, ALLOW reducing; unknown date fails closed; **blocks entry, never holding**; no override. | #39 |
 | **14** | **Third tier.** `LOSS-001`/`LOSS-002` → **`HALT_ENTRIES`**, auto-expiring at the period boundary, no human reset, exits always permitted. `LOSS-003`/`LOSS-004` → `KILL` unchanged. **Escalation:** 3 consecutive daily breaches or 2 consecutive weekly breaches trips the kill switch. | #17 |
 
-**Consequential work:** `HALT_ENTRIES` is a new action in the policy DSL between `MODIFY` and `DENY`;
+**Consequential work:** `HALT_ENTRIES` is a new action in the policy DSL, between `KILL` and `DENY` as amended below;
 the consecutive-breach counter must survive a restart (storage, not memory); `SETTLE-001` and
 `BLACKOUT-001` are new rules; the `exposure_reducing` classifier is a new pure function needing
 boundary tests including the sell-that-opens-a-short case.
@@ -194,6 +194,20 @@ reading of `master-research-summary.md` §11 was simply overlooked — it was co
 **All four conditions are now closed.** No owner decision blocks waves 0 to 3. The only owner item
 still open in the programme is `EDGE-ADR` E-4 — whether 15 news-triggered exits per year that beat
 the ATR stop is the right falsification threshold — and that gates #35, not any current work.
+
+---
+
+## Owner amendment — Rulings 12 and 14, and SPEC-P1.3.1 B1 to B7
+
+**Date:** 2026-10-31 · **Status:** **RATIFIED by Owner, 2026-10-31** · **Record:** `SPEC-P1.3.1-POLICY-DIFF` §1
+
+| Item | Decision |
+|---|---|
+| **Action ladder** | `KILL > HALT_ENTRIES > DENY > MODIFY > ALLOW`. **This amends Rulings 12 and 14 as ratified**: the text at issue #16 comment 6221092946 says "between `MODIFY` and `DENY`". Every chain written in the issues gives this order, and none gives the other |
+| **Who may use `HALT_ENTRIES`** | `LOSS-001` and `LOSS-002` only. Exits are always permitted under it, so moving any other rule to it is UNDECIDABLE (C-42) and pinned |
+| **B1, exit-path overlay** | None. The Owner stated no preference, so the default stands under the Owner's delegation. It is the one answer that is not fail-closed for exits, so P2.9 must guarantee that an exposure-reducing order is never denied by TURN-001, TURN-002 or HOLD-001 (Q-P1.3.1-11) |
+| **B7, first approvers** | No bootstrap for now; reopened when a second approver exists. Until then, no LOOSENS or UNDECIDABLE change can be approved |
+| **B3 to B6** | The spec's defaults, under the Owner's delegation of technical decisions |
 
 ---
 
